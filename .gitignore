@@ -1,0 +1,10 @@
+build/
+bin/
+.vs/
+out/
+*.user
+*.exe
+*.lib
+*.pdb
+*.ilk
+*.mid
