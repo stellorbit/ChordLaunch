@@ -27,6 +27,15 @@ public:
     static std::vector<ChordToken> GetModalInterchangeChords(std::string_view keyRoot, MusicalMode mode);
     static std::vector<ChordToken> GetSecondaryDominants(std::string_view keyRoot, MusicalMode mode);
     static std::vector<ChordToken> GetTritoneSubstitutions(std::string_view keyRoot, MusicalMode mode);
+    static std::vector<ChordToken> GetSuggestions(const std::vector<ChordToken>& chords, std::string_view keyRoot, MusicalMode mode);
+
+    struct TemplateInfo {
+        std::string id;
+        std::string name;
+        std::string progression;
+        std::string description;
+    };
+    static std::vector<TemplateInfo> GetBuiltinTemplates();
 
     static std::vector<int> GetChordMidiNotes(
         const ChordToken& chord,

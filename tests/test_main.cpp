@@ -185,6 +185,32 @@ void TestMidiBuilder() {
     TEST_ASSERT(midiBytes[14] == 'M' && midiBytes[15] == 'T' && midiBytes[16] == 'r' && midiBytes[17] == 'k', "Track must start with MTrk");
 }
 
+void TestDegreeInputParsing() {
+    std::cout << "[TEST] 9. Degree notation parsing (1 5 6m 4, 4mas 3svn 6mis 1svn, Roman numerals)\n";
+
+    auto bars1 = ProgressionParser::Parse("1 5 6m 4", "C", MusicalMode::Major);
+    TEST_ASSERT(bars1.size() == 1, "Must parse 1 bar");
+    TEST_ASSERT(bars1[0].chords.size() == 4, "Must have 4 chords");
+    TEST_ASSERT(bars1[0].chords[0].rootName == "C", "1 is C");
+    TEST_ASSERT(bars1[0].chords[1].rootName == "G", "5 is G");
+    TEST_ASSERT(bars1[0].chords[2].rootName == "A" && bars1[0].chords[2].quality == ChordQuality::Minor, "6m is Am");
+    TEST_ASSERT(bars1[0].chords[3].rootName == "F", "4 is F");
+
+    // 丸サ進行ディグリー 4mas 3svn 6mis 1svn
+    auto bars2 = ProgressionParser::Parse("4mas 3svn 6mis 1svn", "C", MusicalMode::Major);
+    TEST_ASSERT(bars2[0].chords[0].rootName == "F" && bars2[0].chords[0].quality == ChordQuality::Major7, "4mas is Fmaj7");
+    TEST_ASSERT(bars2[0].chords[1].rootName == "E" && bars2[0].chords[1].quality == ChordQuality::Dominant7, "3svn is E7");
+    TEST_ASSERT(bars2[0].chords[2].rootName == "A" && bars2[0].chords[2].quality == ChordQuality::Minor7, "6mis is Am7");
+    TEST_ASSERT(bars2[0].chords[3].rootName == "C" && bars2[0].chords[3].quality == ChordQuality::Dominant7, "1svn is C7");
+
+    // ローマ数字入力 IVmaj7 V7 iiim7 vim7
+    auto bars3 = ProgressionParser::Parse("IVmaj7 V7 iiim7 vim7", "C", MusicalMode::Major);
+    TEST_ASSERT(bars3[0].chords[0].rootName == "F" && bars3[0].chords[0].quality == ChordQuality::Major7, "IVmaj7 is Fmaj7");
+    TEST_ASSERT(bars3[0].chords[1].rootName == "G" && bars3[0].chords[1].quality == ChordQuality::Dominant7, "V7 is G7");
+    TEST_ASSERT(bars3[0].chords[2].rootName == "E" && bars3[0].chords[2].quality == ChordQuality::Minor7, "iiim7 is Em7");
+    TEST_ASSERT(bars3[0].chords[3].rootName == "A" && bars3[0].chords[3].quality == ChordQuality::Minor7, "vim7 is Am7");
+}
+
 int main() {
     std::cout << "========================================\n";
     std::cout << "ChordLaunchpad C++20 Core Test Suite\n";
@@ -198,6 +224,7 @@ int main() {
     TestRestTokens();
     TestPartManagerAndKeyChangeMerge();
     TestMidiBuilder();
+    TestDegreeInputParsing();
 
     std::cout << "========================================\n";
     std::cout << "Tests Passed: " << g_passCount << ", Failed: " << g_failCount << "\n";

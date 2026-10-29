@@ -121,7 +121,80 @@ ChordToken MusicEngine::ParseChordSymbol(std::string_view symbol, std::string_vi
 
     if (mainPart.empty()) return token;
 
-    // ルート音名の抽出 (1文字目 + オプションで '#' または 'b')
+    PitchClass keyP = NoteToPitch(currentKey);
+    if (keyP == PitchClass::Unknown) keyP = PitchClass::C;
+
+    // ディグリー記法 (アラビア数字: 1..7 または ローマ数字: I..VII, i..vii) の判定と解決
+    char firstChar = mainPart[0];
+    bool isArabic = (firstChar >= '1' && firstChar <= '7');
+
+    std::string romanLower;
+    int romanDeg = -1;
+    size_t romanLen = 0;
+
+    // ローマ数字プレフィックス判定
+    static const std::pair<const char*, int> kRomans[] = {
+        {"vii", 6}, {"vi", 5}, {"iv", 3}, {"v", 4}, {"iii", 2}, {"ii", 1}, {"i", 0}
+    };
+    std::string mainLower = std::string(mainPart);
+    std::transform(mainLower.begin(), mainLower.end(), mainLower.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+
+    for (const auto& r : kRomans) {
+        if (mainLower.starts_with(r.first)) {
+            romanDeg = r.second;
+            romanLen = strlen(r.first);
+            break;
+        }
+    }
+
+    if (isArabic || romanDeg >= 0) {
+        int scaleStep = isArabic ? (firstChar - '1') : romanDeg;
+        size_t prefixLen = isArabic ? 1 : romanLen;
+        std::string suffix = std::string(mainPart.substr(prefixLen));
+        std::string sLower = suffix;
+        std::transform(sLower.begin(), sLower.end(), sLower.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+
+        static const int kMajOffsets[7] = {0, 2, 4, 5, 7, 9, 11};
+        static const int kMinOffsets[7] = {0, 2, 3, 5, 7, 8, 10};
+        int semitoneDist = (currentMode == MusicalMode::NaturalMinor) ? kMinOffsets[scaleStep] : kMajOffsets[scaleStep];
+        PitchClass chordPitch = static_cast<PitchClass>((static_cast<int>(keyP) + semitoneDist) % 12);
+
+        token.rootPitch = chordPitch;
+        token.rootName = PitchToNoteForKey(chordPitch, currentKey, currentMode);
+
+        // 特殊サフィックス展開 (ChordLaunchpad-v2 互換: mas -> maj7, svn -> 7, mis -> m7)
+        if (sLower == "mas" || sLower == "maj7" || sLower == "m7" && (scaleStep == 0 || scaleStep == 3)) {
+            token.quality = ChordQuality::Major7;
+            token.qualitySuffix = "maj7";
+        } else if (sLower == "svn" || sLower == "7") {
+            token.quality = ChordQuality::Dominant7;
+            token.qualitySuffix = "7";
+        } else if (sLower == "mis" || sLower == "m7" || sLower == "min7") {
+            token.quality = ChordQuality::Minor7;
+            token.qualitySuffix = "m7";
+        } else if (sLower == "m" || sLower == "min") {
+            token.quality = ChordQuality::Minor;
+            token.qualitySuffix = "m";
+        } else if (sLower == "m7b5" || sLower == "m7-5" || sLower == "dim") {
+            token.quality = ChordQuality::HalfDiminished7;
+            token.qualitySuffix = "m7b5";
+        } else {
+            // 省略時はスケールのデフォルトダイアトニック和音
+            static const ChordQuality kDefaultQMaj[7] = {
+                ChordQuality::Major, ChordQuality::Minor, ChordQuality::Minor,
+                ChordQuality::Major, ChordQuality::Dominant7, ChordQuality::Minor, ChordQuality::HalfDiminished7
+            };
+            token.quality = kDefaultQMaj[scaleStep];
+            if (token.quality == ChordQuality::Minor) token.qualitySuffix = "m";
+            else if (token.quality == ChordQuality::Dominant7) token.qualitySuffix = "7";
+            else if (token.quality == ChordQuality::HalfDiminished7) token.qualitySuffix = "m7b5";
+        }
+
+        token.degreeRoman = CalculateDegree(token.rootPitch, token.quality, keyP, currentMode, token.bassPitch);
+        return token;
+    }
+
+    // 通常のコード名（英音名: C, Dm, G7 など）の抽出
     size_t rootLen = 1;
     if (mainPart.size() > 1 && (mainPart[1] == '#' || mainPart[1] == 'b' || mainPart[1] == '+')) {
         rootLen = 2;
@@ -194,7 +267,6 @@ ChordToken MusicEngine::ParseChordSymbol(std::string_view symbol, std::string_vi
     }
 
     // ディグリーの決定論的計算（"?" を一切返さない）
-    PitchClass keyP = NoteToPitch(currentKey);
     token.degreeRoman = CalculateDegree(token.rootPitch, token.quality, keyP, currentMode, token.bassPitch);
 
     return token;
@@ -544,13 +616,92 @@ std::vector<int> MusicEngine::GetChordMidiNotes(
     return notes;
 }
 
-std::vector<std::string> MusicEngine::GetCircleOfFifths(bool counterClockwise) {
-    static const std::vector<std::string> kCircleFifths = {
-        "C", "G", "D", "A", "E", "B", "F#", "Db", "Ab", "Eb", "Bb", "F"
+std::vector<ChordToken> MusicEngine::GetSuggestions(
+    const std::vector<ChordToken>& chords,
+    std::string_view keyRoot,
+    MusicalMode mode
+) {
+    auto baseDiatonics = GetDiatonicChords(keyRoot, mode, true);
+    if (baseDiatonics.empty()) return {};
+
+    auto pick = [&](const std::vector<int>& indices) {
+        std::vector<ChordToken> res;
+        for (int idx : indices) {
+            if (idx >= 0 && idx < static_cast<int>(baseDiatonics.size())) {
+                res.push_back(baseDiatonics[idx]);
+            }
+        }
+        return res;
     };
-    if (!counterClockwise) return kCircleFifths;
-    std::vector<std::string> rev(kCircleFifths.rbegin(), kCircleFifths.rend());
-    return rev;
+
+    if (chords.empty()) {
+        return pick({0, 4, 5, 3}); // I, V, vi, IV
+    }
+
+    const auto& last = chords.back();
+    std::string deg = last.degreeRoman;
+
+    if (deg.starts_with("V") && !deg.starts_with("VI")) {
+        return pick({0, 5, 3, 1}); // I, vi, IV, ii
+    }
+    if (deg.starts_with("VI") || deg.starts_with("vi")) {
+        return pick({3, 4, 0, 1}); // IV, V, I, ii
+    }
+    if (deg.starts_with("II") || deg.starts_with("ii")) {
+        return pick({4, 0, 5, 3}); // V, I, vi, IV
+    }
+    if (deg.starts_with("IV") || deg.starts_with("iv")) {
+        return pick({4, 0, 2, 5}); // V, I, iii, vi
+    }
+
+    return pick({4, 5, 3, 1}); // V, vi, IV, ii
+}
+
+std::vector<MusicEngine::TemplateInfo> MusicEngine::GetBuiltinTemplates() {
+    return {
+        {
+            "oudo",
+            "王道進行 (4536)",
+            "| IVmaj7 | V7 | iiim7 | vim7 |",
+            "J-POP・アニソンで最も愛される大ヒット王道進行"
+        },
+        {
+            "marusa",
+            "丸サ進行 (Just The Two of Us)",
+            "| IVmaj7 | III7 | vim7 | I7 |",
+            "椎名林檎やNeo Soulで絶大な人気を誇るお洒落ループ"
+        },
+        {
+            "komuro",
+            "小室進行",
+            "| vi | IV | V | I |",
+            "ドラマチックで力強い90年代〜現代ヒット進行"
+        },
+        {
+            "canon",
+            "カノン進行",
+            "| I | V | vi | iii | IV | I | IV | V |",
+            "誰もが耳にしたことのあるクラシック由来の感動進行"
+        },
+        {
+            "pop-punk",
+            "4コード進行 (Let It Be)",
+            "| I | V | vi | IV |",
+            "世界中で最も多くのヒット曲を生んだ4コード"
+        },
+        {
+            "two-five-one",
+            "2-5-1 進行 (循環)",
+            "| iim7 | V7 | Imaj7 | Imaj7 |",
+            "ジャズやポップスの基本カデンツ"
+        },
+        {
+            "anison-climax",
+            "アニソン大サビ進行",
+            "| IV | V | iiim | vi | ii | V | I | I |",
+            "サビの後半で一気に盛り上げて完結するドラマチック進行"
+        }
+    };
 }
 
 } // namespace clp
