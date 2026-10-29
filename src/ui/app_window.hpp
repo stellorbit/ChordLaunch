@@ -89,6 +89,7 @@ private:
     void ShowBassMenu(int x, int y);
     void ShowVoicingMenu(int x, int y);
     void ShowGridMenu(int x, int y);
+    void ShowSettingsMenu(int x, int y);
 
     // コピペ・編集
     void CopySelection();

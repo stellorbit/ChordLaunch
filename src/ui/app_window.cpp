@@ -432,8 +432,8 @@ void AppWindow::OnRender() {
             static_cast<float>(m_dragCurrentPos.x) + 36.0f,
             static_cast<float>(m_dragCurrentPos.y) + 24.0f
         );
-        std::wstring nameW = std::wstring(m_draggedChord.rootName.begin(), m_draggedChord.rootName.end());
-        std::wstring degW = std::wstring(m_draggedChord.degreeRoman.begin(), m_draggedChord.degreeRoman.end());
+        std::wstring nameW = Utf8ToWString(m_draggedChord.rootName);
+        std::wstring degW = Utf8ToWString(m_draggedChord.degreeRoman);
         DrawCard(ghostRect, nameW, degW, true, true, m_draggedChord.isRest);
     }
 
@@ -495,10 +495,10 @@ void AppWindow::RenderTopToolbarRow1(float width, float height) {
     );
     curX += 136.0f;
 
-    // 言語切替 (右端)
+    // 設定 ⚙ (右端)
     DrawButton(
-        D2D1::RectF(width - 80.0f, btnY, width - 10.0f, btnY + btnH),
-        I18n::Get(StrId::LangSwitch), false, false, false
+        D2D1::RectF(width - 70.0f, btnY, width - 10.0f, btnY + btnH),
+        L"⚙ 設定", false, false, false
     );
 }
 
@@ -517,7 +517,7 @@ void AppWindow::RenderTopToolbarRow2(float width, float y, float height) {
     int bpm = pActive ? pActive->bpm : 120;
 
     // キー: [ C ▾ ]
-    std::wstring keyStr = L"キー: " + std::wstring(key.begin(), key.end()) + L" ▾";
+    std::wstring keyStr = L"キー: " + Utf8ToWString(key) + L" ▾";
     DrawButton(D2D1::RectF(curX, btnY, curX + 70.0f, btnY + btnH), keyStr, false, false);
     curX += 76.0f;
 
@@ -532,23 +532,23 @@ void AppWindow::RenderTopToolbarRow2(float width, float y, float height) {
     DrawButton(D2D1::RectF(curX, btnY, curX + 22.0f, btnY + btnH), L"-", false, false); curX += 24.0f;
     DrawButton(D2D1::RectF(curX, btnY, curX + 22.0f, btnY + btnH), L"+", false, false); curX += 26.0f;
 
-    // Tap
-    DrawButton(D2D1::RectF(curX, btnY, curX + 42.0f, btnY + btnH), L"♫ Tap", false, false); curX += 48.0f;
+    // Tap (幅50pxで余裕確保)
+    DrawButton(D2D1::RectF(curX, btnY, curX + 50.0f, btnY + btnH), L"♫ Tap", false, false); curX += 56.0f;
 
     // 音色: [ Piano ▾ ]
     static const wchar_t* kInsts[] = { L"Piano", L"Pad", L"E-Piano", L"Strings" };
     std::wstring instStr = L"音色: " + std::wstring(kInsts[m_selectedSoundIndex % 4]) + L" ▾";
-    DrawButton(D2D1::RectF(curX, btnY, curX + 88.0f, btnY + btnH), instStr, false, false); curX += 94.0f;
+    DrawButton(D2D1::RectF(curX, btnY, curX + 90.0f, btnY + btnH), instStr, false, false); curX += 96.0f;
 
     // ベース: [ なし ▾ ]
     static const wchar_t* kBasses[] = { L"なし", L"1音", L"2音", L"両方" };
     std::wstring bassStr = L"ベース: " + std::wstring(kBasses[m_selectedBassIndex % 4]) + L" ▾";
-    DrawButton(D2D1::RectF(curX, btnY, curX + 80.0f, btnY + btnH), bassStr, false, false); curX += 86.0f;
+    DrawButton(D2D1::RectF(curX, btnY, curX + 84.0f, btnY + btnH), bassStr, false, false); curX += 90.0f;
 
     // ボイシング: [ 基本形 ▾ ]
     static const wchar_t* kVoicings[] = { L"基本形", L"Drop 2", L"Drop 3", L"Open" };
     std::wstring voiceStr = L"ボイシング: " + std::wstring(kVoicings[m_selectedVoicingIndex % 4]) + L" ▾";
-    DrawButton(D2D1::RectF(curX, btnY, curX + 96.0f, btnY + btnH), voiceStr, false, false); curX += 102.0f;
+    DrawButton(D2D1::RectF(curX, btnY, curX + 100.0f, btnY + btnH), voiceStr, false, false); curX += 106.0f;
 
     // グリッド: [ 1拍 ▾ ]
     std::wstring gridStr = L"グリッド: 1拍 ▾";
@@ -556,12 +556,12 @@ void AppWindow::RenderTopToolbarRow2(float width, float y, float height) {
     else if (m_selectedGridBeats == 0.5f) gridStr = L"グリッド: 1/8 ▾";
     else if (m_selectedGridBeats == 2.0f) gridStr = L"グリッド: 2拍 ▾";
     else if (m_selectedGridBeats == 4.0f) gridStr = L"グリッド: 1小節 ▾";
-    DrawButton(D2D1::RectF(curX, btnY, curX + 92.0f, btnY + btnH), gridStr, false, false); curX += 98.0f;
+    DrawButton(D2D1::RectF(curX, btnY, curX + 96.0f, btnY + btnH), gridStr, false, false); curX += 104.0f;
 
     // 操作: [ 複製 ] [ 削除 ] [ 全クリア ]
-    DrawButton(D2D1::RectF(curX, btnY, curX + 40.0f, btnY + btnH), L"複製", false, false); curX += 44.0f;
-    DrawButton(D2D1::RectF(curX, btnY, curX + 40.0f, btnY + btnH), L"削除", false, false); curX += 44.0f;
-    DrawButton(D2D1::RectF(curX, btnY, curX + 54.0f, btnY + btnH), L"全クリア", false, false);
+    DrawButton(D2D1::RectF(curX, btnY, curX + 44.0f, btnY + btnH), L"複製", false, false); curX += 48.0f;
+    DrawButton(D2D1::RectF(curX, btnY, curX + 44.0f, btnY + btnH), L"削除", false, false); curX += 48.0f;
+    DrawButton(D2D1::RectF(curX, btnY, curX + 64.0f, btnY + btnH), L"全クリア", false, false);
 }
 
 void AppWindow::RenderLeftPane(float x, float y, float width, float height) {
@@ -618,8 +618,8 @@ void AppWindow::RenderLeftPane(float x, float y, float width, float height) {
     for (size_t i = 0; i < diatonics.size(); ++i) {
         float cx = x + padding + (i % 4) * (cardW + 5.0f);
         float cy = curY + (i / 4) * (cardH + 5.0f);
-        std::wstring nameW = std::wstring(diatonics[i].rootName.begin(), diatonics[i].rootName.end()) + std::wstring(diatonics[i].qualitySuffix.begin(), diatonics[i].qualitySuffix.end());
-        std::wstring degW = std::wstring(diatonics[i].degreeRoman.begin(), diatonics[i].degreeRoman.end());
+        std::wstring nameW = Utf8ToWString(diatonics[i].rootName) + Utf8ToWString(diatonics[i].qualitySuffix);
+        std::wstring degW = Utf8ToWString(diatonics[i].degreeRoman);
         DrawCard(D2D1::RectF(cx, cy, cx + cardW, cy + cardH), nameW, degW, false, false, false);
     }
 
@@ -674,8 +674,8 @@ void AppWindow::RenderLeftPane(float x, float y, float width, float height) {
 
     DrawCard(
         D2D1::RectF(x + padding, curY, x + padding + 80.0f, curY + 44.0f),
-        std::wstring(bChordName.begin(), bChordName.end()),
-        std::wstring(bDeg.begin(), bDeg.end()),
+        Utf8ToWString(bChordName),
+        Utf8ToWString(bDeg),
         false, false, false
     );
 
@@ -701,7 +701,7 @@ void AppWindow::RenderCenterPane(float x, float y, float width, float height) {
 
     const auto& parts = m_partManager.GetParts();
     for (size_t i = 0; i < parts.size(); ++i) {
-        std::wstring pTitle = std::wstring(parts[i].name.begin(), parts[i].name.end()) + L" (" + std::wstring(parts[i].keyRoot.begin(), parts[i].keyRoot.end()) + L")";
+        std::wstring pTitle = Utf8ToWString(parts[i].name) + L" (" + Utf8ToWString(parts[i].keyRoot) + L")";
         bool isAct = (!m_isMergedView && m_partManager.GetActiveIndex() == static_cast<int>(i));
         DrawButton(D2D1::RectF(tx, y + 3.0f, tx + 94.0f, y + tabH - 3.0f), pTitle, false, false, isAct);
         tx += 98.0f;
@@ -764,7 +764,7 @@ void AppWindow::RenderCenterPane(float x, float y, float width, float height) {
 
         // 転調マーカー
         if (!currentBars[bi].keyChange.empty()) {
-            std::wstring kcStr = L"🔑 " + std::wstring(currentBars[bi].keyChange.begin(), currentBars[bi].keyChange.end());
+            std::wstring kcStr = L"🔑 " + Utf8ToWString(currentBars[bi].keyChange);
             m_pRenderTarget->DrawText(
                 kcStr.c_str(), static_cast<UINT32>(kcStr.size()),
                 m_pFontTiny,
@@ -779,8 +779,8 @@ void AppWindow::RenderCenterPane(float x, float y, float width, float height) {
             const auto& chord = currentBars[bi].chords[ci];
             float cardSlotW = m_pixelsPerBeat * chord.durationBeats - 4.0f;
 
-            std::wstring cTitle = chord.isRest ? L"Rest" : (std::wstring(chord.rootName.begin(), chord.rootName.end()) + std::wstring(chord.qualitySuffix.begin(), chord.qualitySuffix.end()));
-            std::wstring cDeg = std::wstring(chord.degreeRoman.begin(), chord.degreeRoman.end());
+            std::wstring cTitle = chord.isRest ? L"Rest" : (Utf8ToWString(chord.rootName) + Utf8ToWString(chord.qualitySuffix));
+            std::wstring cDeg = Utf8ToWString(chord.degreeRoman);
 
             bool isSel = (m_selection.startBar <= static_cast<int>(bi) && static_cast<int>(bi) <= m_selection.endBar);
             D2D1_RECT_F cRect = D2D1::RectF(curCardX, trackY + 18.0f, curCardX + cardSlotW, trackY + 92.0f);
@@ -928,8 +928,9 @@ void AppWindow::RenderInspectorBar(float x, float y, float width, float height) 
     float curX = x + 10.0f;
     float ty = y + 7.0f;
 
-    m_pRenderTarget->DrawText(L"INSPECTOR:", 10, m_pFontHeader, D2D1::RectF(curX, ty, curX + 70.0f, ty + 16.0f), m_pBrushTextSecondary);
-    curX += 74.0f;
+    // 幅を85pxに拡大し改行を防止
+    m_pRenderTarget->DrawText(L"INSPECTOR:", 10, m_pFontHeader, D2D1::RectF(curX, ty, curX + 85.0f, ty + 16.0f), m_pBrushTextSecondary);
+    curX += 90.0f;
 
     Part* pActive = m_partManager.GetActivePart();
     std::wstring symb = L"-";
@@ -940,27 +941,30 @@ void AppWindow::RenderInspectorBar(float x, float y, float width, float height) 
         int barIdx = (m_selectedCardIndex >= 0) ? m_selectedCardIndex : 0;
         if (barIdx < static_cast<int>(pActive->bars.size()) && !pActive->bars[barIdx].chords.empty()) {
             const auto& c = pActive->bars[barIdx].chords[0];
-            symb = std::wstring(c.rootName.begin(), c.rootName.end()) + std::wstring(c.qualitySuffix.begin(), c.qualitySuffix.end()) + L" (" + std::wstring(c.degreeRoman.begin(), c.degreeRoman.end()) + L")";
+            symb = Utf8ToWString(c.rootName) + Utf8ToWString(c.qualitySuffix) + L" (" + Utf8ToWString(c.degreeRoman) + L")";
             dur = std::to_wstring(c.durationBeats) + L"拍";
             auto notes = MusicEngine::GetChordMidiNotes(c, 4, static_cast<VoicingStyle>(m_selectedVoicingIndex));
             notesStr.clear();
-            for (int n : notes) {
-                notesStr += std::wstring(MusicEngine::PitchToNote(static_cast<PitchClass>(n % 12)).begin(), MusicEngine::PitchToNote(static_cast<PitchClass>(n % 12)).end()) + std::to_wstring(n / 12 - 1) + L" ";
+            for (size_t i = 0; i < notes.size(); ++i) {
+                int n = notes[i];
+                std::string pStr = MusicEngine::PitchToNote(static_cast<PitchClass>(n % 12), false);
+                notesStr += Utf8ToWString(pStr) + std::to_wstring(n / 12 - 1);
+                if (i + 1 < notes.size()) notesStr += L" ";
             }
         }
     }
 
     std::wstring chordLabel = L"コード: " + symb;
     m_pRenderTarget->DrawText(chordLabel.c_str(), static_cast<UINT32>(chordLabel.size()), m_pFontNormal, D2D1::RectF(curX, ty, curX + 110.0f, ty + 16.0f), m_pBrushTextPrimary);
-    curX += 114.0f;
+    curX += 116.0f;
 
     std::wstring durLabel = L"長さ: " + dur;
-    m_pRenderTarget->DrawText(durLabel.c_str(), static_cast<UINT32>(durLabel.size()), m_pFontNormal, D2D1::RectF(curX, ty, curX + 70.0f, ty + 16.0f), m_pBrushTextPrimary);
-    curX += 74.0f;
+    m_pRenderTarget->DrawText(durLabel.c_str(), static_cast<UINT32>(durLabel.size()), m_pFontNormal, D2D1::RectF(curX, ty, curX + 66.0f, ty + 16.0f), m_pBrushTextPrimary);
+    curX += 72.0f;
 
     std::wstring notesLabel = L"構成音: " + notesStr;
-    m_pRenderTarget->DrawText(notesLabel.c_str(), static_cast<UINT32>(notesLabel.size()), m_pFontNormal, D2D1::RectF(curX, ty, curX + 180.0f, ty + 16.0f), m_pBrushAccent);
-    curX += 184.0f;
+    m_pRenderTarget->DrawText(notesLabel.c_str(), static_cast<UINT32>(notesLabel.size()), m_pFontNormal, D2D1::RectF(curX, ty, curX + 260.0f, ty + 16.0f), m_pBrushAccent);
+    curX += 266.0f;
 
     // 右端: ズームコントロール
     float zX = x + width - 130.0f;
@@ -1002,8 +1006,8 @@ void AppWindow::RenderRightPane(float x, float y, float width, float height) {
     float badgeW = (width - padding * 2 - 3 * 6.0f) / 4.0f;
     for (size_t i = 0; i < suggestions.size() && i < 4; ++i) {
         float bx = x + padding + i * (badgeW + 6.0f);
-        std::wstring sSym = std::wstring(suggestions[i].rootName.begin(), suggestions[i].rootName.end()) + std::wstring(suggestions[i].qualitySuffix.begin(), suggestions[i].qualitySuffix.end());
-        std::wstring sDeg = std::wstring(suggestions[i].degreeRoman.begin(), suggestions[i].degreeRoman.end());
+        std::wstring sSym = Utf8ToWString(suggestions[i].rootName) + Utf8ToWString(suggestions[i].qualitySuffix);
+        std::wstring sDeg = Utf8ToWString(suggestions[i].degreeRoman);
         DrawRoundBadge(D2D1::RectF(bx, curY, bx + badgeW, curY + 38.0f), sSym, sDeg, false, false);
     }
     curY += 44.0f;
@@ -1018,8 +1022,8 @@ void AppWindow::RenderRightPane(float x, float y, float width, float height) {
     for (size_t i = 0; i < miChords.size(); ++i) {
         float cx = x + padding + (i % 3) * (miW + 6.0f);
         float cy = curY + (i / 3) * (miH + 5.0f);
-        std::wstring nW = std::wstring(miChords[i].rootName.begin(), miChords[i].rootName.end()) + std::wstring(miChords[i].qualitySuffix.begin(), miChords[i].qualitySuffix.end());
-        std::wstring dW = std::wstring(miChords[i].degreeRoman.begin(), miChords[i].degreeRoman.end());
+        std::wstring nW = Utf8ToWString(miChords[i].rootName) + Utf8ToWString(miChords[i].qualitySuffix);
+        std::wstring dW = Utf8ToWString(miChords[i].degreeRoman);
         DrawCard(D2D1::RectF(cx, cy, cx + miW, cy + miH), nW, dW, false, false, false);
     }
     curY += (miH + 5.0f) * 3 + 6.0f;
@@ -1032,28 +1036,28 @@ void AppWindow::RenderRightPane(float x, float y, float width, float height) {
     for (size_t i = 0; i < secDoms.size(); ++i) {
         float cx = x + padding + (i % 3) * (miW + 6.0f);
         float cy = curY + (i / 3) * (miH + 5.0f);
-        std::wstring nW = std::wstring(secDoms[i].rootName.begin(), secDoms[i].rootName.end()) + L"7";
-        std::wstring dW = std::wstring(secDoms[i].degreeRoman.begin(), secDoms[i].degreeRoman.end());
+        std::wstring nW = Utf8ToWString(secDoms[i].rootName) + L"7";
+        std::wstring dW = Utf8ToWString(secDoms[i].degreeRoman);
         DrawCard(D2D1::RectF(cx, cy, cx + miW, cy + miH), nW, dW, false, false, false);
     }
     curY += (miH + 5.0f) * 2 + 6.0f;
 
-    // 4. 定番進行テンプレート
+    // 4. 定番進行テンプレート (UTF-8正常変換)
     m_pRenderTarget->DrawText(L"定番進行テンプレート", 10, m_pFontSmall, D2D1::RectF(x + padding, curY, x + width - padding, curY + 14.0f), m_pBrushAccent);
     curY += 16.0f;
 
     auto templates = MusicEngine::GetBuiltinTemplates();
     for (const auto& tmpl : templates) {
-        std::wstring tName = std::wstring(tmpl.name.begin(), tmpl.name.end());
+        std::wstring tName = Utf8ToWString(tmpl.name);
         DrawButton(D2D1::RectF(x + padding, curY, x + width - padding, curY + 24.0f), tName, false, false, false);
         curY += 28.0f;
     }
 
-    // 単一スリムスクロールバー (右端)
+    // 単一スリムスクロールバー (右端・控えめな厚さ)
     m_pRenderTarget->DrawLine(
-        D2D1::Point2F(x + width - 3.0f, y),
-        D2D1::Point2F(x + width - 3.0f, y + height),
-        m_pBrushBorder, 4.0f
+        D2D1::Point2F(x + width - 2.0f, y + 2.0f),
+        D2D1::Point2F(x + width - 2.0f, y + height - 2.0f),
+        m_pBrushBorder, 2.0f
     );
 }
 
@@ -1150,8 +1154,17 @@ void AppWindow::AdvancePlayback(float deltaSeconds) {
 
 void AppWindow::ProcessTapTempo() {
     auto now = std::chrono::high_resolution_clock::now();
+
+    // 最後のタップから2秒以上空いていたらリセット
+    if (!m_tapTimes.empty()) {
+        float elapsedSinceLast = std::chrono::duration<float>(now - m_tapTimes.back()).count();
+        if (elapsedSinceLast > 2.0f) {
+            m_tapTimes.clear();
+        }
+    }
+
     m_tapTimes.push_back(now);
-    if (m_tapTimes.size() > 4) {
+    if (m_tapTimes.size() > 5) {
         m_tapTimes.erase(m_tapTimes.begin());
     }
 
@@ -1160,15 +1173,21 @@ void AppWindow::ProcessTapTempo() {
         for (size_t i = 1; i < m_tapTimes.size(); ++i) {
             totalSec += std::chrono::duration<float>(m_tapTimes[i] - m_tapTimes[i - 1]).count();
         }
-        float avgInterval = totalSec / (m_tapTimes.size() - 1);
-        if (avgInterval > 0.1f && avgInterval < 3.0f) {
-            int newBpm = static_cast<int>(60.0f / avgInterval);
+        float avgInterval = totalSec / static_cast<float>(m_tapTimes.size() - 1);
+        if (avgInterval >= 0.15f && avgInterval <= 2.0f) {
+            int newBpm = static_cast<int>(std::round(60.0f / avgInterval));
+            newBpm = std::clamp(newBpm, 40, 300);
             Part* pActive = m_partManager.GetActivePart();
             if (pActive) {
-                pActive->bpm = std::clamp(newBpm, 40, 300);
+                pActive->bpm = newBpm;
             }
-            m_statusMessage = L"タップテンポ設定: " + std::to_wstring(newBpm) + L" BPM";
+            m_statusMessage = L"タップテンポ設定: " + std::to_wstring(newBpm) + L" BPM (平均間隔: " +
+                              std::to_wstring(static_cast<int>(avgInterval * 1000.0f)) + L" ms)";
+            InvalidateRect(m_hwnd, nullptr, FALSE);
         }
+    } else {
+        m_statusMessage = L"タップテンポ: もう一度タップしてください...";
+        InvalidateRect(m_hwnd, nullptr, FALSE);
     }
 }
 
@@ -1224,7 +1243,7 @@ void AppWindow::AddChordToTimeline(const ChordToken& chord) {
 
     SyncTimelineToText();
     EnsureVisible(static_cast<int>(pActive->bars.size()) - 1);
-    m_statusMessage = L"コードを追加しました: " + std::wstring(chord.rootName.begin(), chord.rootName.end());
+    m_statusMessage = L"コードを追加しました: " + Utf8ToWString(chord.rootName) + Utf8ToWString(chord.qualitySuffix);
     InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
@@ -1236,7 +1255,7 @@ void AppWindow::ApplyTemplate(const MusicEngine::TemplateInfo& tmpl) {
     pActive->rawProgressionText = tmpl.progression;
 
     SyncTimelineToText();
-    m_statusMessage = L"テンプレートを適用しました: " + std::wstring(tmpl.name.begin(), tmpl.name.end());
+    m_statusMessage = L"テンプレートを適用しました: " + Utf8ToWString(tmpl.name);
     InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
@@ -1257,7 +1276,7 @@ void AppWindow::ShowKeyMenu(int x, int y) {
             pActive->keyRoot = newKey;
             pActive->bars = ProgressionParser::Parse(pActive->rawProgressionText, pActive->keyRoot, pActive->mode);
             SyncTimelineToText();
-            m_statusMessage = L"キーを変更しました: " + std::wstring(newKey.begin(), newKey.end());
+            m_statusMessage = L"キーを変更しました: " + Utf8ToWString(newKey);
             InvalidateRect(m_hwnd, nullptr, FALSE);
         }
     }
@@ -1355,6 +1374,39 @@ void AppWindow::ShowGridMenu(int x, int y) {
     InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
+void AppWindow::ShowSettingsMenu(int x, int y) {
+    HMENU hMenu = CreatePopupMenu();
+    HMENU hSubLang = CreatePopupMenu();
+
+    AppendMenuW(hSubLang, (I18n::GetLanguage() == Language::Japanese ? MF_CHECKED : MF_UNCHECKED) | MF_STRING, 101, L"日本語 (Japanese)");
+    AppendMenuW(hSubLang, (I18n::GetLanguage() == Language::English ? MF_CHECKED : MF_UNCHECKED) | MF_STRING, 102, L"English");
+
+    AppendMenuW(hMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hSubLang), L"言語設定 (Language)");
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hMenu, MF_STRING, 201, L"ChordLaunchpad について (About)");
+
+    int selected = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_RIGHTBUTTON, x, y, 0, m_hwnd, nullptr);
+    DestroyMenu(hSubLang);
+    DestroyMenu(hMenu);
+
+    if (selected == 101) {
+        I18n::SetLanguage(Language::Japanese);
+        m_statusMessage = L"言語を日本語に設定しました";
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+    } else if (selected == 102) {
+        I18n::SetLanguage(Language::English);
+        m_statusMessage = L"Language set to English";
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+    } else if (selected == 201) {
+        MessageBoxW(
+            m_hwnd,
+            L"Chord Launchpad\n\n高速・超軽量・モダン音楽制作アシスタント\nC++20 / Direct2D / WASAPI / OLE Drag&Drop\n\n(c) 2026",
+            L"About Chord Launchpad",
+            MB_OK | MB_ICONINFORMATION
+        );
+    }
+}
+
 void AppWindow::OnLButtonDown(int x, int y, [[maybe_unused]] WPARAM wParam) {
     RECT rc;
     GetClientRect(m_hwnd, &rc);
@@ -1367,27 +1419,54 @@ void AppWindow::OnLButtonDown(int x, int y, [[maybe_unused]] WPARAM wParam) {
             m_partManager.ResetToDefaultSong();
             SyncTimelineToText();
             m_statusMessage = L"新規プロジェクトを作成しました";
-        } else if (x >= 152 && x <= 220) {
+        } else if (x >= 58 && x <= 102) {
+            // 開く
+            m_statusMessage = L"プロジェクトを開く";
+        } else if (x >= 106 && x <= 154) {
+            // 保存
+            m_statusMessage = L"プロジェクトを保存しました";
+        } else if (x >= 160 && x <= 188) {
+            // Undo
+            m_statusMessage = L"元に戻す";
+        } else if (x >= 192 && x <= 220) {
+            // Redo
+            m_statusMessage = L"やり直し";
+        } else if (x >= 234 && x <= 302) {
             // 再生
             TogglePlayback();
-        } else if (x >= 224 && x <= 278) {
+        } else if (x >= 306 && x <= 360) {
             // 停止
             StopPlayback();
-        } else if (x >= 282 && x <= 336) {
+        } else if (x >= 364 && x <= 418) {
             // ループ
             m_isLooping = !m_isLooping;
-        } else if (x >= 420 && x <= 550) {
+        } else if (x >= 426 && x <= 500) {
+            // MIDI保存
+            std::vector<Bar> currentBars = m_isMergedView ?
+                m_partManager.GenerateMergedProgression() :
+                (m_partManager.GetActivePart() ? m_partManager.GetActivePart()->bars : std::vector<Bar>{});
+            Part* pAct = m_partManager.GetActivePart();
+            int actBpm = pAct ? pAct->bpm : 120;
+            std::wstring tempMidi = MidiBuilder::ExportToTempFile(currentBars, actBpm);
+            if (!tempMidi.empty()) {
+                m_statusMessage = L"MIDIファイルを保存しました: " + tempMidi;
+            }
+        } else if (x >= 504 && x <= 634) {
             // DAWドラッグ
             std::vector<Bar> currentBars = m_isMergedView ?
                 m_partManager.GenerateMergedProgression() :
                 (m_partManager.GetActivePart() ? m_partManager.GetActivePart()->bars : std::vector<Bar>{});
-            std::wstring tempMidi = MidiBuilder::ExportToTempFile(currentBars, 120);
+            Part* pAct = m_partManager.GetActivePart();
+            int actBpm = pAct ? pAct->bpm : 120;
+            std::wstring tempMidi = MidiBuilder::ExportToTempFile(currentBars, actBpm);
             if (!tempMidi.empty()) {
                 OleFileDataObject::StartFileDrag(m_hwnd, tempMidi);
             }
-        } else if (x >= width - 80 && x <= width - 10) {
-            // 言語切替
-            I18n::SetLanguage(I18n::GetLanguage() == Language::Japanese ? Language::English : Language::Japanese);
+        } else if (x >= width - 70 && x <= width - 10) {
+            // 設定 ⚙
+            POINT pt = {x, y};
+            ClientToScreen(m_hwnd, &pt);
+            ShowSettingsMenu(pt.x, pt.y);
         }
         InvalidateRect(m_hwnd, nullptr, FALSE);
         return;
@@ -1402,30 +1481,35 @@ void AppWindow::OnLButtonDown(int x, int y, [[maybe_unused]] WPARAM wParam) {
             ShowKeyMenu(pt.x, pt.y);
         } else if (x >= 86 && x <= 190) {
             ShowModeMenu(pt.x, pt.y);
-        } else if (x >= 262 && x <= 286) {
+        } else if (x >= 196 && x <= 262) {
+            // BPM クリックで Tap
+            ProcessTapTempo();
+        } else if (x >= 264 && x <= 286) {
             // BPM -
             Part* pActive = m_partManager.GetActivePart();
             if (pActive && pActive->bpm > 40) pActive->bpm -= 5;
-        } else if (x >= 288 && x <= 312) {
+            m_statusMessage = L"BPM: " + std::to_wstring(pActive ? pActive->bpm : 120);
+        } else if (x >= 288 && x <= 310) {
             // BPM +
             Part* pActive = m_partManager.GetActivePart();
             if (pActive && pActive->bpm < 300) pActive->bpm += 5;
-        } else if (x >= 314 && x <= 356) {
+            m_statusMessage = L"BPM: " + std::to_wstring(pActive ? pActive->bpm : 120);
+        } else if (x >= 314 && x <= 364) {
             // Tap
             ProcessTapTempo();
-        } else if (x >= 362 && x <= 450) {
+        } else if (x >= 370 && x <= 460) {
             ShowToneMenu(pt.x, pt.y);
-        } else if (x >= 456 && x <= 536) {
+        } else if (x >= 466 && x <= 550) {
             ShowBassMenu(pt.x, pt.y);
-        } else if (x >= 542 && x <= 638) {
+        } else if (x >= 556 && x <= 656) {
             ShowVoicingMenu(pt.x, pt.y);
-        } else if (x >= 644 && x <= 736) {
+        } else if (x >= 662 && x <= 758) {
             ShowGridMenu(pt.x, pt.y);
-        } else if (x >= 742 && x <= 782) {
+        } else if (x >= 768 && x <= 812) {
             DuplicateSelection();
-        } else if (x >= 786 && x <= 826) {
+        } else if (x >= 816 && x <= 860) {
             DeleteSelection();
-        } else if (x >= 830 && x <= 884) {
+        } else if (x >= 866 && x <= 930) {
             // 全クリア
             Part* pActive = m_partManager.GetActivePart();
             if (pActive) {
@@ -1510,7 +1594,7 @@ void AppWindow::OnLButtonDown(int x, int y, [[maybe_unused]] WPARAM wParam) {
                     m_isMergedView = false;
                     m_partManager.SetActiveIndex(static_cast<int>(i));
                     SyncTimelineToText();
-                    m_statusMessage = L"パートを切り替えました: " + std::wstring(parts[i].name.begin(), parts[i].name.end());
+                    m_statusMessage = L"パートを切り替えました: " + Utf8ToWString(parts[i].name);
                     break;
                 }
                 tx += 98.0f;
@@ -1624,6 +1708,8 @@ void AppWindow::OnKeyDown(WPARAM wParam, [[maybe_unused]] LPARAM lParam) {
 
     if (wParam == VK_SPACE) {
         TogglePlayback();
+    } else if (wParam == 'T' && !isCtrl) {
+        ProcessTapTempo();
     } else if (wParam == VK_RETURN && isCtrl) {
         ApplyTextToTimeline();
     } else if (isCtrl && wParam == 'C') {
