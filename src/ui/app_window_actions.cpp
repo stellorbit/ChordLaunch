@@ -114,10 +114,11 @@ void AppWindow::InsertChordAtTimelineTick(const ChordToken& chord, int targetBar
     if (barTicks <= 0) barTicks = TICKS_PER_BAR_4_4;
 
     int chordTicks = chord.durationTicks > 0 ? chord.durationTicks : (chord.durationBeats > 0 ? chord.durationBeats * TICKS_PER_BEAT : TICKS_PER_BEAT);
-    chordTicks = std::clamp(chordTicks, 1, barTicks);
+    chordTicks = std::max(1, chordTicks);
 
     // 前小節から伸びてくる跨ぎカードに覆われた区間へは配置しない
-    int maxStart = std::max(0, barTicks - chordTicks);
+    int minGrid = std::max(1, m_timelineGridTicks);
+    int maxStart = std::max(0, barTicks - std::min(barTicks, minGrid));
     int covered = TimelineEdit::IncomingCoverUntil(pActive->bars, targetBarIdx);
     int minStart = std::min(covered, maxStart);
     int newStart = std::clamp(targetTickInBar, minStart, maxStart);
@@ -260,10 +261,13 @@ void AppWindow::InsertChordAtTimelineX(const ChordToken& chord, float x, bool pu
     int snappedTick = static_cast<int>(std::round(rawTick / static_cast<float>(gridTicks))) * gridTicks;
     int fallbackTicks = std::max(1, m_inputGridTicks);
     int chordTicks = chord.durationTicks > 0 ? chord.durationTicks : (chord.durationBeats > 0 ? chord.durationBeats * TICKS_PER_BEAT : fallbackTicks);
-    chordTicks = std::clamp(chordTicks, 1, barTotalTicks);
-    snappedTick = std::clamp(snappedTick, 0, std::max(0, barTotalTicks - chordTicks));
+    chordTicks = std::max(1, chordTicks);
+    int maxStart = std::max(0, barTotalTicks - std::min(barTotalTicks, gridTicks));
+    snappedTick = std::clamp(snappedTick, 0, maxStart);
 
-    InsertChordAtTimelineTick(chord, targetBarIdx, snappedTick, pushUndo);
+    ChordToken placedChord = chord;
+    placedChord.SetTicks(chordTicks);
+    InsertChordAtTimelineTick(placedChord, targetBarIdx, snappedTick, pushUndo);
 }
 
 void AppWindow::SyncTextToTimeline() {

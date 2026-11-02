@@ -509,6 +509,14 @@ int AppWindow::Run() {
                     InvalidateRect(m_hwnd, nullptr, FALSE);
                     continue;
                 }
+                if ((isCtrl || isShift) && msg.wParam == VK_UP && msg.hwnd != m_hwndEdit) {
+                    ShiftSelectedChordOctave(1);
+                    continue;
+                }
+                if ((isCtrl || isShift) && msg.wParam == VK_DOWN && msg.hwnd != m_hwndEdit) {
+                    ShiftSelectedChordOctave(-1);
+                    continue;
+                }
                 if (!isCtrl && msg.hwnd != m_hwndEdit) {
                     if ((m_settingZoomStyle == 0 && msg.wParam == 'R') ||
                         (m_settingZoomStyle == 1 && msg.wParam == 'G') ||
@@ -848,6 +856,9 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             }
             return 0;
         }
+        case WM_KEYDOWN:
+            OnKeyDown(wParam);
+            return 0;
         case WM_CHAR:
             OnChar(static_cast<WCHAR>(wParam));
             return 0;

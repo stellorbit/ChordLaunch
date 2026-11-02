@@ -321,9 +321,8 @@ std::vector<TimelineEdit::OverflowItem> TimelineEdit::InsertChord(Bar& bar, cons
     NormalizeBar(bar, &overflow);
 
     const int barTicks = BarTicksOf(bar);
-    int chordTicks = DurOf(chord);
-    chordTicks = std::clamp(chordTicks, 1, barTicks);
-    startTick = std::clamp(startTick, 0, barTicks - chordTicks);
+    int chordTicks = std::max(1, DurOf(chord));
+    startTick = std::clamp(startTick, 0, std::max(0, barTicks - 1));
 
     if (chord.isRest) {
         return overflow;

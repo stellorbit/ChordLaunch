@@ -1233,7 +1233,7 @@ void AppWindow::OnLButtonUp(float x, float y) {
             float centerW = m_width - rightW - centerX;
             float curDockH = m_showKeyboard ? m_bottomDockHeight : 28.0f;
             if (x >= centerX && x <= centerX + centerW && y >= m_toolbarHeight && y <= m_height - curDockH) {
-                InsertChordAtTimelineX(droppedChord, x, true, m_inputGridTicks);
+                InsertChordAtTimelineX(droppedChord, x, true, m_timelineGridTicks);
             }
             InvalidateRect(m_hwnd, nullptr, FALSE);
         }

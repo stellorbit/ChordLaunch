@@ -58,13 +58,13 @@ void AppWindow::OnRender() {
                 barTotalTicks = barNumerator * TICKS_PER_BEAT;
             }
 
-            int snapGrid = (m_dragMode == DragMode::PaletteCardDrag) ? m_inputGridTicks : m_timelineGridTicks;
-            int gridTicks = std::max(1, snapGrid);
+            int gridTicks = std::max(1, m_timelineGridTicks);
             float rawTick = barOffsetRatio * static_cast<float>(barTotalTicks);
             int snappedTick = static_cast<int>(std::round(rawTick / static_cast<float>(gridTicks))) * gridTicks;
-            int chordTicks = m_dragPaletteChord.durationTicks > 0 ? m_dragPaletteChord.durationTicks : (m_dragPaletteChord.durationBeats > 0 ? m_dragPaletteChord.durationBeats * TICKS_PER_BEAT : std::max(1, m_inputGridTicks));
-            chordTicks = std::clamp(chordTicks, 1, barTotalTicks);
-            int maxStart = std::max(0, barTotalTicks - chordTicks);
+            int fallbackTicks = std::max(1, m_inputGridTicks);
+            int chordTicks = m_dragPaletteChord.durationTicks > 0 ? m_dragPaletteChord.durationTicks : (m_dragPaletteChord.durationBeats > 0 ? m_dragPaletteChord.durationBeats * TICKS_PER_BEAT : fallbackTicks);
+            chordTicks = std::max(1, chordTicks);
+            int maxStart = std::max(0, barTotalTicks - std::min(barTotalTicks, gridTicks));
             int covered = (pActive) ? TimelineEdit::IncomingCoverUntil(pActive->bars, targetBarIdx) : 0;
             snappedTick = std::clamp(snappedTick, std::min(covered, maxStart), maxStart);
 

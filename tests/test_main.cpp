@@ -1627,6 +1627,69 @@ void TestSyncopationPersistence() {
     TEST_ASSERT(cb.chords[1].rootName == "G" && cb.chords[1].durationTicks == 1440, "Following chord stays trimmed");
 }
 
+void TestOneBarChordCrossBarInsertion() {
+    std::cout << "[TEST] 28. One-bar chord cross-bar insertion and overflow handling\n";
+
+    // 1. 1小節のコード A (1920 ticks) を Bar 1 の 2拍目 (480 ticks) に挿入
+    Bar bar1;
+    bar1.barNumber = 1;
+    bar1.timeNumerator = 4;
+    bar1.timeDenominator = 4;
+
+    ChordToken chordC;
+    chordC.rawText = "C";
+    chordC.rootName = "C";
+    chordC.SetTicks(1920);
+    bar1.chords.push_back(chordC);
+
+    ChordToken chordA;
+    chordA.rawText = "A";
+    chordA.rootName = "A";
+    chordA.SetTicks(1920);
+
+    auto overflow = TimelineEdit::InsertChord(bar1, chordA, 480);
+    TEST_ASSERT(overflow.size() == 1, "Inserting 1-bar chord at Beat 2 produces 1 overflow item");
+    TEST_ASSERT(overflow[0].startTick == 0, "Overflow item starts at tick 0 of next bar");
+    TEST_ASSERT(overflow[0].chord.durationTicks == 480, "Overflow item duration is 480 ticks (1 beat)");
+
+    TEST_ASSERT(TimelineEdit::TotalTicks(bar1) == 1920, "Bar 1 total ticks is strictly 1920 ticks");
+    TEST_ASSERT(bar1.chords.size() == 2, "Bar 1 contains 2 chords (C trimmed to 480, A occupying 1440)");
+    TEST_ASSERT(bar1.chords[0].rootName == "C" && bar1.chords[0].durationTicks == 480, "C occupies 0..480 (Beat 1)");
+    TEST_ASSERT(bar1.chords[1].rootName == "A" && bar1.chords[1].durationTicks == 1440, "A occupies 480..1920 (Beats 2-4)");
+
+    // 2. 次小節 (Bar 2) へのオーバーフロー挿入
+    Bar bar2;
+    bar2.barNumber = 2;
+    bar2.timeNumerator = 4;
+    bar2.timeDenominator = 4;
+    ChordToken restBar2;
+    restBar2.isRest = true;
+    restBar2.rawText = "_";
+    restBar2.SetTicks(1920);
+    bar2.chords.push_back(restBar2);
+
+    auto overflow2 = TimelineEdit::InsertChord(bar2, overflow[0].chord, overflow[0].startTick);
+    TEST_ASSERT(overflow2.empty(), "Overflow item into empty bar produces no further overflow");
+    TEST_ASSERT(TimelineEdit::TotalTicks(bar2) == 1920, "Bar 2 total ticks is strictly 1920 ticks");
+    TEST_ASSERT(bar2.chords.size() == 2, "Bar 2 contains A (480) and remaining rest (1440)");
+    TEST_ASSERT(bar2.chords[0].rootName == "A" && bar2.chords[0].durationTicks == 480, "A occupies Beat 1 of Bar 2 (480 ticks)");
+    TEST_ASSERT(bar2.chords[1].isRest && bar2.chords[1].durationTicks == 1440, "Remaining 3 beats in Bar 2 are rest (1440 ticks)");
+
+    // 3. 3拍目 (960 ticks) に1小節コードを挿入した場合の前後小節の分割検証
+    Bar bar3;
+    bar3.barNumber = 3;
+    ChordToken restBar3;
+    restBar3.isRest = true;
+    restBar3.rawText = "_";
+    restBar3.SetTicks(1920);
+    bar3.chords.push_back(restBar3);
+
+    auto over3 = TimelineEdit::InsertChord(bar3, chordA, 960);
+    TEST_ASSERT(over3.size() == 1 && over3[0].chord.durationTicks == 960, "At Beat 3, overflow is 960 ticks (2 beats)");
+    TEST_ASSERT(TimelineEdit::TotalTicks(bar3) == 1920, "Bar 3 total ticks is 1920 ticks");
+    TEST_ASSERT(bar3.chords.size() == 2 && bar3.chords[1].durationTicks == 960, "Bar 3 has rest (960) + A (960)");
+}
+
 int main() {
     std::cout << "========================================\n";
     std::cout << "ChordLaunch C++20 Core Test Suite\n";
@@ -1659,6 +1722,7 @@ int main() {
     TestTimelineEditInsertAndResize();
     TestSyncopationPersistence();
     TestOctaveAndGridSeparation();
+    TestOneBarChordCrossBarInsertion();
 
     std::cout << "========================================\n";
     std::cout << "Tests Passed: " << g_passCount << ", Failed: " << g_failCount << "\n";
