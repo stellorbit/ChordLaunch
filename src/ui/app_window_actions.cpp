@@ -610,7 +610,11 @@ void AppWindow::TriggerAutoBackup() {
     std::string data = m_partManager.SerializeProject(
         m_projectTitle, m_selectedVoicing, m_bassOctaveMode, m_selectedGridTicks
     );
-    if (PartManager::PerformAutoBackup(m_currentProjectPath, m_projectTitle, data)) {
+    std::wstring backupDir;
+    if (!m_autoBackupInProjectDir && !m_autoBackupDirectory.empty()) {
+        backupDir = m_autoBackupDirectory;
+    }
+    if (PartManager::PerformAutoBackup(m_currentProjectPath, m_projectTitle, data, backupDir)) {
         auto now = std::chrono::system_clock::now();
         std::time_t tt = std::chrono::system_clock::to_time_t(now);
         std::tm tmNow;
@@ -739,7 +743,17 @@ void AppWindow::OpenOnlineDocumentation() {
 // ---------------------------------------------------------------------------
 void AppWindow::DoFileNew() {
     PushUndo();
-    m_partManager.ResetToDefaultSong();
+    m_partManager.GetParts().clear();
+    Part emptyPart;
+    emptyPart.id = "part_1";
+    emptyPart.name = "Intro";
+    emptyPart.keyRoot = "C";
+    emptyPart.mode = MusicalMode::Major;
+    emptyPart.bpm = 120;
+    emptyPart.timeNumerator = 4;
+    emptyPart.timeDenominator = 4;
+    m_partManager.GetParts().push_back(emptyPart);
+    m_partManager.SetActiveIndex(0);
     m_currentProjectPath.clear();
     m_projectTitle = "MyProgression";
     m_isDirty = false;
@@ -761,6 +775,7 @@ void AppWindow::DoFileSave() {
     )) {
         m_isDirty = false;
         UpdateWindowTitle();
+        AddRecentFile(m_currentProjectPath);
         SetStatusMessage(TR(L"プロジェクトを保存しました", L"Project saved"));
     } else {
         MessageBoxW(m_hwnd, TR(L"プロジェクトの保存に失敗しました。", L"Failed to save project."), TR(L"エラー", L"Error"), MB_OK | MB_ICONERROR);
@@ -782,6 +797,9 @@ void AppWindow::DoFileSaveAs() {
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
     ofn.lpstrDefExt = L"chord";
+    if (!m_projectDirectory.empty() && std::filesystem::exists(m_projectDirectory)) {
+        ofn.lpstrInitialDir = m_projectDirectory.c_str();
+    }
 
     if (GetSaveFileNameW(&ofn)) {
         m_currentProjectPath = szFile;
@@ -794,6 +812,7 @@ void AppWindow::DoFileSaveAs() {
         )) {
             m_isDirty = false;
             UpdateWindowTitle();
+            AddRecentFile(m_currentProjectPath);
             SetStatusMessage(TR(L"プロジェクトを別名で保存しました", L"Project saved as new file"));
         } else {
             MessageBoxW(m_hwnd, TR(L"プロジェクトの保存に失敗しました。", L"Failed to save project."), TR(L"エラー", L"Error"), MB_OK | MB_ICONERROR);
@@ -811,6 +830,9 @@ void AppWindow::DoFileOpen() {
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
     ofn.lpstrDefExt = L"chord";
+    if (!m_projectDirectory.empty() && std::filesystem::exists(m_projectDirectory)) {
+        ofn.lpstrInitialDir = m_projectDirectory.c_str();
+    }
 
     if (GetOpenFileNameW(&ofn)) {
         std::string loadedTitle;
@@ -828,6 +850,7 @@ void AppWindow::DoFileOpen() {
 
             SyncTimelineToText();
             UpdateWindowTitle();
+            AddRecentFile(szFile);
             SetStatusMessage(std::wstring(TR(L"プロジェクトを開きました: ", L"Opened project: ")) + ToWString(m_projectTitle));
             InvalidateRect(m_hwnd, nullptr, FALSE);
         } else {
@@ -922,6 +945,209 @@ void AppWindow::PasteProgressionFromClipboard() {
         }
     }
     CloseClipboard();
+}
+
+namespace {
+
+std::string EscapeJson(std::string_view s) {
+    std::string out;
+    out.reserve(s.size() + 8);
+    for (char c : s) {
+        if (c == '"') out += "\\\"";
+        else if (c == '\\') out += "\\\\";
+        else if (c == '\b') out += "\\b";
+        else if (c == '\f') out += "\\f";
+        else if (c == '\n') out += "\\n";
+        else if (c == '\r') out += "\\r";
+        else if (c == '\t') out += "\\t";
+        else out += c;
+    }
+    return out;
+}
+
+std::string FindJsonStr(const std::string& json, std::string_view key) {
+    std::string pattern = "\"" + std::string(key) + "\"";
+    size_t pos = json.find(pattern);
+    if (pos == std::string::npos) return "";
+    size_t colon = json.find(':', pos + pattern.size());
+    if (colon == std::string::npos) return "";
+    size_t firstQuote = json.find('"', colon + 1);
+    if (firstQuote == std::string::npos) return "";
+    size_t secondQuote = json.find('"', firstQuote + 1);
+    while (secondQuote != std::string::npos && json[secondQuote - 1] == '\\') {
+        secondQuote = json.find('"', secondQuote + 1);
+    }
+    if (secondQuote == std::string::npos) return "";
+    return json.substr(firstQuote + 1, secondQuote - firstQuote - 1);
+}
+
+std::filesystem::path GetSettingsFilePath() {
+    wchar_t appData[MAX_PATH];
+    if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, appData))) {
+        return std::filesystem::path(appData) / L"ChordLaunch" / L"settings.json";
+    }
+    return L"settings.json";
+}
+
+} // namespace
+
+void AppWindow::AddRecentFile(const std::wstring& path) {
+    if (path.empty()) return;
+    auto it = std::find(m_recentFiles.begin(), m_recentFiles.end(), path);
+    if (it != m_recentFiles.end()) {
+        m_recentFiles.erase(it);
+    }
+    m_recentFiles.insert(m_recentFiles.begin(), path);
+    if (m_recentFiles.size() > 10) {
+        m_recentFiles.resize(10);
+    }
+    SaveAppSettings();
+    RebuildMainMenu();
+}
+
+void AppWindow::OpenRecentFile(int index) {
+    if (index < 0 || index >= static_cast<int>(m_recentFiles.size())) return;
+    std::wstring path = m_recentFiles[index];
+    if (!std::filesystem::exists(path)) {
+        MessageBoxW(m_hwnd, TR(L"指定されたプロジェクトファイルが見つかりません。", L"Project file not found."), TR(L"エラー", L"Error"), MB_OK | MB_ICONWARNING);
+        m_recentFiles.erase(m_recentFiles.begin() + index);
+        SaveAppSettings();
+        RebuildMainMenu();
+        return;
+    }
+
+    std::string loadedTitle;
+    VoicingStyle loadedVoicing;
+    int loadedBassMode = 0;
+    int loadedGrid = TICKS_PER_BEAT;
+
+    if (m_partManager.LoadFromFile(path, loadedTitle, loadedVoicing, loadedBassMode, loadedGrid)) {
+        m_currentProjectPath = path;
+        m_projectTitle = loadedTitle;
+        m_selectedVoicing = loadedVoicing;
+        m_bassOctaveMode = loadedBassMode;
+        m_selectedGridTicks = loadedGrid;
+        m_isDirty = false;
+
+        AddRecentFile(path);
+        SyncTimelineToText();
+        UpdateWindowTitle();
+        SetStatusMessage(std::wstring(TR(L"プロジェクトを開きました: ", L"Opened project: ")) + ToWString(m_projectTitle));
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+    } else {
+        MessageBoxW(m_hwnd, TR(L"プロジェクトファイルの読み込みに失敗しました。", L"Failed to load project file."), TR(L"エラー", L"Error"), MB_OK | MB_ICONERROR);
+    }
+}
+
+void AppWindow::LoadAppSettings() {
+    try {
+        auto path = GetSettingsFilePath();
+        if (!std::filesystem::exists(path)) return;
+        std::ifstream ifs(path);
+        if (!ifs.is_open()) return;
+        std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+
+        size_t posDash = content.find("\"showDashboardOnStartup\"");
+        if (posDash != std::string::npos) {
+            size_t valPos = content.find(':', posDash);
+            if (valPos != std::string::npos) {
+                std::string sub = content.substr(valPos + 1, 20);
+                if (sub.find("false") != std::string::npos) m_showDashboardOnStartup = false;
+                else if (sub.find("true") != std::string::npos) m_showDashboardOnStartup = true;
+            }
+        }
+
+        size_t posBak = content.find("\"autoBackupInProjectDir\"");
+        if (posBak != std::string::npos) {
+            size_t valPos = content.find(':', posBak);
+            if (valPos != std::string::npos) {
+                std::string sub = content.substr(valPos + 1, 20);
+                if (sub.find("false") != std::string::npos) m_autoBackupInProjectDir = false;
+                else if (sub.find("true") != std::string::npos) m_autoBackupInProjectDir = true;
+            }
+        }
+
+        m_projectDirectory = ToWString(FindJsonStr(content, "projectDirectory"));
+        m_autoBackupDirectory = ToWString(FindJsonStr(content, "autoBackupDirectory"));
+
+        m_recentFiles.clear();
+        size_t posRec = content.find("\"recentFiles\"");
+        if (posRec != std::string::npos) {
+            size_t arrStart = content.find('[', posRec);
+            size_t arrEnd = content.find(']', arrStart);
+            if (arrStart != std::string::npos && arrEnd != std::string::npos) {
+                size_t cur = arrStart + 1;
+                while (cur < arrEnd) {
+                    size_t sQuote = content.find('"', cur);
+                    if (sQuote == std::string::npos || sQuote >= arrEnd) break;
+                    size_t eQuote = content.find('"', sQuote + 1);
+                    while (eQuote != std::string::npos && eQuote < arrEnd && content[eQuote - 1] == '\\') {
+                        eQuote = content.find('"', eQuote + 1);
+                    }
+                    if (eQuote == std::string::npos || eQuote >= arrEnd) break;
+                    std::string item = content.substr(sQuote + 1, eQuote - sQuote - 1);
+                    std::wstring witem = ToWString(item);
+                    if (!witem.empty() && std::filesystem::exists(witem)) {
+                        m_recentFiles.push_back(witem);
+                    }
+                    cur = eQuote + 1;
+                }
+            }
+        }
+    } catch (...) {}
+}
+
+void AppWindow::SaveAppSettings() {
+    try {
+        auto path = GetSettingsFilePath();
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream ofs(path);
+        if (!ofs.is_open()) return;
+
+        ofs << "{\n";
+        ofs << "  \"showDashboardOnStartup\": " << (m_showDashboardOnStartup ? "true" : "false") << ",\n";
+        ofs << "  \"autoBackupInProjectDir\": " << (m_autoBackupInProjectDir ? "true" : "false") << ",\n";
+        ofs << "  \"projectDirectory\": \"" << EscapeJson(ToUtf8String(m_projectDirectory)) << "\",\n";
+        ofs << "  \"autoBackupDirectory\": \"" << EscapeJson(ToUtf8String(m_autoBackupDirectory)) << "\",\n";
+        ofs << "  \"recentFiles\": [\n";
+        for (size_t i = 0; i < m_recentFiles.size(); ++i) {
+            ofs << "    \"" << EscapeJson(ToUtf8String(m_recentFiles[i])) << "\"" << (i + 1 < m_recentFiles.size() ? "," : "") << "\n";
+        }
+        ofs << "  ]\n";
+        ofs << "}\n";
+    } catch (...) {}
+}
+
+void AppWindow::ChooseDirectory(std::wstring& outDir, const wchar_t* title) {
+    IFileDialog* pfd = nullptr;
+    if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pfd)))) {
+        DWORD dwOptions = 0;
+        if (SUCCEEDED(pfd->GetOptions(&dwOptions))) {
+            pfd->SetOptions(dwOptions | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+        }
+        if (title) {
+            pfd->SetTitle(title);
+        }
+        if (!outDir.empty()) {
+            IShellItem* psiFolder = nullptr;
+            if (SUCCEEDED(SHCreateItemFromParsingName(outDir.c_str(), nullptr, IID_PPV_ARGS(&psiFolder)))) {
+                pfd->SetFolder(psiFolder);
+                psiFolder->Release();
+            }
+        }
+        if (SUCCEEDED(pfd->Show(m_hwnd))) {
+            IShellItem* psiResult = nullptr;
+            if (SUCCEEDED(pfd->GetResult(&psiResult))) {
+                PWSTR pszPath = nullptr;
+                if (SUCCEEDED(psiResult->GetDisplayName(SIGDN_FILESYSPATH, &pszPath))) {
+                    outDir = pszPath;
+                    CoTaskMemFree(pszPath);
+                }
+                psiResult->Release();
+            }
+        }
+        pfd->Release();
+    }
 }
 
 } // namespace clp

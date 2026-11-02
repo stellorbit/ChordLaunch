@@ -441,13 +441,16 @@ bool PartManager::LoadFromFile(
 bool PartManager::PerformAutoBackup(
     const std::wstring& currentProjectFilePath,
     const std::string& projectTitle,
-    const std::string& projectData
+    const std::string& projectData,
+    const std::wstring& customBackupDir
 ) {
     if (projectData.empty()) return false;
 
     try {
         std::filesystem::path backupDir;
-        if (!currentProjectFilePath.empty()) {
+        if (!customBackupDir.empty()) {
+            backupDir = customBackupDir;
+        } else if (!currentProjectFilePath.empty()) {
             std::filesystem::path projPath(currentProjectFilePath);
             backupDir = projPath.parent_path() / L"Project Backup";
         } else {

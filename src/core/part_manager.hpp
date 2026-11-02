@@ -70,7 +70,8 @@ public:
     static bool PerformAutoBackup(
         const std::wstring& currentProjectFilePath,
         const std::string& projectTitle,
-        const std::string& projectData
+        const std::string& projectData,
+        const std::wstring& customBackupDir = L""
     );
 
 private:

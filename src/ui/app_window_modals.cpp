@@ -26,6 +26,12 @@ void AppWindow::RenderModal(float width, float height) {
     D2D1_RECT_F bodyRc = D2D1::RectF(cardX + 16.0f, cardY + titleH + 12.0f, cardX + cardW - 16.0f, cardY + cardH - 16.0f);
 
     switch (m_activeModal) {
+        case ModalType::Dashboard: {
+            D2D1_RECT_F titleRc = D2D1::RectF(cardX + 20.0f, cardY + 10.0f, cardX + cardW - 50.0f, cardY + 36.0f);
+            DrawTextSafe(TR(L"スタートダッシュボード (Dashboard)", L"Dashboard"), m_pFontModalTitle, titleRc, m_pBrushText);
+            RenderDashboardModal(bodyRc);
+            break;
+        }
         case ModalType::Settings: {
             D2D1_RECT_F titleRc = D2D1::RectF(cardX + 20.0f, cardY + 10.0f, cardX + cardW - 50.0f, cardY + 36.0f);
             DrawTextSafe(TR(L"環境設定 (Settings)", L"Settings"), m_pFontModalTitle, titleRc, m_pBrushText);
@@ -54,60 +60,225 @@ void AppWindow::RenderModal(float width, float height) {
     }
 }
 
+namespace {
+
+void DrawCheckboxUI(
+    ID2D1RenderTarget* pTarget,
+    IDWriteTextFormat* pFont,
+    ID2D1SolidColorBrush* pTextBrush,
+    ID2D1SolidColorBrush* pBorderBrush,
+    ID2D1SolidColorBrush* pAccentBrush,
+    const D2D1_RECT_F& rc,
+    bool isChecked,
+    const std::wstring& label,
+    bool isGrayed = false
+) {
+    if (!pTarget || !pFont) return;
+    float boxSize = 16.0f;
+    float boxY = rc.top + (rc.bottom - rc.top - boxSize) * 0.5f;
+    D2D1_RECT_F boxRc = D2D1::RectF(rc.left, boxY, rc.left + boxSize, boxY + boxSize);
+    D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(boxRc, 3.0f, 3.0f);
+
+    pTarget->DrawRoundedRectangle(rr, isGrayed ? pBorderBrush : (isChecked ? pAccentBrush : pBorderBrush), 1.5f);
+
+    if (isChecked) {
+        D2D1_RECT_F innerRc = D2D1::RectF(boxRc.left + 3.0f, boxRc.top + 3.0f, boxRc.right - 3.0f, boxRc.bottom - 3.0f);
+        pTarget->FillRoundedRectangle(D2D1::RoundedRect(innerRc, 2.0f, 2.0f), isGrayed ? pBorderBrush : pAccentBrush);
+    }
+
+    D2D1_RECT_F textRc = D2D1::RectF(rc.left + boxSize + 8.0f, rc.top, rc.right, rc.bottom);
+    pTarget->DrawTextW(label.c_str(), static_cast<UINT32>(label.size()), pFont, textRc, isGrayed ? pBorderBrush : pTextBrush);
+}
+
+} // namespace
+
+void AppWindow::RenderDashboardModal(const D2D1_RECT_F& rc) {
+    float curY = rc.top;
+
+    // 1. 上部ボタングループ (新規作成 / 開く)
+    float btnW = (rc.right - rc.left - 16.0f) * 0.5f;
+    D2D1_RECT_F bNew = D2D1::RectF(rc.left, curY, rc.left + btnW, curY + 46.0f);
+    DrawButton(bNew, TR(L"＋ 新規プロジェクト作成", L"+ New Project"), IconType::Plus, false, false, true, Theme::AccentAction);
+
+    D2D1_RECT_F bOpen = D2D1::RectF(rc.left + btnW + 16.0f, curY, rc.right, curY + 46.0f);
+    DrawButton(bOpen, TR(L"📂 外部ファイルを開く...", L"Open File..."), IconType::None);
+
+    curY += 58.0f;
+
+    // 2. プロジェクト保存先フォルダ設定
+    D2D1_RECT_F pBox = D2D1::RectF(rc.left, curY, rc.right, curY + 62.0f);
+    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(pBox, 6.0f, 6.0f), m_pBrushBg);
+    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(pBox, 6.0f, 6.0f), m_pBrushBorderLight, 1.0f);
+
+    D2D1_RECT_F pTitle = D2D1::RectF(rc.left + 14.0f, curY + 8.0f, rc.left + 350.0f, curY + 26.0f);
+    DrawTextSafe(TR(L"プロジェクト保存先フォルダ", L"Project Save Directory"), m_pFontCardTitle, pTitle, m_pBrushText);
+
+    D2D1_RECT_F pPathBox = D2D1::RectF(rc.left + 14.0f, curY + 30.0f, rc.right - 96.0f, curY + 54.0f);
+    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(pPathBox, 4.0f, 4.0f), m_pBrushCardBg);
+    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(pPathBox, 4.0f, 4.0f), m_pBrushBorderLight, 1.0f);
+
+    std::wstring displayProjDir = m_projectDirectory.empty() ? TR(L"(未設定 - 指定すると保存ダイアログの初期位置になります)", L"(Not set - Click browse to choose)") : m_projectDirectory;
+    D2D1_RECT_F pPathText = D2D1::RectF(pPathBox.left + 8.0f, pPathBox.top + 3.0f, pPathBox.right - 8.0f, pPathBox.bottom);
+    DrawTextSafe(displayProjDir, m_pFontInspector, pPathText, m_projectDirectory.empty() ? m_pBrushTextMuted : m_pBrushText);
+
+    D2D1_RECT_F bBrowseProj = D2D1::RectF(rc.right - 88.0f, curY + 30.0f, rc.right - 14.0f, curY + 54.0f);
+    DrawButton(bBrowseProj, TR(L"参照...", L"Browse..."), IconType::None);
+
+    curY += 72.0f;
+
+    // 3. 最近開いたファイル一覧 (Recent Projects)
+    D2D1_RECT_F rTitle = D2D1::RectF(rc.left + 4.0f, curY, rc.left + 350.0f, curY + 20.0f);
+    DrawTextSafe(TR(L"最近開いたファイル", L"Recent Projects"), m_pFontCardTitle, rTitle, m_pBrushText);
+
+    curY += 24.0f;
+
+    float rListH = rc.bottom - curY - 44.0f;
+    D2D1_RECT_F rListBox = D2D1::RectF(rc.left, curY, rc.right, curY + rListH);
+    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(rListBox, 6.0f, 6.0f), m_pBrushBg);
+    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(rListBox, 6.0f, 6.0f), m_pBrushBorderLight, 1.0f);
+
+    if (m_recentFiles.empty()) {
+        D2D1_RECT_F emptyRc = D2D1::RectF(rListBox.left, rListBox.top + rListH * 0.4f, rListBox.right, rListBox.top + rListH * 0.6f);
+        DrawTextSafe(TR(L"最近開いたプロジェクトはありません", L"No recent projects found"), m_pFontModalBody, emptyRc, m_pBrushTextMuted);
+    } else {
+        float itemH = 32.0f;
+        size_t maxItems = std::min<size_t>(m_recentFiles.size(), static_cast<size_t>(std::floor((rListH - 8.0f) / (itemH + 2.0f))));
+        for (size_t ri = 0; ri < maxItems; ++ri) {
+            float iy = rListBox.top + 6.0f + ri * (itemH + 2.0f);
+            D2D1_RECT_F itemRc = D2D1::RectF(rListBox.left + 6.0f, iy, rListBox.right - 6.0f, iy + itemH);
+
+            bool isSel = (static_cast<int>(ri) == m_dashboardSelectedRecentIndex);
+            if (isSel) {
+                m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(itemRc, 4.0f, 4.0f), m_pBrushCardSelected);
+                m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(itemRc, 4.0f, 4.0f), m_pBrushAccent, 1.0f);
+            }
+
+            std::filesystem::path fp(m_recentFiles[ri]);
+            std::wstring fName = fp.filename().wstring();
+            std::wstring fDir = fp.parent_path().wstring();
+
+            D2D1_RECT_F nameRc = D2D1::RectF(itemRc.left + 10.0f, itemRc.top + 6.0f, itemRc.left + 220.0f, itemRc.bottom - 6.0f);
+            DrawTextSafe(fName, m_pFontTab, nameRc, isSel ? m_pBrushAccent : m_pBrushText);
+
+            D2D1_RECT_F dirRc = D2D1::RectF(itemRc.left + 230.0f, itemRc.top + 8.0f, itemRc.right - 80.0f, itemRc.bottom - 6.0f);
+            DrawTextSafe(fDir, m_pFontInspector, dirRc, m_pBrushTextMuted);
+
+            D2D1_RECT_F bOpenItem = D2D1::RectF(itemRc.right - 72.0f, itemRc.top + 4.0f, itemRc.right - 6.0f, itemRc.bottom - 4.0f);
+            DrawButton(bOpenItem, TR(L"開く", L"Open"), IconType::None);
+        }
+    }
+
+    // 4. フッター (起動時表示チェックボックス & 閉じるボタン)
+    D2D1_RECT_F chkRc = D2D1::RectF(rc.left + 6.0f, rc.bottom - 32.0f, rc.left + 350.0f, rc.bottom - 4.0f);
+    DrawCheckboxUI(m_pRenderTarget, m_pFontInspector, m_pBrushText, m_pBrushBorderLight, m_pBrushAccent, chkRc, m_showDashboardOnStartup, TR(L"起動時にこのダッシュボードを表示する", L"Show this dashboard on startup"));
+
+    D2D1_RECT_F bClose = D2D1::RectF(rc.right - 110.0f, rc.bottom - 34.0f, rc.right, rc.bottom);
+    DrawButton(bClose, TR(L"閉じる", L"Close"), IconType::None);
+}
+
 void AppWindow::RenderSettingsModal(const D2D1_RECT_F& rc) {
     float curY = rc.top;
 
-    D2D1_RECT_F lBox = D2D1::RectF(rc.left, curY, rc.right, curY + 68.0f);
+    // 1. 表示言語
+    D2D1_RECT_F lBox = D2D1::RectF(rc.left, curY, rc.right, curY + 54.0f);
     m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(lBox, 6.0f, 6.0f), m_pBrushBg);
     m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(lBox, 6.0f, 6.0f), m_pBrushBorderLight, 1.0f);
 
-    D2D1_RECT_F lTitle = D2D1::RectF(rc.left + 16.0f, curY + 12.0f, rc.left + 300.0f, curY + 32.0f);
+    D2D1_RECT_F lTitle = D2D1::RectF(rc.left + 14.0f, curY + 16.0f, rc.left + 300.0f, curY + 36.0f);
     DrawTextSafe(TR(L"表示言語 / Language", L"Display Language"), m_pFontCardTitle, lTitle, m_pBrushText);
 
-    D2D1_RECT_F lDesc = D2D1::RectF(rc.left + 16.0f, curY + 36.0f, rc.left + 400.0f, curY + 56.0f);
-    DrawTextSafe(TR(L"ユーザーインターフェースの表示言語を選択します。", L"Select the display language for the user interface."), m_pFontInspector, lDesc, m_pBrushTextMuted);
-
-    D2D1_RECT_F bJa = D2D1::RectF(rc.right - 230.0f, curY + 18.0f, rc.right - 120.0f, curY + 50.0f);
+    D2D1_RECT_F bJa = D2D1::RectF(rc.right - 230.0f, curY + 12.0f, rc.right - 120.0f, curY + 42.0f);
     DrawButton(bJa, L"日本語 (JP)", IconType::None, false, false, m_settingLanguage == 0);
 
-    D2D1_RECT_F bEn = D2D1::RectF(rc.right - 114.0f, curY + 18.0f, rc.right - 16.0f, curY + 50.0f);
+    D2D1_RECT_F bEn = D2D1::RectF(rc.right - 114.0f, curY + 12.0f, rc.right - 16.0f, curY + 42.0f);
     DrawButton(bEn, L"English (US)", IconType::None, false, false, m_settingLanguage == 1);
 
-    curY += 80.0f;
+    curY += 62.0f;
 
-    D2D1_RECT_F zBox = D2D1::RectF(rc.left, curY, rc.right, curY + 130.0f);
+    // 2. ズーム操作スタイル
+    D2D1_RECT_F zBox = D2D1::RectF(rc.left, curY, rc.right, curY + 76.0f);
     m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(zBox, 6.0f, 6.0f), m_pBrushBg);
     m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(zBox, 6.0f, 6.0f), m_pBrushBorderLight, 1.0f);
 
-    D2D1_RECT_F zTitle = D2D1::RectF(rc.left + 16.0f, curY + 12.0f, rc.left + 400.0f, curY + 32.0f);
+    D2D1_RECT_F zTitle = D2D1::RectF(rc.left + 14.0f, curY + 8.0f, rc.left + 400.0f, curY + 28.0f);
     DrawTextSafe(TR(L"タイムライン横ズーム操作スタイル", L"Timeline Horizontal Zoom Shortcut Style"), m_pFontCardTitle, zTitle, m_pBrushText);
 
-    D2D1_RECT_F zDesc = D2D1::RectF(rc.left + 16.0f, curY + 36.0f, rc.left + 500.0f, curY + 56.0f);
-    DrawTextSafe(TR(L"お使いのDAW・動画編集ソフトに合わせたキーバインドを選択できます。", L"Choose zoom keybindings matching your preferred DAW or video editor."), m_pFontInspector, zDesc, m_pBrushTextMuted);
-
-    float zBtnW = (rc.right - rc.left - 32.0f - 18.0f) / 4.0f;
-    float zBtnH = 34.0f;
-    float zBtnY = curY + 70.0f;
+    float zBtnW = (rc.right - rc.left - 28.0f - 18.0f) / 4.0f;
+    float zBtnH = 30.0f;
+    float zBtnY = curY + 34.0f;
 
     const wchar_t* zoomLabels[] = { L"Pro Tools (R/T)", L"Cubase (G/H)", L"Studio One (W/E)", TR(L"標準 (Ctrl +/-)", L"Default (Ctrl +/-)") };
     for (int i = 0; i < 4; ++i) {
-        float zx = rc.left + 16.0f + i * (zBtnW + 6.0f);
+        float zx = rc.left + 14.0f + i * (zBtnW + 6.0f);
         D2D1_RECT_F zRc = D2D1::RectF(zx, zBtnY, zx + zBtnW, zBtnY + zBtnH);
         DrawButton(zRc, zoomLabels[i], IconType::None, false, false, m_settingZoomStyle == i);
     }
 
-    curY += 142.0f;
+    curY += 84.0f;
 
-    D2D1_RECT_F pBox = D2D1::RectF(rc.left, curY, rc.right, curY + 70.0f);
-    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(pBox, 6.0f, 6.0f), m_pBrushBg);
-    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(pBox, 6.0f, 6.0f), m_pBrushBorderLight, 1.0f);
+    // 3. 起動時ダッシュボード表示設定
+    D2D1_RECT_F dBox = D2D1::RectF(rc.left, curY, rc.right, curY + 46.0f);
+    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(dBox, 6.0f, 6.0f), m_pBrushBg);
+    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(dBox, 6.0f, 6.0f), m_pBrushBorderLight, 1.0f);
 
-    D2D1_RECT_F pTitle = D2D1::RectF(rc.left + 16.0f, curY + 12.0f, rc.left + 400.0f, curY + 32.0f);
-    DrawTextSafe(TR(L"自動バックアップ ＆ プロジェクト保存先", L"Auto-Backup & Project Storage"), m_pFontCardTitle, pTitle, m_pBrushText);
+    D2D1_RECT_F dChk = D2D1::RectF(rc.left + 14.0f, curY + 12.0f, rc.right - 14.0f, curY + 34.0f);
+    DrawCheckboxUI(m_pRenderTarget, m_pFontTab, m_pBrushText, m_pBrushBorderLight, m_pBrushAccent, dChk, m_showDashboardOnStartup, TR(L"Chord Launch 起動時にスタートダッシュボードを表示する", L"Show start dashboard on startup"));
 
-    D2D1_RECT_F pDesc = D2D1::RectF(rc.left + 16.0f, curY + 36.0f, rc.right - 16.0f, curY + 56.0f);
-    DrawTextSafe(TR(L"編集内容はリアルタイムにメモリ管理され、Ctrl+S / MIDI保存により即時ファイル出力されます。", L"Edits are managed in memory with auto-backup and saved instantly via Ctrl+S or Export MIDI."), m_pFontInspector, pDesc, m_pBrushTextMuted);
+    curY += 54.0f;
 
+    // 4. プロジェクト保存先フォルダ設定
+    D2D1_RECT_F projBox = D2D1::RectF(rc.left, curY, rc.right, curY + 62.0f);
+    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(projBox, 6.0f, 6.0f), m_pBrushBg);
+    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(projBox, 6.0f, 6.0f), m_pBrushBorderLight, 1.0f);
+
+    D2D1_RECT_F projTitle = D2D1::RectF(rc.left + 14.0f, curY + 8.0f, rc.left + 350.0f, curY + 26.0f);
+    DrawTextSafe(TR(L"プロジェクト保存先フォルダ", L"Project Save Directory"), m_pFontCardTitle, projTitle, m_pBrushText);
+
+    D2D1_RECT_F projPathBox = D2D1::RectF(rc.left + 14.0f, curY + 30.0f, rc.right - 96.0f, curY + 54.0f);
+    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(projPathBox, 4.0f, 4.0f), m_pBrushCardBg);
+    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(projPathBox, 4.0f, 4.0f), m_pBrushBorderLight, 1.0f);
+
+    std::wstring displayProjDir = m_projectDirectory.empty() ? TR(L"(未設定 - 指定すると保存ダイアログの初期位置になります)", L"(Not set - Click browse to choose)") : m_projectDirectory;
+    D2D1_RECT_F projPathText = D2D1::RectF(projPathBox.left + 8.0f, projPathBox.top + 3.0f, projPathBox.right - 8.0f, projPathBox.bottom);
+    DrawTextSafe(displayProjDir, m_pFontInspector, projPathText, m_projectDirectory.empty() ? m_pBrushTextMuted : m_pBrushText);
+
+    D2D1_RECT_F bBrowseProj = D2D1::RectF(rc.right - 88.0f, curY + 30.0f, rc.right - 14.0f, curY + 54.0f);
+    DrawButton(bBrowseProj, TR(L"参照...", L"Browse..."), IconType::None);
+
+    curY += 70.0f;
+
+    // 5. 自動バックアップ設定 & プロジェクトフォルダ内格納オプション
+    D2D1_RECT_F bakBox = D2D1::RectF(rc.left, curY, rc.right, curY + 98.0f);
+    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(bakBox, 6.0f, 6.0f), m_pBrushBg);
+    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(bakBox, 6.0f, 6.0f), m_pBrushBorderLight, 1.0f);
+
+    D2D1_RECT_F bakChk = D2D1::RectF(rc.left + 14.0f, curY + 10.0f, rc.right - 14.0f, curY + 30.0f);
+    DrawCheckboxUI(m_pRenderTarget, m_pFontTab, m_pBrushText, m_pBrushBorderLight, m_pBrushAccent, bakChk, m_autoBackupInProjectDir, TR(L"プロジェクトフォルダ内に自動保存ファイルを格納", L"Store auto-backup files inside project folder"));
+
+    // 自動保存先フォルダ (カスタム指定)
+    bool isCustomBakGrayed = m_autoBackupInProjectDir;
+    D2D1_RECT_F bakSubTitle = D2D1::RectF(rc.left + 14.0f, curY + 38.0f, rc.left + 350.0f, curY + 56.0f);
+    DrawTextSafe(TR(L"自動保存先フォルダ (カスタム指定)", L"Custom Auto-Backup Directory"), m_pFontCardTitle, bakSubTitle, isCustomBakGrayed ? m_pBrushTextMuted : m_pBrushText);
+
+    D2D1_RECT_F bakPathBox = D2D1::RectF(rc.left + 14.0f, curY + 62.0f, rc.right - 96.0f, curY + 86.0f);
+    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(bakPathBox, 4.0f, 4.0f), isCustomBakGrayed ? m_pBrushBg : m_pBrushCardBg);
+    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(bakPathBox, 4.0f, 4.0f), m_pBrushBorderLight, 1.0f);
+
+    std::wstring displayBakDir = isCustomBakGrayed ? TR(L"(プロジェクトフォルダ内の Project Backup に自動保存されます)", L"(Automatically stored in project's Backup folder)") : (m_autoBackupDirectory.empty() ? TR(L"(未設定 - LocalAppData/ChordLaunch/AutoBackup に保存)", L"(Not set - Uses default AppData)") : m_autoBackupDirectory);
+    D2D1_RECT_F bakPathText = D2D1::RectF(bakPathBox.left + 8.0f, bakPathBox.top + 3.0f, bakPathBox.right - 8.0f, bakPathBox.bottom);
+    DrawTextSafe(displayBakDir, m_pFontInspector, bakPathText, m_pBrushTextMuted);
+
+    D2D1_RECT_F bBrowseBak = D2D1::RectF(rc.right - 88.0f, curY + 62.0f, rc.right - 14.0f, curY + 86.0f);
+    if (isCustomBakGrayed) {
+        // グレーアウト描画 (無効化)
+        m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(bBrowseBak, 4.0f, 4.0f), m_pBrushBorderLight, 1.0f);
+        D2D1_RECT_F btnTextRc = D2D1::RectF(bBrowseBak.left, bBrowseBak.top + 3.0f, bBrowseBak.right, bBrowseBak.bottom);
+        DrawTextSafe(TR(L"参照...", L"Browse..."), m_pFontTab, btnTextRc, m_pBrushTextMuted);
+    } else {
+        DrawButton(bBrowseBak, TR(L"参照...", L"Browse..."), IconType::None);
+    }
+
+    // 6. 下部ボタングループ (保存して適用 / キャンセル)
     D2D1_RECT_F bSave = D2D1::RectF(rc.right - 130.0f, rc.bottom - 36.0f, rc.right, rc.bottom);
     DrawButton(bSave, TR(L"保存して適用", L"Save & Apply"), IconType::None, false, false, true, Theme::AccentAction);
 
@@ -679,8 +850,80 @@ bool AppWindow::OnModalClick(float x, float y) {
             }
             break;
         }
+        case ModalType::Dashboard: {
+            float curY = bodyRc.top;
+
+            // 1. 上部ボタン (新規作成 / 外部ファイルを開く)
+            float btnW = (bodyRc.right - bodyRc.left - 16.0f) * 0.5f;
+            D2D1_RECT_F bNew = D2D1::RectF(bodyRc.left, curY, bodyRc.left + btnW, curY + 46.0f);
+            if (PtInRectF(bNew, x, y)) {
+                DoFileNew();
+                CloseModal();
+                return true;
+            }
+
+            D2D1_RECT_F bOpen = D2D1::RectF(bodyRc.left + btnW + 16.0f, curY, bodyRc.right, curY + 46.0f);
+            if (PtInRectF(bOpen, x, y)) {
+                DoFileOpen();
+                if (!m_currentProjectPath.empty()) {
+                    CloseModal();
+                }
+                return true;
+            }
+
+            curY += 58.0f;
+
+            // 2. プロジェクト保存先フォルダ設定の参照ボタン
+            D2D1_RECT_F bBrowseProj = D2D1::RectF(bodyRc.right - 88.0f, curY + 30.0f, bodyRc.right - 14.0f, curY + 54.0f);
+            if (PtInRectF(bBrowseProj, x, y)) {
+                ChooseDirectory(m_projectDirectory, TR(L"プロジェクト保存先フォルダを選択", L"Select Project Directory"));
+                SaveAppSettings();
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return true;
+            }
+
+            curY += 72.0f;
+            curY += 24.0f;
+
+            // 3. 最近開いたファイル一覧
+            float rListH = bodyRc.bottom - curY - 44.0f;
+            D2D1_RECT_F rListBox = D2D1::RectF(bodyRc.left, curY, bodyRc.right, curY + rListH);
+            if (!m_recentFiles.empty() && PtInRectF(rListBox, x, y)) {
+                float itemH = 32.0f;
+                size_t maxItems = std::min<size_t>(m_recentFiles.size(), static_cast<size_t>(std::floor((rListH - 8.0f) / (itemH + 2.0f))));
+                for (size_t ri = 0; ri < maxItems; ++ri) {
+                    float iy = rListBox.top + 6.0f + ri * (itemH + 2.0f);
+                    D2D1_RECT_F itemRc = D2D1::RectF(rListBox.left + 6.0f, iy, rListBox.right - 6.0f, iy + itemH);
+                    if (PtInRectF(itemRc, x, y)) {
+                        m_dashboardSelectedRecentIndex = static_cast<int>(ri);
+                        OpenRecentFile(static_cast<int>(ri));
+                        CloseModal();
+                        return true;
+                    }
+                }
+            }
+
+            // 4. フッター
+            D2D1_RECT_F chkRc = D2D1::RectF(bodyRc.left + 6.0f, bodyRc.bottom - 32.0f, bodyRc.left + 350.0f, bodyRc.bottom - 4.0f);
+            if (PtInRectF(chkRc, x, y)) {
+                m_showDashboardOnStartup = !m_showDashboardOnStartup;
+                SaveAppSettings();
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return true;
+            }
+
+            D2D1_RECT_F bClose = D2D1::RectF(bodyRc.right - 110.0f, bodyRc.bottom - 34.0f, bodyRc.right, bodyRc.bottom);
+            if (PtInRectF(bClose, x, y)) {
+                CloseModal();
+                return true;
+            }
+            break;
+        }
         case ModalType::Settings: {
-            D2D1_RECT_F bJa = D2D1::RectF(bodyRc.right - 230.0f, bodyRc.top + 18.0f, bodyRc.right - 120.0f, bodyRc.top + 50.0f);
+            float curY = bodyRc.top;
+
+            // 1. 言語
+            D2D1_RECT_F bJa = D2D1::RectF(bodyRc.right - 230.0f, curY + 12.0f, bodyRc.right - 120.0f, curY + 42.0f);
             if (PtInRectF(bJa, x, y)) {
                 m_settingLanguage = 0;
                 I18n::SetLanguage(Language::Japanese);
@@ -688,7 +931,7 @@ bool AppWindow::OnModalClick(float x, float y) {
                 InvalidateRect(m_hwnd, nullptr, FALSE);
                 return true;
             }
-            D2D1_RECT_F bEn = D2D1::RectF(bodyRc.right - 114.0f, bodyRc.top + 18.0f, bodyRc.right - 16.0f, bodyRc.top + 50.0f);
+            D2D1_RECT_F bEn = D2D1::RectF(bodyRc.right - 114.0f, curY + 12.0f, bodyRc.right - 16.0f, curY + 42.0f);
             if (PtInRectF(bEn, x, y)) {
                 m_settingLanguage = 1;
                 I18n::SetLanguage(Language::English);
@@ -697,11 +940,14 @@ bool AppWindow::OnModalClick(float x, float y) {
                 return true;
             }
 
-            float zBtnW = (bodyRc.right - bodyRc.left - 32.0f - 18.0f) / 4.0f;
-            float zBtnH = 34.0f;
-            float zBtnY = bodyRc.top + 80.0f + 70.0f;
+            curY += 62.0f;
+
+            // 2. ズームスタイル
+            float zBtnW = (bodyRc.right - bodyRc.left - 28.0f - 18.0f) / 4.0f;
+            float zBtnH = 30.0f;
+            float zBtnY = curY + 34.0f;
             for (int i = 0; i < 4; ++i) {
-                float zx = bodyRc.left + 16.0f + i * (zBtnW + 6.0f);
+                float zx = bodyRc.left + 14.0f + i * (zBtnW + 6.0f);
                 if (PtInRectF(D2D1::RectF(zx, zBtnY, zx + zBtnW, zBtnY + zBtnH), x, y)) {
                     m_settingZoomStyle = i;
                     InvalidateRect(m_hwnd, nullptr, FALSE);
@@ -709,13 +955,56 @@ bool AppWindow::OnModalClick(float x, float y) {
                 }
             }
 
+            curY += 84.0f;
+
+            // 3. 起動時ダッシュボード表示設定
+            D2D1_RECT_F dChk = D2D1::RectF(bodyRc.left + 14.0f, curY + 12.0f, bodyRc.right - 14.0f, curY + 34.0f);
+            if (PtInRectF(dChk, x, y)) {
+                m_showDashboardOnStartup = !m_showDashboardOnStartup;
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return true;
+            }
+
+            curY += 54.0f;
+
+            // 4. プロジェクト保存先フォルダの参照
+            D2D1_RECT_F bBrowseProj = D2D1::RectF(bodyRc.right - 88.0f, curY + 30.0f, bodyRc.right - 14.0f, curY + 54.0f);
+            if (PtInRectF(bBrowseProj, x, y)) {
+                ChooseDirectory(m_projectDirectory, TR(L"プロジェクト保存先フォルダを選択", L"Select Project Directory"));
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return true;
+            }
+
+            curY += 70.0f;
+
+            // 5. 自動バックアップ設定
+            D2D1_RECT_F bakChk = D2D1::RectF(bodyRc.left + 14.0f, curY + 10.0f, bodyRc.right - 14.0f, curY + 30.0f);
+            if (PtInRectF(bakChk, x, y)) {
+                m_autoBackupInProjectDir = !m_autoBackupInProjectDir;
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return true;
+            }
+
+            if (!m_autoBackupInProjectDir) {
+                D2D1_RECT_F bBrowseBak = D2D1::RectF(bodyRc.right - 88.0f, curY + 62.0f, bodyRc.right - 14.0f, curY + 86.0f);
+                if (PtInRectF(bBrowseBak, x, y)) {
+                    ChooseDirectory(m_autoBackupDirectory, TR(L"自動保存先フォルダを選択", L"Select Auto-Backup Directory"));
+                    InvalidateRect(m_hwnd, nullptr, FALSE);
+                    return true;
+                }
+            }
+
+            // 6. フッターボタン
             D2D1_RECT_F bSave = D2D1::RectF(bodyRc.right - 130.0f, bodyRc.bottom - 36.0f, bodyRc.right, bodyRc.bottom);
             if (PtInRectF(bSave, x, y)) {
+                SaveAppSettings();
                 CloseModal();
                 return true;
             }
+
             D2D1_RECT_F bCancel = D2D1::RectF(bodyRc.right - 230.0f, bodyRc.bottom - 36.0f, bodyRc.right - 140.0f, bodyRc.bottom);
             if (PtInRectF(bCancel, x, y)) {
+                LoadAppSettings();
                 CloseModal();
                 return true;
             }

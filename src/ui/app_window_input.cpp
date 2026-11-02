@@ -510,8 +510,6 @@ void AppWindow::OnLButtonDown(float x, float y) {
             if (relX >= 0.0f) {
                 float barWidth = m_pixelsPerBeat * 4.0f;
                 double clickedTick = (relX / barWidth) * TICKS_PER_BAR_4_4;
-                int snapTicks = std::max(1, m_selectedGridTicks);
-                clickedTick = std::floor(clickedTick / snapTicks) * snapTicks;
                 SeekToTick(clickedTick);
                 m_dragMode = DragMode::RulerSeek;
                 SetCapture(m_hwnd);
@@ -610,6 +608,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
                             m_dragStartY = y;
                             m_dragCurrentX = x;
                             m_dragCurrentY = y;
+                            m_dragCardGrabOffsetX = std::clamp(x - cardRc.left, 0.0f, cardRc.right - cardRc.left);
                             m_isPaletteDragging = false;
                             SetCapture(m_hwnd);
                         }
@@ -927,8 +926,6 @@ void AppWindow::OnMouseMove(float x, float y) {
         if (relX >= 0.0f) {
             float barWidth = m_pixelsPerBeat * 4.0f;
             double clickedTick = (relX / barWidth) * TICKS_PER_BAR_4_4;
-            int snapTicks = std::max(1, m_selectedGridTicks);
-            clickedTick = std::floor(clickedTick / snapTicks) * snapTicks;
             SeekToTick(clickedTick);
         }
         return;
@@ -1053,8 +1050,9 @@ void AppWindow::OnMouseMove(float x, float y) {
         float viewWidth = m_width - centerX - rightW;
         if (viewWidth > 0.0f) {
             Part* pActive = m_partManager.GetActivePart();
-            size_t numBars = m_isMergedView ? m_partManager.GenerateMergedProgression().size() : (pActive ? pActive->bars.size() : 8);
-            float totalContentWidth = std::max<size_t>(numBars, 8) * (m_pixelsPerBeat * 4.0f);
+            size_t actualBars = m_isMergedView ? m_partManager.GenerateMergedProgression().size() : (pActive ? pActive->bars.size() : 0);
+            size_t numBars = std::max<size_t>(actualBars + 8, 32);
+            float totalContentWidth = numBars * (m_pixelsPerBeat * 4.0f);
             float maxScroll = std::max(0.0f, totalContentWidth - viewWidth);
             float ratio = std::clamp((x - centerX) / viewWidth, 0.0f, 1.0f);
             m_timelineScrollX = ratio * maxScroll;
@@ -1130,7 +1128,7 @@ void AppWindow::OnLButtonUp(float x, float y) {
                         sBar.chords[srcChord].rootName = "R";
                         sBar.chords[srcChord].degreeRoman = "R";
                         sBar.chords[srcChord].rawText = "_";
-                        InsertChordAtTimelineX(movedChord, x);
+                        InsertChordAtTimelineX(movedChord, x - m_dragCardGrabOffsetX);
                     }
                 }
             }

@@ -9,8 +9,10 @@
 #include <commctrl.h>
 #include <commdlg.h>
 #include <shlobj.h>
+#include <shobjidl.h>
 #include <shellapi.h>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
@@ -24,6 +26,7 @@ namespace clp {
 #define IDM_FILE_SAVEAS      1004
 #define IDM_FILE_EXPORT_MIDI 1005
 #define IDM_FILE_EXIT        1006
+#define IDM_FILE_MRU_BASE    1100 // 1100..1110 for MRU items
 
 #define IDM_EDIT_UNDO        1011
 #define IDM_EDIT_REDO        1012

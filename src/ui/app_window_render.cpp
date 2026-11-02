@@ -438,7 +438,7 @@ void AppWindow::RenderCenterPane(float x, float y, float width, float height) {
     Part* pActive = m_partManager.GetActivePart();
     std::vector<Bar> bars = m_isMergedView ? m_partManager.GenerateMergedProgression() : (pActive ? pActive->bars : std::vector<Bar>{});
     float barWidth = m_pixelsPerBeat * 4.0f;
-    size_t numBars = std::max<size_t>(bars.size(), 8);
+    size_t numBars = std::max<size_t>(bars.size() + 8, 32);
 
     for (size_t b = 0; b <= numBars; ++b) {
         float bx = x + b * barWidth - m_timelineScrollX;
@@ -580,7 +580,7 @@ void AppWindow::RenderTimelineCards(float x, float y, float width, float height)
     Part* pActive = m_partManager.GetActivePart();
     std::vector<Bar> bars = m_isMergedView ? m_partManager.GenerateMergedProgression() : (pActive ? pActive->bars : std::vector<Bar>{});
     float barWidth = m_pixelsPerBeat * 4.0f;
-    size_t numBars = std::max<size_t>(bars.size(), 8);
+    size_t numBars = std::max<size_t>(bars.size() + 8, 32);
     int gridDivisions = std::clamp(TICKS_PER_BAR_4_4 / std::max(120, m_selectedGridTicks), 1, 16);
 
     // 1. 背景グリッド線 (カードの下層に描画するため、コード文字の上に線が被らない)
@@ -710,7 +710,7 @@ void AppWindow::RenderPianoRoll(float x, float y, float width, float height) {
     }
 
     // 2. 垂直グリッド線 (ノートバーの背面に描画し、左端ガイド列 x+guideW より右側のみに制限)
-    size_t numBars = std::max<size_t>(bars.size(), 8);
+    size_t numBars = std::max<size_t>(bars.size() + 8, 32);
     int gridDivisions = std::clamp(TICKS_PER_BAR_4_4 / std::max(120, m_selectedGridTicks), 1, 16);
     for (size_t b = 0; b <= numBars; ++b) {
         float bx = x + b * barWidth - m_timelineScrollX;
@@ -938,8 +938,8 @@ void AppWindow::RenderTimelineScrollBar(float x, float y, float width, float hei
     m_pRenderTarget->DrawLine(D2D1::Point2F(x, y), D2D1::Point2F(x + width, y), m_pBrushBorder, 1.0f);
 
     Part* pActive = m_partManager.GetActivePart();
-    size_t numBars = m_isMergedView ? m_partManager.GenerateMergedProgression().size() : (pActive ? pActive->bars.size() : 8);
-    numBars = std::max<size_t>(numBars, 8);
+    size_t actualBars = m_isMergedView ? m_partManager.GenerateMergedProgression().size() : (pActive ? pActive->bars.size() : 0);
+    size_t numBars = std::max<size_t>(actualBars + 8, 32);
 
     float totalContentWidth = numBars * (m_pixelsPerBeat * 4.0f);
     float viewWidth = width;

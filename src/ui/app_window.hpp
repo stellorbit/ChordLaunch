@@ -37,6 +37,7 @@ enum class IconType {
 
 enum class ModalType {
     None = 0,
+    Dashboard,
     Settings,
     Templates,
     Help,
@@ -75,6 +76,7 @@ private:
 
     // モーダルダイアログ描画ルーチン
     void RenderModal(float width, float height);
+    void RenderDashboardModal(const D2D1_RECT_F& rc);
     void RenderSettingsModal(const D2D1_RECT_F& rc);
     void RenderTemplatesModal(const D2D1_RECT_F& rc);
     void RenderHelpModal(const D2D1_RECT_F& rc);
@@ -146,6 +148,11 @@ private:
     void InsertChordAtTimelinePosition(const ChordToken& chord, int targetBarIdx, int targetBeat);
     void SplitSelectedChord();
     void DuplicateSelectedChord();
+    void AddRecentFile(const std::wstring& path);
+    void LoadAppSettings();
+    void SaveAppSettings();
+    void OpenRecentFile(int index);
+    void ChooseDirectory(std::wstring& outDir, const wchar_t* title);
 
     // プルダウンメニュー表示・メニューバー言語更新
     void RebuildMainMenu();
@@ -292,6 +299,7 @@ private:
     ChordToken m_dragPaletteChord;
     int   m_dragInitialTicks = 0;
     int   m_dragInitialNextTicks = 0;
+    float m_dragCardGrabOffsetX = 0.0f; // カード左端からのクリック位置オフセット
 
     // 再生状態 (tick時間管理)
     bool   m_isPlaying = false;
@@ -345,10 +353,16 @@ private:
     std::wstring m_tmplEditDesc;
     int m_tmplEditFocusField = 0;
 
-    // プロジェクト保存・自動バックアップ状態
+    // プロジェクト保存・自動バックアップ・ダッシュボード設定
     std::wstring m_currentProjectPath;
     std::string m_projectTitle = "MyProgression";
     bool m_isDirty = false;
+    std::vector<std::wstring> m_recentFiles;
+    std::wstring m_projectDirectory;
+    std::wstring m_autoBackupDirectory;
+    bool m_autoBackupInProjectDir = true;
+    bool m_showDashboardOnStartup = true;
+    int m_dashboardSelectedRecentIndex = -1;
     std::wstring m_statusMessage;
     std::chrono::steady_clock::time_point m_statusMessageTime;
 

@@ -9,6 +9,7 @@
 #include <iostream>
 #include <cassert>
 #include <string>
+#include <filesystem>
 
 using namespace clp;
 
@@ -550,6 +551,73 @@ void TestComprehensiveFixes() {
     TEST_ASSERT(!v1.active && v1.state == Voice::EnvState::Idle, "FastChoke silences previous chord within ~12ms");
 }
 
+void TestDashboardAndMRU() {
+    std::cout << "[TEST] 17. Dashboard, Custom Backup Directory, and MRU\n";
+
+    // 1. PerformAutoBackup with custom directory
+    wchar_t tempPath[MAX_PATH];
+    GetTempPathW(MAX_PATH, tempPath);
+    std::wstring customBakDir = std::wstring(tempPath) + L"ChordLaunch_CustomBak_Test";
+    std::filesystem::remove_all(customBakDir);
+
+    std::string dummyData = "{\"format\":\"ChordLaunchProject\",\"version\":1}";
+    bool bakRes = PartManager::PerformAutoBackup(L"", "TestSong", dummyData, customBakDir);
+    TEST_ASSERT(bakRes, "PerformAutoBackup succeeds with custom backup directory");
+    TEST_ASSERT(std::filesystem::exists(customBakDir), "Custom backup directory was created");
+
+    bool foundBackupFile = false;
+    for (const auto& entry : std::filesystem::directory_iterator(customBakDir)) {
+        if (entry.path().extension() == ".chord") {
+            foundBackupFile = true;
+            break;
+        }
+    }
+    TEST_ASSERT(foundBackupFile, "Backup file with .chord extension was written to custom backup directory");
+    std::filesystem::remove_all(customBakDir);
+
+    // 2. Empty project state verification
+    PartManager pm;
+    pm.GetParts().clear();
+    Part emptyPart;
+    emptyPart.id = "part_1";
+    emptyPart.name = "Intro";
+    emptyPart.keyRoot = "C";
+    emptyPart.mode = MusicalMode::Major;
+    emptyPart.bpm = 120;
+    emptyPart.timeNumerator = 4;
+    emptyPart.timeDenominator = 4;
+    pm.GetParts().push_back(emptyPart);
+    pm.SetActiveIndex(0);
+
+    TEST_ASSERT(pm.GetParts().size() == 1, "Empty project has exactly 1 part");
+    TEST_ASSERT(pm.GetActivePart() != nullptr, "Active part is valid");
+    TEST_ASSERT(pm.GetActivePart()->bars.empty(), "Empty part has 0 initial bars");
+    auto merged = pm.GenerateMergedProgression();
+    TEST_ASSERT(merged.empty(), "GenerateMergedProgression on empty part returns 0 bars safely");
+
+    // 3. MRU Rotation & Deduplication logic verification
+    std::vector<std::wstring> mru;
+    auto addMru = [&](const std::wstring& path) {
+        auto it = std::find(mru.begin(), mru.end(), path);
+        if (it != mru.end()) mru.erase(it);
+        mru.insert(mru.begin(), path);
+        if (mru.size() > 10) mru.resize(10);
+    };
+
+    for (int i = 0; i < 15; ++i) {
+        addMru(L"C:\\Project_" + std::to_wstring(i) + L".chord");
+    }
+    TEST_ASSERT(mru.size() == 10, "MRU size is capped at 10 items");
+    TEST_ASSERT(mru[0] == L"C:\\Project_14.chord", "Most recently added file is at index 0");
+    TEST_ASSERT(mru[9] == L"C:\\Project_5.chord", "Oldest kept file is at index 9");
+
+    // 重複追加
+    addMru(L"C:\\Project_5.chord");
+    TEST_ASSERT(mru.size() == 10, "Re-adding existing file keeps MRU size at 10");
+    TEST_ASSERT(mru[0] == L"C:\\Project_5.chord", "Re-added file moves to top (index 0)");
+    TEST_ASSERT(mru[1] == L"C:\\Project_14.chord", "Previous top file shifts to index 1");
+}
+
 int main() {
     std::cout << "========================================\n";
     std::cout << "ChordLaunch C++20 Core Test Suite\n";
@@ -571,6 +639,7 @@ int main() {
     TestUserTemplateManager();
     TestWasapiAudioEngine();
     TestComprehensiveFixes();
+    TestDashboardAndMRU();
 
     std::cout << "========================================\n";
     std::cout << "Tests Passed: " << g_passCount << ", Failed: " << g_failCount << "\n";

@@ -207,6 +207,20 @@ void AppWindow::RebuildMainMenu() {
     HMENU hFileMenu = CreatePopupMenu();
     AppendMenuW(hFileMenu, MF_STRING, IDM_FILE_NEW, TR(L"新規(&N)\tCtrl+N", L"New(&N)\tCtrl+N"));
     AppendMenuW(hFileMenu, MF_STRING, IDM_FILE_OPEN, TR(L"開く(&O)...\tCtrl+O", L"Open(&O)...\tCtrl+O"));
+
+    // 最近使ったファイル (MRU) サブメニュー
+    HMENU hRecentMenu = CreatePopupMenu();
+    if (m_recentFiles.empty()) {
+        AppendMenuW(hRecentMenu, MF_STRING | MF_GRAYED, 0, TR(L"(履歴なし)", L"(No Recent Files)"));
+    } else {
+        for (size_t ri = 0; ri < std::min<size_t>(m_recentFiles.size(), 10); ++ri) {
+            std::filesystem::path fp(m_recentFiles[ri]);
+            std::wstring itemText = std::to_wstring(ri + 1) + L": " + fp.filename().wstring();
+            AppendMenuW(hRecentMenu, MF_STRING, IDM_FILE_MRU_BASE + ri, itemText.c_str());
+        }
+    }
+    AppendMenuW(hFileMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hRecentMenu), TR(L"最近使ったファイル(&R)", L"Recent Files(&R)"));
+
     AppendMenuW(hFileMenu, MF_STRING, IDM_FILE_SAVE, TR(L"保存(&S)\tCtrl+S", L"Save(&S)\tCtrl+S"));
     AppendMenuW(hFileMenu, MF_STRING, IDM_FILE_SAVEAS, TR(L"名前を付けて保存(&A)...", L"Save As(&A)..."));
     AppendMenuW(hFileMenu, MF_SEPARATOR, 0, nullptr);
@@ -304,9 +318,30 @@ bool AppWindow::Create(HINSTANCE hInstance, int nCmdShow) {
     SendMessageW(m_hwndEdit, WM_SETFONT, reinterpret_cast<WPARAM>(m_hFontEdit), TRUE);
 
     m_synth.Initialize();
-    m_partManager.ResetToDefaultSong();
+    LoadAppSettings();
+
+    // 起動時は Empty でスタート
+    m_partManager.GetParts().clear();
+    Part emptyPart;
+    emptyPart.id = "part_1";
+    emptyPart.name = "Intro";
+    emptyPart.keyRoot = "C";
+    emptyPart.mode = MusicalMode::Major;
+    emptyPart.bpm = 120;
+    emptyPart.timeNumerator = 4;
+    emptyPart.timeDenominator = 4;
+    m_partManager.GetParts().push_back(emptyPart);
+    m_partManager.SetActiveIndex(0);
+    m_projectTitle = "MyProgression";
+    m_currentProjectPath.clear();
+    m_isDirty = false;
+
     SyncTimelineToText();
     UpdateWindowTitle();
+
+    if (m_showDashboardOnStartup) {
+        m_activeModal = ModalType::Dashboard;
+    }
 
     SetTimer(m_hwnd, 1, 16, nullptr); // 60FPS
     SetTimer(m_hwnd, TIMER_ID_AUTOBACKUP, 60000, nullptr); // 1分間隔自動バックアップ
@@ -726,6 +761,12 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             switch (wmId) {
                 case IDM_FILE_NEW: DoFileNew(); break;
                 case IDM_FILE_OPEN: DoFileOpen(); break;
+                default:
+                    if (wmId >= IDM_FILE_MRU_BASE && wmId < IDM_FILE_MRU_BASE + 10) {
+                        OpenRecentFile(wmId - IDM_FILE_MRU_BASE);
+                        break;
+                    }
+                    break;
                 case IDM_FILE_SAVE: DoFileSave(); break;
                 case IDM_FILE_SAVEAS: DoFileSaveAs(); break;
                 case IDM_FILE_EXPORT_MIDI: DoMidiSaveAs(); break;
