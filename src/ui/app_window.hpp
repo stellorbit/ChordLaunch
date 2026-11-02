@@ -146,11 +146,13 @@ private:
     void OnChar(WCHAR ch);
     void OnSize(UINT width, UINT height);
     bool HitTestPaletteCard(float x, float y, ChordToken& outChord);
-    void InsertChordAtTimelineX(const ChordToken& chord, float x, bool pushUndo = true);
+    void InsertChordAtTimelineX(const ChordToken& chord, float x, bool pushUndo = true, int snapTicks = 0);
     void InsertChordAtTimelinePosition(const ChordToken& chord, int targetBarIdx, int targetBeat);
     void InsertChordAtTimelineTick(const ChordToken& chord, int targetBarIdx, int targetTickInBar, bool pushUndo = true);
     void SplitSelectedChord();
     void DuplicateSelectedChord();
+    void ShiftSelectedChordOctave(int delta);
+    void ResetSelectedChordOctave();
     void AddRecentFile(const std::wstring& path);
     void LoadAppSettings();
     void SaveAppSettings();
@@ -168,6 +170,7 @@ private:
     void ShowVoicingMenu(float screenX, float screenY);
     void ShowBassMenu(float screenX, float screenY);
     void ShowGridMenu(float screenX, float screenY);
+    void ShowInputGridMenu(float screenX, float screenY);
 
     const wchar_t* TR(const wchar_t* ja, const wchar_t* en) const {
         return (m_settingLanguage == 1) ? en : ja;
@@ -303,12 +306,11 @@ private:
     float m_dragCurrentY = 0.0f;
     bool  m_isPaletteDragging = false;
     ChordToken m_dragPaletteChord;
-    int   m_dragInitialTicks = 0;
-    int   m_dragInitialNextTicks = 0;
-    int   m_dragInitialPrevTicks = 0;
     int   m_dragChordStartTick = 0;
-    int   m_dragLeftLimitTick = 0;
-    std::vector<ChordToken> m_dragInitialBarChords;
+    int   m_dragChordEndTick = 0;
+    int   m_dragChordStartGlobal = 0;
+    int   m_dragChordEndGlobal = 0;
+    std::vector<Bar> m_dragBaseBars;     // リサイズ開始時点のパートスナップショット
     float m_dragCardGrabOffsetX = 0.0f; // カード左端からのクリック位置オフセット
 
     // 再生状態 (tick時間管理)
@@ -323,7 +325,8 @@ private:
     VoicingStyle m_selectedVoicing = VoicingStyle::RootPosition;
     int m_baseOctave = 4;
     int m_bassOctaveMode = 0;
-    int m_selectedGridTicks = TICKS_PER_BEAT;
+    int m_inputGridTicks = TICKS_PER_BEAT;      // コード入力時の音価グリッド
+    int m_timelineGridTicks = TICKS_PER_BEAT;   // タイムラインのスナップ/表示グリッド
 
     // 右ペインのアコーディオン開閉状態
     bool m_accSuggestionsOpen = true;

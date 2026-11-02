@@ -35,6 +35,7 @@ endif()
 add_library(clp_core STATIC
     src/core/music_engine.cpp
     src/core/progression_parser.cpp
+    src/core/timeline_edit.cpp
     src/core/part_manager.cpp
     src/core/midi_builder.cpp
     src/core/i18n.cpp

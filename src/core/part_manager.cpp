@@ -1,6 +1,7 @@
 #include "part_manager.hpp"
 #include "music_engine.hpp"
 #include "progression_parser.hpp"
+#include "timeline_edit.hpp"
 #include <fstream>
 #include <sstream>
 #include <filesystem>
@@ -201,8 +202,10 @@ std::string PartManager::SerializeProject(
     std::string_view projectTitle,
     VoicingStyle voicing,
     int bassMode,
-    int gridTicks
+    int gridTicks,
+    int inputGridTicks
 ) const {
+    if (inputGridTicks <= 0) inputGridTicks = gridTicks;
     std::ostringstream ss;
     ss << "{\n";
     ss << "  \"format\": \"ChordLaunchProject\",\n";
@@ -212,6 +215,7 @@ std::string PartManager::SerializeProject(
     ss << "  \"voicing\": " << static_cast<int>(voicing) << ",\n";
     ss << "  \"bassMode\": " << bassMode << ",\n";
     ss << "  \"gridTicks\": " << gridTicks << ",\n";
+    ss << "  \"inputGridTicks\": " << inputGridTicks << ",\n";
     ss << "  \"parts\": [\n";
 
     for (size_t pi = 0; pi < m_parts.size(); ++pi) {
@@ -237,9 +241,12 @@ std::string PartManager::SerializeProject(
                 ss << "            {\n";
                 ss << "              \"rawText\": \"" << EscapeJsonString(c.rawText) << "\",\n";
                 ss << "              \"rootName\": \"" << EscapeJsonString(c.rootName) << "\",\n";
+                ss << "              \"quality\": " << static_cast<int>(c.quality) << ",\n";
+                ss << "              \"qualitySuffix\": \"" << EscapeJsonString(c.qualitySuffix) << "\",\n";
                 ss << "              \"durationTicks\": " << c.durationTicks << ",\n";
                 ss << "              \"durationBeats\": " << c.durationBeats << ",\n";
                 ss << "              \"isRest\": " << (c.isRest ? "true" : "false") << ",\n";
+                ss << "              \"octaveOffset\": " << c.octaveOffset << ",\n";
                 ss << "              \"degreeRoman\": \"" << EscapeJsonString(c.degreeRoman) << "\"\n";
                 ss << "            }" << (ci + 1 < bar.chords.size() ? "," : "") << "\n";
             }
@@ -301,12 +308,155 @@ static int FindJsonInt(const std::string& src, std::string_view key, int default
     return defaultVal;
 }
 
+// 指定位置の '[' から、同じ深さの要素オブジェクト（{...}）を列挙する
+static std::vector<std::string> ExtractArrayObjects(const std::string& src, size_t arrayOpenPos) {
+    std::vector<std::string> result;
+    if (arrayOpenPos >= src.size() || src[arrayOpenPos] != '[') return result;
+
+    size_t pos = arrayOpenPos + 1;
+    int depth = 0;
+    bool inQuotes = false;
+    size_t objStart = std::string::npos;
+    while (pos < src.size()) {
+        char c = src[pos];
+        if (inQuotes) {
+            if (c == '\\') { pos += 2; continue; }
+            if (c == '"') inQuotes = false;
+            ++pos;
+            continue;
+        }
+        if (c == '"') {
+            inQuotes = true;
+        } else if (c == '{') {
+            if (depth == 0) objStart = pos;
+            ++depth;
+        } else if (c == '}') {
+            --depth;
+            if (depth == 0 && objStart != std::string::npos) {
+                result.push_back(src.substr(objStart, pos - objStart + 1));
+                objStart = std::string::npos;
+            }
+        } else if (c == '[') {
+            ++depth;
+        } else if (c == ']') {
+            if (depth == 0) break;
+            --depth;
+        }
+        ++pos;
+    }
+    return result;
+}
+
+static bool LooksLikeJsonTrue(const std::string& src, const char* key) {
+    std::string needle = std::string("\"") + key + "\":";
+    size_t pos = src.find(needle);
+    if (pos == std::string::npos) return false;
+    pos += needle.size();
+    while (pos < src.size() && (src[pos] == ' ' || src[pos] == '\t')) ++pos;
+    return src.compare(pos, 4, "true") == 0;
+}
+
+// 保存された chords 配列の1要素から ChordToken を復元する。
+// rawText を再パースして quality / rootPitch / テンション等を復元し、
+// 音価は durationTicks（sub-beat シンコペーション）を優先する。
+static ChordToken ParseChordJson(const std::string& obj, const Part& part) {
+    std::string raw = FindJsonString(obj, "rawText");
+    std::string root = FindJsonString(obj, "rootName");
+    std::string suffix = FindJsonString(obj, "qualitySuffix");
+    std::string degree = FindJsonString(obj, "degreeRoman");
+    int quality = FindJsonInt(obj, "quality", -1);
+    int ticks = FindJsonInt(obj, "durationTicks", 0);
+    int beats = FindJsonInt(obj, "durationBeats", 1);
+    int octaveOffset = FindJsonInt(obj, "octaveOffset", 0);
+    bool isRest = LooksLikeJsonTrue(obj, "isRest");
+
+    ChordToken tok;
+    if (!isRest && !raw.empty()) {
+        auto parsed = ProgressionParser::Parse("| " + raw + " |", part.keyRoot, part.mode,
+                                               part.timeNumerator, part.timeDenominator);
+        if (!parsed.empty()) {
+            for (const auto& c : parsed[0].chords) {
+                if (!c.isRest) {
+                    tok = c;
+                    break;
+                }
+            }
+        }
+        if (tok.rawText.empty()) tok.rawText = raw;
+        if (tok.rootName.empty()) tok.rootName = root;
+    } else if (!isRest) {
+        tok.rawText = raw;
+        tok.rootName = root;
+        tok.qualitySuffix = suffix;
+        if (quality >= 0) tok.quality = static_cast<ChordQuality>(quality);
+    }
+    if (tok.qualitySuffix.empty() && !suffix.empty()) tok.qualitySuffix = suffix;
+    if (tok.rootName.empty() && !root.empty()) tok.rootName = root;
+
+    if (isRest) {
+        tok = ChordToken{};
+        tok.isRest = true;
+        tok.quality = ChordQuality::Rest;
+        tok.rootName = "R";
+        tok.degreeRoman = "R";
+        tok.rawText = raw.empty() ? "_" : raw;
+    }
+
+    if (!degree.empty()) tok.degreeRoman = degree;
+    if (!tok.isRest) tok.octaveOffset = std::clamp(octaveOffset, -3, 3);
+    if (ticks <= 0) ticks = std::max(1, beats) * TICKS_PER_BEAT;
+    tok.SetTicks(ticks);
+    return tok;
+}
+
+// 保存された bars 配列を復元する。bars が無い（旧形式）場合は false。
+static bool ParseBarsJson(const std::string& partBlock, const Part& part, std::vector<Bar>& outBars) {
+    size_t barsKey = partBlock.find("\"bars\"");
+    if (barsKey == std::string::npos) return false;
+    size_t barsArr = partBlock.find('[', barsKey);
+    if (barsArr == std::string::npos) return false;
+
+    std::vector<Bar> bars;
+    for (const auto& barObj : ExtractArrayObjects(partBlock, barsArr)) {
+        size_t chordsKey = barObj.find("\"chords\"");
+        if (chordsKey == std::string::npos) continue;
+        size_t chordsArr = barObj.find('[', chordsKey);
+        if (chordsArr == std::string::npos) continue;
+
+        Bar bar;
+        bar.timeNumerator = part.timeNumerator;
+        bar.timeDenominator = part.timeDenominator;
+        bar.barNumber = FindJsonInt(barObj, "barNumber", static_cast<int>(bars.size()) + 1);
+
+        for (const auto& chordObj : ExtractArrayObjects(barObj, chordsArr)) {
+            bar.chords.push_back(ParseChordJson(chordObj, part));
+        }
+        if (bar.chords.empty()) {
+            ChordToken fullRest;
+            fullRest.isRest = true;
+            fullRest.quality = ChordQuality::Rest;
+            fullRest.rootName = "R";
+            fullRest.degreeRoman = "R";
+            fullRest.rawText = "_";
+            fullRest.SetTicks(bar.GetTotalTicks());
+            bar.chords.push_back(fullRest);
+        }
+        TimelineEdit::NormalizeBar(bar, nullptr, true);
+        bars.push_back(std::move(bar));
+    }
+
+    if (bars.empty()) return false;
+    outBars = std::move(bars);
+    return true;
+}
+
 bool PartManager::DeserializeProject(
     const std::string& data,
     std::string& outTitle,
     VoicingStyle& outVoicing,
     int& outBassMode,
-    int& outGridTicks
+    int& outGridTicks,
+    int* outInputGridTicks
 ) {
     if (data.empty()) return false;
     if (data.find("ChordLaunchProject") == std::string::npos && data.find("ChordLaunchpadProject") == std::string::npos && data.find("\"parts\"") == std::string::npos) {
@@ -319,6 +469,9 @@ bool PartManager::DeserializeProject(
     outVoicing = static_cast<VoicingStyle>(FindJsonInt(data, "voicing", 0));
     outBassMode = FindJsonInt(data, "bassMode", 0);
     outGridTicks = FindJsonInt(data, "gridTicks", TICKS_PER_BEAT);
+    if (outInputGridTicks) {
+        *outInputGridTicks = FindJsonInt(data, "inputGridTicks", outGridTicks);
+    }
     int activeIdx = FindJsonInt(data, "activePartIndex", 0);
 
     size_t partsPos = data.find("\"parts\":");
@@ -374,6 +527,16 @@ bool PartManager::DeserializeProject(
             p.bars = ProgressionParser::Parse(p.rawProgressionText, p.keyRoot, p.mode, p.timeNumerator, p.timeDenominator);
         }
 
+        // bars 配列が保存されていれば、テキスト再パースより優先する。
+        // テキストは拍単位に丸められるため、sub-beat のシンコペーションは bars にしか残らない。
+        std::vector<Bar> savedBars;
+        if (ParseBarsJson(partBlock, p, savedBars)) {
+            p.bars = std::move(savedBars);
+            if (p.rawProgressionText.empty()) {
+                p.rawProgressionText = ProgressionParser::Format(p.bars);
+            }
+        }
+
         newParts.push_back(std::move(p));
         curPos = objEnd;
         size_t nextComma = data.find(',', curPos);
@@ -394,10 +557,11 @@ bool PartManager::SaveToFile(
     std::string_view projectTitle,
     VoicingStyle voicing,
     int bassMode,
-    int gridTicks
+    int gridTicks,
+    int inputGridTicks
 ) const {
     if (filePath.empty()) return false;
-    std::string json = SerializeProject(projectTitle, voicing, bassMode, gridTicks);
+    std::string json = SerializeProject(projectTitle, voicing, bassMode, gridTicks, inputGridTicks);
 
     try {
         std::filesystem::path p(filePath);
@@ -419,7 +583,8 @@ bool PartManager::LoadFromFile(
     std::string& outTitle,
     VoicingStyle& outVoicing,
     int& outBassMode,
-    int& outGridTicks
+    int& outGridTicks,
+    int* outInputGridTicks
 ) {
     if (filePath.empty()) return false;
     try {
@@ -432,7 +597,7 @@ bool PartManager::LoadFromFile(
         std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
         ifs.close();
 
-        return DeserializeProject(content, outTitle, outVoicing, outBassMode, outGridTicks);
+        return DeserializeProject(content, outTitle, outVoicing, outBassMode, outGridTicks, outInputGridTicks);
     } catch (...) {
         return false;
     }

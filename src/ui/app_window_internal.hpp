@@ -3,6 +3,7 @@
 #include "theme.hpp"
 #include "i18n.hpp"
 #include "progression_parser.hpp"
+#include "timeline_edit.hpp"
 #include "midi_builder.hpp"
 #include "ole_dnd.hpp"
 #include <windowsx.h>
@@ -36,6 +37,9 @@ namespace clp {
 #define IDM_EDIT_SELECTALL   1015
 #define IDM_EDIT_CLEARALL    1016
 #define IDM_EDIT_SPLIT       1017
+#define IDM_EDIT_OCTAVE_UP   1018
+#define IDM_EDIT_OCTAVE_DOWN 1019
+#define IDM_EDIT_OCTAVE_RESET 1020
 
 #define IDM_VIEW_PIANOROLL   1021
 #define IDM_VIEW_RIGHTPANE   1022
@@ -58,6 +62,7 @@ namespace clp {
 #define IDM_VOICING_BASE     3200
 #define IDM_BASS_BASE        3300
 #define IDM_GRID_BASE        3400
+#define IDM_INPUT_GRID_BASE  3420
 #define IDM_PRESET_BASE      3500
 #define IDM_CTX_PART_DUP     3601
 #define IDM_CTX_PART_DEL     3602
@@ -73,6 +78,9 @@ namespace clp {
 #define IDM_CTX_CARD_BASS_5TH  3712
 #define IDM_CTX_CARD_BASS_7TH  3713
 #define IDM_CTX_CARD_BASS_BASE 3720
+#define IDM_CTX_CARD_OCT_UP    3730
+#define IDM_CTX_CARD_OCT_DOWN  3731
+#define IDM_CTX_CARD_OCT_RESET 3732
 
 #define IDC_TEXT_EDIT        2001
 #define TIMER_ID_AUTOBACKUP  2050

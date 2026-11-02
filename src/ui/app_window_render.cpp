@@ -45,17 +45,28 @@ void AppWindow::OnRender() {
             if (relX < 0.0f) relX = 0.0f;
 
             Part* pActive = m_partManager.GetActivePart();
-            int barNumerator = (pActive && pActive->timeNumerator > 0) ? pActive->timeNumerator : 4;
-            int barTotalTicks = barNumerator * TICKS_PER_BEAT;
-
             int targetBarIdx = (barWidth > 0.0f) ? static_cast<int>(relX / barWidth) : 0;
             float barOffsetRatio = (barWidth > 0.0f) ? (std::fmod(relX, barWidth) / barWidth) : 0.0f;
 
-            int gridTicks = std::max(1, m_selectedGridTicks);
+            // ドロップ先の小節が実在する場合はその拍子を優先（挿入処理と完全一致させる）
+            int barTotalTicks = -1;
+            if (pActive && targetBarIdx >= 0 && targetBarIdx < static_cast<int>(pActive->bars.size())) {
+                barTotalTicks = pActive->bars[targetBarIdx].GetTotalTicks();
+            }
+            if (barTotalTicks <= 0) {
+                int barNumerator = (pActive && pActive->timeNumerator > 0) ? pActive->timeNumerator : 4;
+                barTotalTicks = barNumerator * TICKS_PER_BEAT;
+            }
+
+            int snapGrid = (m_dragMode == DragMode::PaletteCardDrag) ? m_inputGridTicks : m_timelineGridTicks;
+            int gridTicks = std::max(1, snapGrid);
             float rawTick = barOffsetRatio * static_cast<float>(barTotalTicks);
             int snappedTick = static_cast<int>(std::round(rawTick / static_cast<float>(gridTicks))) * gridTicks;
-            int chordTicks = m_dragPaletteChord.durationTicks > 0 ? m_dragPaletteChord.durationTicks : (m_dragPaletteChord.durationBeats > 0 ? m_dragPaletteChord.durationBeats * TICKS_PER_BEAT : gridTicks);
-            snappedTick = std::clamp(snappedTick, 0, std::max(0, barTotalTicks - chordTicks));
+            int chordTicks = m_dragPaletteChord.durationTicks > 0 ? m_dragPaletteChord.durationTicks : (m_dragPaletteChord.durationBeats > 0 ? m_dragPaletteChord.durationBeats * TICKS_PER_BEAT : std::max(1, m_inputGridTicks));
+            chordTicks = std::clamp(chordTicks, 1, barTotalTicks);
+            int maxStart = std::max(0, barTotalTicks - chordTicks);
+            int covered = (pActive) ? TimelineEdit::IncomingCoverUntil(pActive->bars, targetBarIdx) : 0;
+            snappedTick = std::clamp(snappedTick, std::min(covered, maxStart), maxStart);
 
             float barLeftX = centerX + targetBarIdx * barWidth - m_timelineScrollX;
             float slotX = barLeftX + (static_cast<float>(snappedTick) / static_cast<float>(barTotalTicks)) * barWidth;
@@ -145,6 +156,10 @@ void AppWindow::RenderToolbar(float x, float y, float width, float height) {
     D2D1_RECT_F rcLoop = D2D1::RectF(curX, r1Y, curX + 66.0f, r1Y + r1H);
     DrawButton(rcLoop, TR(L"ループ", L"Loop"), IconType::Loop, false, false, m_isLooping, Theme::AccentAction);
     curX += 74.0f;
+
+    // 全体マージ (新規パート生成) — 上段の再生系の並びに配置
+    D2D1_RECT_F rcMerge = D2D1::RectF(curX + 6.0f, r1Y, curX + 116.0f, r1Y + r1H);
+    DrawButton(rcMerge, TR(L"全体マージ", L"Merge All"), IconType::None, false, false, true, Theme::AccentAction);
 
     // 小節 / 拍カウンター (BAR 1 : 1) - ツールバー中央に配置して視認性を向上
     float counterW = 124.0f;
@@ -277,23 +292,29 @@ void AppWindow::RenderToolbar(float x, float y, float width, float height) {
     DrawButton(rcBass, bassStr, IconType::None);
     curX += 119.0f;
 
-    // 8. グリッド (プルダウンメニュー)
+    // 8. 入力グリッド (追加するコードの音価)
+    std::wstring inGridStr = TR(L"入力: 1拍 ▼", L"In: 1 Beat ▼");
+    if (m_inputGridTicks == TICKS_PER_BAR_4_4) inGridStr = TR(L"入力: 1小節 ▼", L"In: 1 Bar ▼");
+    else if (m_inputGridTicks == TICKS_PER_BEAT * 2) inGridStr = TR(L"入力: 2拍 ▼", L"In: 2 Beats ▼");
+    else if (m_inputGridTicks == TICKS_PER_BEAT / 2) inGridStr = TR(L"入力: 1/2拍 ▼", L"In: 1/2 Beat ▼");
+    else if (m_inputGridTicks == TICKS_PER_BEAT / 4) inGridStr = TR(L"入力: 1/4拍 ▼", L"In: 1/4 Beat ▼");
+
+    D2D1_RECT_F rcInputGrid = D2D1::RectF(curX, r2Y, curX + 100.0f, r2Y + r2H);
+    DrawButton(rcInputGrid, inGridStr, IconType::None);
+    curX += 104.0f;
+
+    // 9. タイムライングリッド (スナップ/表示)
     std::wstring gridStr = TR(L"グリッド: 1拍 ▼", L"Grid: 1 Beat ▼");
-    if (m_selectedGridTicks == TICKS_PER_BAR_4_4) gridStr = TR(L"グリッド: 1小節 ▼", L"Grid: 1 Bar ▼");
-    else if (m_selectedGridTicks == TICKS_PER_BEAT * 2) gridStr = TR(L"グリッド: 2拍 ▼", L"Grid: 2 Beats ▼");
-    else if (m_selectedGridTicks == TICKS_PER_BEAT / 2) gridStr = TR(L"グリッド: 1/2拍 ▼", L"Grid: 1/2 Beat ▼");
-    else if (m_selectedGridTicks == TICKS_PER_BEAT / 4) gridStr = TR(L"グリッド: 1/4拍 ▼", L"Grid: 1/4 Beat ▼");
+    if (m_timelineGridTicks == TICKS_PER_BAR_4_4) gridStr = TR(L"グリッド: 1小節 ▼", L"Grid: 1 Bar ▼");
+    else if (m_timelineGridTicks == TICKS_PER_BEAT * 2) gridStr = TR(L"グリッド: 2拍 ▼", L"Grid: 2 Beats ▼");
+    else if (m_timelineGridTicks == TICKS_PER_BEAT / 2) gridStr = TR(L"グリッド: 1/2拍 ▼", L"Grid: 1/2 Beat ▼");
+    else if (m_timelineGridTicks == TICKS_PER_BEAT / 4) gridStr = TR(L"グリッド: 1/4拍 ▼", L"Grid: 1/4 Beat ▼");
 
     D2D1_RECT_F rcGrid = D2D1::RectF(curX, r2Y, curX + 110.0f, r2Y + r2H);
     DrawButton(rcGrid, gridStr, IconType::None);
-    curX += 116.0f;
+    curX += 114.0f;
 
     m_pRenderTarget->DrawLine(D2D1::Point2F(curX, r2Y + 2.0f), D2D1::Point2F(curX, r2Y + r2H - 2.0f), m_pBrushBorderLight, 1.0f);
-    curX += 8.0f;
-
-    // 9. 全体マージ (新規パート生成ボタン)
-    D2D1_RECT_F rcMerge = D2D1::RectF(curX, r2Y, curX + 110.0f, r2Y + r2H);
-    DrawButton(rcMerge, TR(L"全体マージ", L"Merge All"), IconType::None, false, false, true, Theme::AccentAction);
 }
 
 // ---------------------------------------------------------------------------
@@ -631,7 +652,7 @@ void AppWindow::RenderTimelineCards(float x, float y, float width, float height)
     std::vector<Bar> bars = m_isMergedView ? m_partManager.GenerateMergedProgression() : (pActive ? pActive->bars : std::vector<Bar>{});
     float barWidth = m_pixelsPerBeat * 4.0f;
     size_t numBars = std::max<size_t>(bars.size() + 16, 64);
-    int gridDivisions = std::clamp(TICKS_PER_BAR_4_4 / std::max(120, m_selectedGridTicks), 1, 16);
+    int gridDivisions = std::clamp(TICKS_PER_BAR_4_4 / std::max(120, m_timelineGridTicks), 1, 16);
 
     // 1. 背景グリッド線 (カードの下層に描画するため、コード文字の上に線が被らない)
     for (size_t b = 0; b <= numBars; ++b) {
@@ -693,7 +714,14 @@ void AppWindow::RenderTimelineCards(float x, float y, float width, float height)
             std::wstring cName = ToWString(chord.rootName + chord.qualitySuffix);
             if (!chord.bassName.empty()) cName += L"/" + ToWString(chord.bassName);
 
-            DrawCard(cardRc, cName, ToWString(chord.degreeRoman), false, isSel, false, true, false);
+            std::wstring degree = ToWString(chord.degreeRoman);
+            if (chord.octaveOffset != 0) {
+                degree += (chord.octaveOffset > 0) ? L" +" : L" ";
+                degree += std::to_wstring(chord.octaveOffset);
+                degree += L"oct";
+            }
+
+            DrawCard(cardRc, cName, degree, false, isSel, false, true, false);
         }
     }
 }
@@ -761,7 +789,7 @@ void AppWindow::RenderPianoRoll(float x, float y, float width, float height) {
 
     // 2. 垂直グリッド線 (ノートバーの背面に描画し、左端ガイド列 x+guideW より右側のみに制限)
     size_t numBars = std::max<size_t>(bars.size() + 16, 64);
-    int gridDivisions = std::clamp(TICKS_PER_BAR_4_4 / std::max(120, m_selectedGridTicks), 1, 16);
+    int gridDivisions = std::clamp(TICKS_PER_BAR_4_4 / std::max(120, m_timelineGridTicks), 1, 16);
     for (size_t b = 0; b <= numBars; ++b) {
         float bx = x + b * barWidth - m_timelineScrollX;
         if (bx < x - barWidth || bx > x + width) continue;

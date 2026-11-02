@@ -108,177 +108,32 @@ void AppWindow::InsertChordAtTimelineTick(const ChordToken& chord, int targetBar
         PushUndo();
     }
     m_isMergedView = false;
-    auto& targetBar = pActive->bars[targetBarIdx];
-    int barNumerator = targetBar.timeNumerator > 0 ? targetBar.timeNumerator : 4;
-    int barTotalTicks = barNumerator * TICKS_PER_BEAT;
+
+    Bar& targetBar = pActive->bars[targetBarIdx];
+    int barTicks = targetBar.GetTotalTicks();
+    if (barTicks <= 0) barTicks = TICKS_PER_BAR_4_4;
 
     int chordTicks = chord.durationTicks > 0 ? chord.durationTicks : (chord.durationBeats > 0 ? chord.durationBeats * TICKS_PER_BEAT : TICKS_PER_BEAT);
-    chordTicks = std::clamp(chordTicks, 1, barTotalTicks);
+    chordTicks = std::clamp(chordTicks, 1, barTicks);
 
-    // 小節末尾に収まるようスナップ
-    targetTickInBar = std::clamp(targetTickInBar, 0, std::max(0, barTotalTicks - chordTicks));
+    // 前小節から伸びてくる跨ぎカードに覆われた区間へは配置しない
+    int maxStart = std::max(0, barTicks - chordTicks);
+    int covered = TimelineEdit::IncomingCoverUntil(pActive->bars, targetBarIdx);
+    int minStart = std::min(covered, maxStart);
+    int newStart = std::clamp(targetTickInBar, minStart, maxStart);
 
-    struct PlacedTickItem {
-        int startTick = 0;
-        int durationTicks = TICKS_PER_BEAT;
-        ChordToken chord;
-    };
-    std::vector<PlacedTickItem> placed;
-    int curTick = 0;
-    for (const auto& existing : targetBar.chords) {
-        int eTicks = existing.durationTicks > 0 ? existing.durationTicks : (existing.durationBeats * TICKS_PER_BEAT);
-        if (!existing.isRest) {
-            placed.push_back(PlacedTickItem{curTick, eTicks, existing});
-        }
-        curTick += eTicks;
-    }
+    ChordToken placed = chord;
+    placed.SetTicks(chordTicks);
 
-    int newStart = targetTickInBar;
-    int newEnd = targetTickInBar + chordTicks;
-
-    bool hasCollision = false;
-    for (const auto& pt : placed) {
-        int ptStart = pt.startTick;
-        int ptEnd = pt.startTick + pt.durationTicks;
-        if (std::max(ptStart, newStart) < std::min(ptEnd, newEnd)) {
-            hasCollision = true;
-            break;
-        }
-    }
-
-    std::vector<PlacedTickItem> resolved;
-    std::vector<PlacedTickItem> overflowItems;
-
-    if (!hasCollision) {
-        resolved = placed;
-        if (!chord.isRest) {
-            PlacedTickItem newPt;
-            newPt.startTick = newStart;
-            newPt.durationTicks = chordTicks;
-            newPt.chord = chord;
-            newPt.chord.SetTicks(chordTicks);
-            resolved.push_back(newPt);
-        }
-    } else {
-        for (const auto& pt : placed) {
-            int ptStart = pt.startTick;
-            int ptEnd = pt.startTick + pt.durationTicks;
-
-            if (ptEnd <= newStart) {
-                resolved.push_back(pt);
-            } else if (ptStart >= newStart) {
-                PlacedTickItem shifted = pt;
-                shifted.startTick += chordTicks;
-                if (shifted.startTick >= barTotalTicks) {
-                    overflowItems.push_back(shifted);
-                } else if (shifted.startTick + shifted.durationTicks > barTotalTicks) {
-                    int inBarTicks = barTotalTicks - shifted.startTick;
-                    int overTicks = shifted.durationTicks - inBarTicks;
-                    PlacedTickItem inBar = shifted;
-                    inBar.durationTicks = inBarTicks;
-                    inBar.chord.SetTicks(inBarTicks);
-                    resolved.push_back(inBar);
-
-                    PlacedTickItem over = shifted;
-                    over.startTick = 0;
-                    over.durationTicks = overTicks;
-                    over.chord.SetTicks(overTicks);
-                    overflowItems.push_back(over);
-                } else {
-                    resolved.push_back(shifted);
-                }
-            } else {
-                PlacedTickItem left = pt;
-                left.durationTicks = newStart - ptStart;
-                left.chord.SetTicks(left.durationTicks);
-                resolved.push_back(left);
-
-                PlacedTickItem right = pt;
-                right.startTick = newStart + chordTicks;
-                right.durationTicks = ptEnd - newStart;
-                right.chord.SetTicks(right.durationTicks);
-                if (right.startTick >= barTotalTicks) {
-                    overflowItems.push_back(right);
-                } else if (right.startTick + right.durationTicks > barTotalTicks) {
-                    int inBarTicks = barTotalTicks - right.startTick;
-                    int overTicks = right.durationTicks - inBarTicks;
-                    PlacedTickItem inBar = right;
-                    inBar.durationTicks = inBarTicks;
-                    inBar.chord.SetTicks(inBarTicks);
-                    resolved.push_back(inBar);
-
-                    PlacedTickItem over = right;
-                    over.startTick = 0;
-                    over.durationTicks = overTicks;
-                    over.chord.SetTicks(overTicks);
-                    overflowItems.push_back(over);
-                } else {
-                    resolved.push_back(right);
-                }
-            }
-        }
-
-        if (!chord.isRest) {
-            PlacedTickItem newPt;
-            newPt.startTick = newStart;
-            newPt.durationTicks = chordTicks;
-            newPt.chord = chord;
-            newPt.chord.SetTicks(chordTicks);
-            resolved.push_back(newPt);
-        }
-    }
-
-    std::sort(resolved.begin(), resolved.end(), [](const PlacedTickItem& a, const PlacedTickItem& b) {
-        return a.startTick < b.startTick;
-    });
-
-    std::vector<ChordToken> finalChords;
-    int walkerTick = 0;
-    for (const auto& pt : resolved) {
-        if (pt.startTick > walkerTick) {
-            int gap = pt.startTick - walkerTick;
-            ChordToken restTok;
-            restTok.isRest = true;
-            restTok.quality = ChordQuality::Rest;
-            restTok.rootName = "R";
-            restTok.degreeRoman = "R";
-            restTok.rawText = "_";
-            restTok.SetTicks(gap);
-            finalChords.push_back(restTok);
-            walkerTick = pt.startTick;
-        }
-        finalChords.push_back(pt.chord);
-        walkerTick += pt.durationTicks;
-    }
-
-    if (walkerTick < barTotalTicks) {
-        int gap = barTotalTicks - walkerTick;
-        ChordToken restTok;
-        restTok.isRest = true;
-        restTok.quality = ChordQuality::Rest;
-        restTok.rootName = "R";
-        restTok.degreeRoman = "R";
-        restTok.rawText = "_";
-        restTok.SetTicks(gap);
-        finalChords.push_back(restTok);
-    }
-
-    targetBar.chords = std::move(finalChords);
-
-    for (const auto& over : overflowItems) {
+    auto overflow = TimelineEdit::InsertChord(targetBar, placed, newStart);
+    for (const auto& over : overflow) {
+        // 再帰で pActive->bars が拡張されるため参照を保持しない
         InsertChordAtTimelineTick(over.chord, targetBarIdx + 1, over.startTick, false);
     }
-    m_selectedBarIndex = targetBarIdx;
 
-    m_selectedChordIndex = 0;
-    int accTick = 0;
-    for (size_t ci = 0; ci < targetBar.chords.size(); ++ci) {
-        if (targetTickInBar >= accTick && targetTickInBar < accTick + targetBar.chords[ci].durationTicks) {
-            m_selectedChordIndex = static_cast<int>(ci);
-            break;
-        }
-        accTick += targetBar.chords[ci].durationTicks;
-    }
+    m_selectedBarIndex = targetBarIdx;
+    m_selectedChordIndex = TimelineEdit::ChordIndexAtTick(pActive->bars[targetBarIdx], newStart);
+    if (m_selectedChordIndex < 0) m_selectedChordIndex = 0;
 
     EnsureVisible(m_selectedBarIndex);
     SyncTimelineToText();
@@ -307,7 +162,7 @@ void AppWindow::SplitSelectedChord() {
     m_isMergedView = false;
 
     int halfTicks = totalTicks / 2;
-    int snap = std::max(60, m_selectedGridTicks);
+    int snap = std::max(60, m_timelineGridTicks);
     if (totalTicks >= snap * 2) {
         halfTicks = (halfTicks / snap) * snap;
     }
@@ -329,7 +184,57 @@ void AppWindow::DuplicateSelectedChord() {
     DuplicateSelection();
 }
 
-void AppWindow::InsertChordAtTimelineX(const ChordToken& chord, float x, bool pushUndo) {
+void AppWindow::ShiftSelectedChordOctave(int delta) {
+    Part* pActive = m_partManager.GetActivePart();
+    if (!pActive || m_selectedBarIndex < 0 || m_selectedBarIndex >= static_cast<int>(pActive->bars.size())) return;
+    auto& bar = pActive->bars[m_selectedBarIndex];
+    if (m_selectedChordIndex < 0 || m_selectedChordIndex >= static_cast<int>(bar.chords.size())) return;
+
+    auto& chord = bar.chords[m_selectedChordIndex];
+    if (chord.isRest || chord.rootPitch == PitchClass::Unknown) {
+        SetStatusMessage(TR(L"休符はオクターブ変更できません", L"Rests cannot be transposed"));
+        return;
+    }
+
+    int next = std::clamp(chord.octaveOffset + delta, -3, 3);
+    if (next == chord.octaveOffset) {
+        SetStatusMessage(TR(L"これ以上オクターブを変更できません", L"Octave limit reached"));
+        return;
+    }
+
+    PushUndo();
+    m_isMergedView = false;
+    chord.octaveOffset = next;
+    if (next == 0) {
+        SetStatusMessage(TR(L"オクターブをリセットしました", L"Octave reset"));
+    } else {
+        std::wstring msg = TR(L"オクターブ", L"Octave");
+        msg += (next > 0) ? L" +" : L" ";
+        msg += std::to_wstring(next);
+        SetStatusMessage(msg);
+    }
+    AuditionChord(chord);
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::ResetSelectedChordOctave() {
+    Part* pActive = m_partManager.GetActivePart();
+    if (!pActive || m_selectedBarIndex < 0 || m_selectedBarIndex >= static_cast<int>(pActive->bars.size())) return;
+    auto& bar = pActive->bars[m_selectedBarIndex];
+    if (m_selectedChordIndex < 0 || m_selectedChordIndex >= static_cast<int>(bar.chords.size())) return;
+
+    auto& chord = bar.chords[m_selectedChordIndex];
+    if (chord.isRest || chord.octaveOffset == 0) return;
+
+    PushUndo();
+    m_isMergedView = false;
+    chord.octaveOffset = 0;
+    SetStatusMessage(TR(L"オクターブをリセットしました", L"Octave reset"));
+    AuditionChord(chord);
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::InsertChordAtTimelineX(const ChordToken& chord, float x, bool pushUndo, int snapTicks) {
     Part* pActive = m_partManager.GetActivePart();
     if (!pActive) return;
 
@@ -340,13 +245,22 @@ void AppWindow::InsertChordAtTimelineX(const ChordToken& chord, float x, bool pu
 
     int targetBarIdx = (barWidth > 0.0f) ? static_cast<int>(relX / barWidth) : 0;
     float barOffsetRatio = (barWidth > 0.0f) ? (std::fmod(relX, barWidth) / barWidth) : 0.0f;
-    int barNumerator = (pActive->timeNumerator > 0) ? pActive->timeNumerator : 4;
-    int barTotalTicks = barNumerator * TICKS_PER_BEAT;
 
-    int gridTicks = std::max(1, m_selectedGridTicks);
+    int barTotalTicks = -1;
+    if (targetBarIdx >= 0 && targetBarIdx < static_cast<int>(pActive->bars.size())) {
+        barTotalTicks = pActive->bars[targetBarIdx].GetTotalTicks();
+    }
+    if (barTotalTicks <= 0) {
+        int barNumerator = (pActive->timeNumerator > 0) ? pActive->timeNumerator : 4;
+        barTotalTicks = barNumerator * TICKS_PER_BEAT;
+    }
+
+    int gridTicks = std::max(1, snapTicks > 0 ? snapTicks : m_timelineGridTicks);
     float rawTick = barOffsetRatio * static_cast<float>(barTotalTicks);
     int snappedTick = static_cast<int>(std::round(rawTick / static_cast<float>(gridTicks))) * gridTicks;
-    int chordTicks = chord.durationTicks > 0 ? chord.durationTicks : (chord.durationBeats > 0 ? chord.durationBeats * TICKS_PER_BEAT : gridTicks);
+    int fallbackTicks = std::max(1, m_inputGridTicks);
+    int chordTicks = chord.durationTicks > 0 ? chord.durationTicks : (chord.durationBeats > 0 ? chord.durationBeats * TICKS_PER_BEAT : fallbackTicks);
+    chordTicks = std::clamp(chordTicks, 1, barTotalTicks);
     snappedTick = std::clamp(snappedTick, 0, std::max(0, barTotalTicks - chordTicks));
 
     InsertChordAtTimelineTick(chord, targetBarIdx, snappedTick, pushUndo);
@@ -436,11 +350,29 @@ void AppWindow::DuplicateSelection() {
 
     auto& bar = pActive->bars[m_selectedBarIndex];
     if (m_selectedChordIndex < 0 || m_selectedChordIndex >= static_cast<int>(bar.chords.size())) return;
+    if (bar.chords[m_selectedChordIndex].isRest) return;
+
+    // 元コードの直後へ「長さぶん押し出して」複製する（小節をはみ出す分は次小節へ）
+    int insertTick = 0;
+    for (int i = 0; i <= m_selectedChordIndex; ++i) {
+        int d = bar.chords[i].durationTicks > 0 ? bar.chords[i].durationTicks : (bar.chords[i].durationBeats * TICKS_PER_BEAT);
+        insertTick += d;
+    }
+    ChordToken copy = bar.chords[m_selectedChordIndex];
+    int copyTicks = copy.durationTicks > 0 ? copy.durationTicks : (copy.durationBeats * TICKS_PER_BEAT);
+    int barTicks = bar.GetTotalTicks();
+    if (barTicks <= 0) barTicks = TICKS_PER_BAR_4_4;
+
+    int targetBar = m_selectedBarIndex;
+    int targetTick = insertTick;
+    if (targetTick + copyTicks > barTicks) {
+        // 小節末尾を超える場合は次小節の先頭へ（元コードを上書きしない）
+        targetBar += 1;
+        targetTick = 0;
+    }
 
     PushUndo();
-    bar.chords.insert(bar.chords.begin() + m_selectedChordIndex + 1, bar.chords[m_selectedChordIndex]);
-    SyncTimelineToText();
-    InvalidateRect(m_hwnd, nullptr, FALSE);
+    InsertChordAtTimelineTick(copy, targetBar, targetTick, false);
 }
 
 void AppWindow::DeleteSelection() {
@@ -670,7 +602,7 @@ void AppWindow::SetStatusMessage(const std::wstring& msg) {
 void AppWindow::TriggerAutoBackup() {
     if (!m_isDirty) return;
     std::string data = m_partManager.SerializeProject(
-        m_projectTitle, m_selectedVoicing, m_bassOctaveMode, m_selectedGridTicks
+        m_projectTitle, m_selectedVoicing, m_bassOctaveMode, m_timelineGridTicks, m_inputGridTicks
     );
     std::wstring backupDir;
     if (!m_autoBackupInProjectDir && !m_autoBackupDirectory.empty()) {
@@ -833,7 +765,7 @@ void AppWindow::DoFileSave() {
 
     if (m_partManager.SaveToFile(
         m_currentProjectPath, m_projectTitle,
-        m_selectedVoicing, m_bassOctaveMode, m_selectedGridTicks
+        m_selectedVoicing, m_bassOctaveMode, m_timelineGridTicks, m_inputGridTicks
     )) {
         m_isDirty = false;
         UpdateWindowTitle();
@@ -870,7 +802,7 @@ void AppWindow::DoFileSaveAs() {
 
         if (m_partManager.SaveToFile(
             m_currentProjectPath, m_projectTitle,
-            m_selectedVoicing, m_bassOctaveMode, m_selectedGridTicks
+            m_selectedVoicing, m_bassOctaveMode, m_timelineGridTicks, m_inputGridTicks
         )) {
             m_isDirty = false;
             UpdateWindowTitle();
@@ -901,13 +833,15 @@ void AppWindow::DoFileOpen() {
         VoicingStyle loadedVoicing;
         int loadedBassMode = 0;
         int loadedGrid = TICKS_PER_BEAT;
+        int loadedInputGrid = TICKS_PER_BEAT;
 
-        if (m_partManager.LoadFromFile(szFile, loadedTitle, loadedVoicing, loadedBassMode, loadedGrid)) {
+        if (m_partManager.LoadFromFile(szFile, loadedTitle, loadedVoicing, loadedBassMode, loadedGrid, &loadedInputGrid)) {
             m_currentProjectPath = szFile;
             m_projectTitle = loadedTitle;
             m_selectedVoicing = loadedVoicing;
             m_bassOctaveMode = loadedBassMode;
-            m_selectedGridTicks = loadedGrid;
+            m_timelineGridTicks = loadedGrid;
+            m_inputGridTicks = loadedInputGrid;
             m_isDirty = false;
 
             SyncTimelineToText();
@@ -1105,13 +1039,15 @@ void AppWindow::OpenRecentFile(int index) {
     VoicingStyle loadedVoicing;
     int loadedBassMode = 0;
     int loadedGrid = TICKS_PER_BEAT;
+    int loadedInputGrid = TICKS_PER_BEAT;
 
-    if (m_partManager.LoadFromFile(path, loadedTitle, loadedVoicing, loadedBassMode, loadedGrid)) {
+    if (m_partManager.LoadFromFile(path, loadedTitle, loadedVoicing, loadedBassMode, loadedGrid, &loadedInputGrid)) {
         m_currentProjectPath = path;
         m_projectTitle = loadedTitle;
         m_selectedVoicing = loadedVoicing;
         m_bassOctaveMode = loadedBassMode;
-        m_selectedGridTicks = loadedGrid;
+        m_timelineGridTicks = loadedGrid;
+        m_inputGridTicks = loadedInputGrid;
         m_isDirty = false;
 
         AddRecentFile(path);

@@ -581,11 +581,14 @@ void AppWindow::RenderHelpModal(const D2D1_RECT_F& rc) {
             { L"Ctrl + E", TR(L"標準 MIDI ファイル (.mid) をエクスポート保存", L"Export Standard MIDI File (.mid)") },
             { TR(L"マウスホイール", L"Mouse Wheel"), TR(L"タイムラインの水平スクロール", L"Scroll timeline horizontally") },
             { L"Ctrl + + / Ctrl + -", TR(L"タイムラインの横ズームイン / ズームアウト", L"Zoom timeline in / out horizontally") },
-            { TR(L"コード左右端ドラッグ", L"Drag Card Edge"), TR(L"コードカードの音価 (Tick時間長) をマウスで伸縮変更", L"Resize chord card duration (in ticks)") }
+            { TR(L"コード左右端ドラッグ", L"Drag Card Edge"), TR(L"コードカードの音価 (Tick時間長) をマウスで伸縮変更（小節線を越える跨ぎも可）", L"Resize chord card duration in ticks (can cross bar lines)") },
+            { L"Ctrl + Up / Down", TR(L"選択コードを1オクターブ上 / 下へ移動", L"Shift selected chord up / down one octave") },
+            { L"Ctrl + 1..5", TR(L"タイムライングリッド切替 (1小節 / 2拍 / 1拍 / 1/2拍 / 1/4拍)", L"Timeline grid preset (1 bar / 2 beats / 1 beat / 1/2 / 1/4)") },
+            { L"Ctrl + Shift + 1..5", TR(L"入力グリッド切替 (追加位置と音価)", L"Input grid preset (placement & length of new chords)") }
         };
 
         float col1W = 190.0f;
-        for (size_t ki = 0; ki < 14; ++ki) {
+        for (size_t ki = 0; ki < sizeof(sRows) / sizeof(sRows[0]); ++ki) {
             D2D1_RECT_F trRc = D2D1::RectF(rc.left + pad, textY, rc.right - pad, textY + 22.0f);
             if (ki % 2 == 1) {
                 m_pRenderTarget->FillRectangle(trRc, m_pBrushCardBg);
@@ -824,10 +827,35 @@ void AppWindow::ShowGridMenu(float screenX, float screenY) {
     };
     int grids[] = { TICKS_PER_BAR_4_4, TICKS_PER_BEAT * 2, TICKS_PER_BEAT, TICKS_PER_BEAT / 2, TICKS_PER_BEAT / 4 };
 
+    AppendMenuW(hMenu, MF_STRING | MF_GRAYED, 0, TR(L"タイムライングリッド (表示と移動/伸縮スナップ)", L"Timeline Grid (Display & Editing Snap)"));
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
     for (int i = 0; i < 5; ++i) {
         UINT flags = MF_STRING;
-        if (m_selectedGridTicks == grids[i]) flags |= MF_CHECKED;
+        if (m_timelineGridTicks == grids[i]) flags |= MF_CHECKED;
         AppendMenuW(hMenu, flags, IDM_GRID_BASE + i, gridNames[i]);
+    }
+
+    TrackPopupMenu(hMenu, TPM_LEFTALIGN | TPM_TOPALIGN, static_cast<int>(screenX), static_cast<int>(screenY), 0, m_hwnd, nullptr);
+    DestroyMenu(hMenu);
+}
+
+void AppWindow::ShowInputGridMenu(float screenX, float screenY) {
+    HMENU hMenu = CreatePopupMenu();
+    const wchar_t* gridNames[] = {
+        TR(L"1小節", L"1 Bar"),
+        TR(L"2拍", L"2 Beats"),
+        TR(L"1拍", L"1 Beat"),
+        TR(L"1/2拍", L"1/2 Beat"),
+        TR(L"1/4拍", L"1/4 Beat")
+    };
+    int grids[] = { TICKS_PER_BAR_4_4, TICKS_PER_BEAT * 2, TICKS_PER_BEAT, TICKS_PER_BEAT / 2, TICKS_PER_BEAT / 4 };
+
+    AppendMenuW(hMenu, MF_STRING | MF_GRAYED, 0, TR(L"入力グリッド (追加位置スナップと音価)", L"Input Grid (Placement & Length)"));
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+    for (int i = 0; i < 5; ++i) {
+        UINT flags = MF_STRING;
+        if (m_inputGridTicks == grids[i]) flags |= MF_CHECKED;
+        AppendMenuW(hMenu, flags, IDM_INPUT_GRID_BASE + i, gridNames[i]);
     }
 
     TrackPopupMenu(hMenu, TPM_LEFTALIGN | TPM_TOPALIGN, static_cast<int>(screenX), static_cast<int>(screenY), 0, m_hwnd, nullptr);

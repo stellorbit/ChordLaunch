@@ -1238,6 +1238,395 @@ void TestCrossBarDragAndRestNormalization() {
     TEST_ASSERT(totalTicksBar4 == 1920, "Total ticks in Bar 4 perfectly preserved at 1920 ticks");
 }
 
+static ChordToken MakeTok(const char* root, int ticks) {
+    ChordToken c;
+    c.rawText = root;
+    c.rootName = root;
+    c.SetTicks(ticks);
+    return c;
+}
+
+static ChordToken MakeRestTok(int ticks) {
+    ChordToken c;
+    c.isRest = true;
+    c.quality = ChordQuality::Rest;
+    c.rawText = "_";
+    c.rootName = "R";
+    c.degreeRoman = "R";
+    c.SetTicks(ticks);
+    return c;
+}
+
+static Bar MakeTickBar4() {
+    Bar b;
+    b.timeNumerator = 4;
+    b.timeDenominator = 4;
+    return b;
+}
+
+static int StartTickOfIndex(const Bar& bar, int index) {
+    int t = 0;
+    for (int i = 0; i < index && i < static_cast<int>(bar.chords.size()); ++i) t += bar.chords[i].durationTicks;
+    return t;
+}
+
+void TestTimelineEditInsertAndResize() {
+    std::cout << "[TEST] 25. TimelineEdit: no-drift insert, rest absorption and syncopated resize\n";
+
+    // 1. 4拍コードの中央へ1コード挿入: 分割長が正しく、小節は1920tickのまま
+    {
+        Bar bar = MakeTickBar4();
+        bar.chords.push_back(MakeTok("C", 1920));
+
+        auto overflow = TimelineEdit::InsertChord(bar, MakeTok("G", 480), 480);
+        TEST_ASSERT(overflow.empty(), "Split insert must not overflow a full-length chord");
+        TEST_ASSERT(bar.chords.size() == 3, "C must be split into 2 pieces around the inserted G");
+        TEST_ASSERT(bar.chords[0].rootName == "C" && bar.chords[0].durationTicks == 480, "Left C piece is 480 ticks");
+        TEST_ASSERT(bar.chords[1].rootName == "G" && bar.chords[1].durationTicks == 480, "G sits on beat 2");
+        TEST_ASSERT(bar.chords[2].rootName == "C" && bar.chords[2].durationTicks == 960, "Right C piece is 960 ticks (no drift)");
+        TEST_ASSERT(TimelineEdit::TotalTicks(bar) == 1920, "Bar total stays exactly 1920 ticks");
+    }
+
+    // 2. 休符区間へのドロップは休符を消費し、後続コードを押し出さない
+    {
+        Bar bar = MakeTickBar4();
+        bar.chords.push_back(MakeTok("C", 960));
+        bar.chords.push_back(MakeRestTok(960));
+
+        auto overflow = TimelineEdit::InsertChord(bar, MakeTok("G", 480), 960);
+        TEST_ASSERT(overflow.empty(), "Drop into a rest must not overflow");
+        TEST_ASSERT(bar.chords.size() == 3, "Rest is split into chord + remainder");
+        TEST_ASSERT(bar.chords[0].rootName == "C" && bar.chords[0].durationTicks == 960, "Preceding C untouched");
+        TEST_ASSERT(bar.chords[1].rootName == "G" && bar.chords[1].durationTicks == 480, "G pinned at the drop tick");
+        TEST_ASSERT(bar.chords[2].isRest && bar.chords[2].durationTicks == 480, "Remaining rest is 480 ticks");
+        TEST_ASSERT(StartTickOfIndex(bar, 1) == 960, "G starts exactly at the drop tick (WYSIWYG)");
+    }
+
+    // 3. 満杯の小節では押し出し分が overflow として次小節へ渡る（データ消失なし）
+    {
+        Bar bar = MakeTickBar4();
+        for (const char* r : {"C", "D", "E", "F"}) bar.chords.push_back(MakeTok(r, 480));
+
+        auto overflow = TimelineEdit::InsertChord(bar, MakeTok("G", 480), 480);
+        TEST_ASSERT(overflow.size() == 1, "One chord overflows to the next bar");
+        TEST_ASSERT(overflow[0].chord.rootName == "F", "Last chord F is carried over (nothing is deleted)");
+        TEST_ASSERT(TimelineEdit::TotalTicks(bar) == 1920, "Rippled bar still sums to 1920 ticks");
+        TEST_ASSERT(bar.chords[1].rootName == "G", "Inserted chord lands on the requested tick");
+        TEST_ASSERT(StartTickOfIndex(bar, 1) == 480, "Inserted chord starts at 480 ticks");
+    }
+
+    // 4. 押し出しは後方の休符で吸収される（次小節へ漏れない）
+    {
+        Bar bar = MakeTickBar4();
+        bar.chords.push_back(MakeTok("C", 480));
+        bar.chords.push_back(MakeRestTok(1440));
+
+        auto overflow = TimelineEdit::InsertChord(bar, MakeTok("G", 480), 0);
+        TEST_ASSERT(overflow.empty(), "Trailing rest absorbs the shift");
+        TEST_ASSERT(TimelineEdit::TotalTicks(bar) == 1920, "Bar stays 1920 ticks");
+        TEST_ASSERT(bar.chords[0].rootName == "G", "G on beat 1");
+        TEST_ASSERT(bar.chords[1].rootName == "C" && bar.chords[1].durationTicks == 480, "C pushed to beat 2");
+        TEST_ASSERT(bar.chords[2].isRest && bar.chords[2].durationTicks == 960, "Rest shrunk to 960 ticks");
+    }
+
+    auto MakeBars = [](std::initializer_list<Bar> bs) {
+        std::vector<Bar> v;
+        for (const auto& b : bs) v.push_back(b);
+        return v;
+    };
+    auto BarSum = [](const Bar& b) {
+        int t = 0;
+        for (const auto& c : b.chords) t += c.durationTicks;
+        return t;
+    };
+
+    // 5. 右端伸長: 後続休符を食い、シンコペーション長(1.75拍)をそのまま保持
+    {
+        Bar b = MakeTickBar4();
+        b.chords.push_back(MakeTok("C", 480));
+        b.chords.push_back(MakeRestTok(1440));
+
+        auto res = TimelineEdit::ResizeChordSpan(MakeBars({b}), 0, 0, 840, 120);
+        const Bar& bar = res.bars[0];
+        TEST_ASSERT(bar.chords[0].durationTicks == 840, "Right edge extends to 1.75 beats (840 ticks)");
+        TEST_ASSERT(bar.chords[1].isRest && bar.chords[1].durationTicks == 1080, "Following rest shrinks by the same amount");
+        TEST_ASSERT(TimelineEdit::TotalTicks(bar) == 1920, "Total ticks preserved after extension");
+    }
+
+    // 6. 右端伸長で後続コードを完全に覆うと、そのコードは消える（区間の上書き）
+    {
+        Bar b = MakeTickBar4();
+        b.chords.push_back(MakeTok("C", 960));
+        b.chords.push_back(MakeTok("G", 960));
+
+        auto res = TimelineEdit::ResizeChordSpan(MakeBars({b}), 0, 0, 1920, 240);
+        const Bar& bar = res.bars[0];
+        TEST_ASSERT(bar.chords.size() == 1, "Fully covered G is removed");
+        TEST_ASSERT(bar.chords[0].rootName == "C" && bar.chords[0].durationTicks == 1920, "C fills the bar");
+        TEST_ASSERT(BarSum(bar) == 1920, "Bar stays 1920 ticks");
+    }
+
+    // 7. 右端縮小: 空いた区間は休符として残る（左詰めされない）
+    {
+        Bar b = MakeTickBar4();
+        b.chords.push_back(MakeTok("C", 960));
+        b.chords.push_back(MakeTok("G", 960));
+
+        auto res = TimelineEdit::ResizeChordSpan(MakeBars({b}), 0, 0, 720, 240);
+        const Bar& bar = res.bars[0];
+        TEST_ASSERT(bar.chords.size() == 3, "C, gap rest and G");
+        TEST_ASSERT(bar.chords[0].durationTicks == 720, "C shrinks to 720 ticks");
+        TEST_ASSERT(bar.chords[1].isRest && bar.chords[1].durationTicks == 240, "Gap rest of 240 ticks is inserted");
+        TEST_ASSERT(bar.chords[2].rootName == "G" && StartTickOfIndex(bar, 2) == 960, "Following G keeps its absolute position");
+    }
+
+    // 8. 左端伸長: 手前休符を食って裏拍開始(1.5拍目)へ
+    {
+        Bar b = MakeTickBar4();
+        b.chords.push_back(MakeTok("C", 480));
+        b.chords.push_back(MakeRestTok(480));
+        b.chords.push_back(MakeTok("G", 480));
+        b.chords.push_back(MakeRestTok(480));
+
+        auto res = TimelineEdit::ResizeChordSpan(MakeBars({b}), 960, 720, 1440, 120);
+        const Bar& bar = res.bars[0];
+        TEST_ASSERT(bar.chords.size() == 4, "C, lead rest, G, tail rest");
+        TEST_ASSERT(bar.chords[0].rootName == "C", "C stays first");
+        TEST_ASSERT(bar.chords[1].isRest && bar.chords[1].durationTicks == 240, "Lead rest compressed to 240 ticks");
+        TEST_ASSERT(bar.chords[2].rootName == "G" && bar.chords[2].durationTicks == 720, "G starts on the off-beat with 1.5 beats");
+        TEST_ASSERT(StartTickOfIndex(bar, 2) == 720, "G starts at tick 720 (off-beat)");
+        TEST_ASSERT(TimelineEdit::TotalTicks(bar) == 1920, "Total ticks preserved");
+    }
+
+    // 9. 左端伸長は手前コードを完全に覆える（終端は固定）
+    {
+        Bar b = MakeTickBar4();
+        b.chords.push_back(MakeTok("C", 480));
+        b.chords.push_back(MakeTok("G", 960));
+        b.chords.push_back(MakeRestTok(480));
+
+        auto res = TimelineEdit::ResizeChordSpan(MakeBars({b}), 480, 0, 1440, 120);
+        const Bar& bar = res.bars[0];
+        TEST_ASSERT(bar.chords.size() == 2, "Covered C is removed");
+        TEST_ASSERT(bar.chords[0].rootName == "G" && bar.chords[0].durationTicks == 1440, "G now starts at 0 and keeps its end (1440)");
+        TEST_ASSERT(bar.chords[1].isRest && bar.chords[1].durationTicks == 480, "Tail rest intact");
+    }
+
+    // 10. 左端縮小: 手前に休符が生成される
+    {
+        Bar b = MakeTickBar4();
+        b.chords.push_back(MakeTok("C", 960));
+        b.chords.push_back(MakeTok("G", 960));
+
+        auto res = TimelineEdit::ResizeChordSpan(MakeBars({b}), 0, 480, 960, 240);
+        const Bar& bar = res.bars[0];
+        TEST_ASSERT(bar.chords[0].isRest && bar.chords[0].durationTicks == 480, "Leading rest of 480 ticks is inserted");
+        TEST_ASSERT(bar.chords[1].rootName == "C" && bar.chords[1].durationTicks == 480, "C keeps its end tick (960)");
+        TEST_ASSERT(StartTickOfIndex(bar, 1) == 480, "C now starts at 480 ticks");
+    }
+
+    // 11. 小節跨ぎの右伸長: 1枚のカードのまま次小節へ。次小節先頭は上書き（短縮）
+    {
+        Bar b1 = MakeTickBar4();
+        b1.chords.push_back(MakeTok("C", 1920));
+        Bar b2 = MakeTickBar4();
+        b2.chords.push_back(MakeTok("G", 1920));
+
+        // C を 1拍ぶん小節線の向こうまで伸ばす (1920 -> 2400)
+        auto res = TimelineEdit::ResizeChordSpan(MakeBars({b1, b2}), 0, 0, 2400, 120);
+        TEST_ASSERT(res.bars.size() == 2, "Two bars preserved");
+        TEST_ASSERT(res.bars[0].chords.size() == 1, "No chord is moved into the next bar");
+        TEST_ASSERT(res.bars[0].chords[0].rootName == "C" && res.bars[0].chords[0].durationTicks == 2400,
+                    "C is one card spanning the bar line (2400 ticks = 5 beats)");
+        TEST_ASSERT(BarSum(res.bars[0]) == 2400, "Spill is kept in the starting bar");
+
+        const Bar& nb = res.bars[1];
+        TEST_ASSERT(nb.chords.size() == 2, "Next bar: covered rest + trimmed chord");
+        TEST_ASSERT(nb.chords[0].isRest && nb.chords[0].durationTicks == 480, "Next bar starts with 480 ticks covered by the C card");
+        TEST_ASSERT(nb.chords[1].rootName == "G" && nb.chords[1].durationTicks == 1440, "G trimmed from the left (3 beats left)");
+        TEST_ASSERT(StartTickOfIndex(nb, 1) == 480, "G now starts on beat 2 of the next bar");
+        TEST_ASSERT(BarSum(nb) == 1920, "Next bar total remains 1920 ticks");
+        TEST_ASSERT(res.selectedBar == 0 && res.selectedChord == 0, "Selection stays on the spanning card");
+    }
+
+    // 12. 小節跨ぎの左伸長: 前小節の末尾を上書きして、開始小節に格納される
+    {
+        Bar b1 = MakeTickBar4();
+        b1.chords.push_back(MakeTok("C", 1920));
+        Bar b2 = MakeTickBar4();
+        b2.chords.push_back(MakeTok("G", 1920));
+
+        // G の開始を1拍前へ (1920 -> 1440)。G は前小節4拍目から5拍ぶんになる
+        auto res = TimelineEdit::ResizeChordSpan(MakeBars({b1, b2}), 1920, 1440, 3840, 120);
+        TEST_ASSERT(res.selectedBar == 0, "Chord is stored in the bar containing its new start");
+        TEST_ASSERT(res.bars[0].chords.size() == 2, "Bar 1: trimmed C + spanning G");
+        TEST_ASSERT(res.bars[0].chords[0].rootName == "C" && res.bars[0].chords[0].durationTicks == 1440,
+                    "C trimmed from the right (3 beats)");
+        TEST_ASSERT(res.bars[0].chords[1].rootName == "G" && res.bars[0].chords[1].durationTicks == 2400,
+                    "G is one card starting on beat 4 of bar 1 (5 beats)");
+        TEST_ASSERT(res.bars[1].chords.size() == 1 && res.bars[1].chords[0].isRest, "Bar 2 is fully covered");
+        TEST_ASSERT(BarSum(res.bars[1]) == 1920, "Covered bar remains 1920 ticks");
+    }
+
+    // 13. 複数小節を跨ぐ伸長（3小節ぶん）
+    {
+        Bar b1 = MakeTickBar4(); b1.chords.push_back(MakeTok("C", 1920));
+        Bar b2 = MakeTickBar4(); b2.chords.push_back(MakeTok("G", 1920));
+        Bar b3 = MakeTickBar4(); b3.chords.push_back(MakeTok("Am", 1920));
+
+        auto res = TimelineEdit::ResizeChordSpan(MakeBars({b1, b2, b3}), 0, 0, 4800, 120);
+        TEST_ASSERT(res.bars[0].chords[0].durationTicks == 4800, "Single card spans 2.5 bars");
+        TEST_ASSERT(res.bars[1].chords.size() == 1 && res.bars[1].chords[0].isRest, "Middle bar is fully covered");
+        const Bar& last = res.bars[2];
+        TEST_ASSERT(last.chords.size() == 2, "Last bar: covered rest + trimmed Am");
+        TEST_ASSERT(last.chords[0].isRest && last.chords[0].durationTicks == 960, "Covered until tick 960 in the last bar");
+        TEST_ASSERT(last.chords[1].rootName == "Am" && last.chords[1].durationTicks == 960, "Am trimmed to its last 2 beats");
+    }
+
+    // 14. どの操作後も各小節は拍子ぶん以上を覆い、負長のコードを作らない
+    {
+        Bar b1 = MakeTickBar4(); b1.chords.push_back(MakeTok("C", 1920));
+        Bar b2 = MakeTickBar4(); b2.chords.push_back(MakeTok("G", 1920));
+        Bar b3 = MakeTickBar4(); b3.chords.push_back(MakeRestTok(1920));
+        std::vector<Bar> bars = MakeBars({b1, b2, b3});
+
+        bool invariant = true;
+        int targetStart = 0;
+        for (int i = 0; i < 30; ++i) {
+            int newEnd = 120 + (i * 173) % 5000;
+            auto res = TimelineEdit::ResizeChordSpan(bars, targetStart, targetStart, newEnd, 120);
+            bars = res.bars;
+            for (const auto& bar : bars) {
+                if (BarSum(bar) < 1920) invariant = false;
+                for (const auto& c : bar.chords) {
+                    if (c.durationTicks <= 0) invariant = false;
+                }
+            }
+            targetStart = (targetStart + 480) % 1920;
+        }
+        TEST_ASSERT(invariant, "Every bar still covers its meter after repeated cross-bar resizes");
+    }
+}
+
+void TestOctaveAndGridSeparation() {
+    std::cout << "[TEST] 27. Per-chord octave shift and split input/timeline grid persistence\n";
+
+    ChordToken octChord = MusicEngine::ParseChordSymbol("C", "C", MusicalMode::Major);
+    octChord.SetTicks(480);
+    auto baseNotes = MusicEngine::GetChordMidiNotes(octChord, 4, VoicingStyle::RootPosition, 0, 0);
+    TEST_ASSERT(!baseNotes.empty() && baseNotes[0] == 60, "C4 root is MIDI 60");
+
+    octChord.octaveOffset = 1;
+    auto upNotes = MusicEngine::GetChordMidiNotes(octChord, 4, VoicingStyle::RootPosition, 0, 0);
+    TEST_ASSERT(!upNotes.empty() && upNotes[0] == 72, "+1 octave shifts the root to MIDI 72");
+
+    octChord.octaveOffset = -1;
+    auto downNotes = MusicEngine::GetChordMidiNotes(octChord, 4, VoicingStyle::RootPosition, 0, 0);
+    TEST_ASSERT(!downNotes.empty() && downNotes[0] == 48, "-1 octave shifts the root to MIDI 48");
+
+    PartManager pm;
+    std::vector<Part>& parts = pm.GetParts();
+    TEST_ASSERT(!parts.empty(), "Default song has parts");
+
+    Bar bar = MakeTickBar4();
+    ChordToken g = MusicEngine::ParseChordSymbol("G", "C", MusicalMode::Major);
+    g.SetTicks(1920);
+    g.octaveOffset = 2;
+    bar.chords.push_back(g);
+    parts[0].bars = { bar };
+    parts[0].rawProgressionText = ProgressionParser::Format(parts[0].bars);
+
+    std::string json = pm.SerializeProject("OctGrid", VoicingStyle::RootPosition, 0, TICKS_PER_BEAT / 2, TICKS_PER_BEAT / 4);
+    TEST_ASSERT(json.find("\"inputGridTicks\": 120") != std::string::npos, "Input grid (120) is serialized independently");
+    TEST_ASSERT(json.find("\"octaveOffset\": 2") != std::string::npos, "Octave offset is serialized");
+
+    PartManager loaded;
+    std::string title;
+    VoicingStyle voicing;
+    int bassMode = 0;
+    int timelineGrid = 0;
+    int inputGrid = 0;
+    TEST_ASSERT(loaded.DeserializeProject(json, title, voicing, bassMode, timelineGrid, &inputGrid), "Project with octave/grid deserializes");
+    TEST_ASSERT(timelineGrid == TICKS_PER_BEAT / 2, "Timeline grid restored (240)");
+    TEST_ASSERT(inputGrid == TICKS_PER_BEAT / 4, "Input grid restored separately (120)");
+    const Bar& rb = loaded.GetParts()[0].bars[0];
+    TEST_ASSERT(!rb.chords.empty() && rb.chords[0].octaveOffset == 2, "Per-chord octave offset restored");
+
+    // 旧形式 (inputGridTicks 無し) はタイムライングリッドへフォールバック
+    std::string legacy = json;
+    size_t keyPos = legacy.find("\"inputGridTicks\"");
+    if (keyPos != std::string::npos) {
+        size_t lineEnd = legacy.find('\n', keyPos);
+        legacy.erase(keyPos, lineEnd - keyPos + 1);
+    }
+    PartManager legacyLoaded;
+    int legacyTimeline = 0;
+    int legacyInput = 0;
+    TEST_ASSERT(legacyLoaded.DeserializeProject(legacy, title, voicing, bassMode, legacyTimeline, &legacyInput), "Legacy project deserializes");
+    TEST_ASSERT(legacyInput == legacyTimeline, "Legacy file falls back to the timeline grid for input");
+}
+
+void TestSyncopationPersistence() {
+    std::cout << "[TEST] 26. Syncopated timing survives project save/load (bars array is authoritative)\n";
+
+    PartManager pm;
+    std::vector<Part>& parts = pm.GetParts();
+    TEST_ASSERT(!parts.empty(), "Default song has parts");
+
+    Bar bar;
+    bar.timeNumerator = 4;
+    bar.timeDenominator = 4;
+    bar.chords.push_back(MakeRestTok(240));
+    bar.chords.push_back(MakeTok("G", 720));
+    bar.chords.push_back(MakeRestTok(960));
+    parts[0].bars = { bar };
+    parts[0].rawProgressionText = ProgressionParser::Format(parts[0].bars);
+
+    std::string json = pm.SerializeProject("SyncopationTest", VoicingStyle::RootPosition, 0, 120);
+    TEST_ASSERT(json.find("\"durationTicks\": 720") != std::string::npos, "Sub-beat duration is serialized");
+
+    PartManager loaded;
+    std::string title;
+    VoicingStyle voicing;
+    int bassMode = 0;
+    int gridTicks = 0;
+    TEST_ASSERT(loaded.DeserializeProject(json, title, voicing, bassMode, gridTicks), "Project deserializes");
+    TEST_ASSERT(loaded.GetParts()[0].bars.size() == 1, "One bar restored");
+
+    const Bar& rb = loaded.GetParts()[0].bars[0];
+    TEST_ASSERT(rb.chords.size() == 3, "Three tokens restored");
+    TEST_ASSERT(rb.chords[0].isRest && rb.chords[0].durationTicks == 240, "Lead 8th-note rest (240 ticks) restored");
+    TEST_ASSERT(rb.chords[1].rootName == "G" && rb.chords[1].durationTicks == 720, "G keeps its 1.5-beat syncopated length");
+    TEST_ASSERT(rb.chords[2].isRest && rb.chords[2].durationTicks == 960, "Tail rest restored");
+    TEST_ASSERT(TimelineEdit::TotalTicks(rb) == 1920, "Restored bar totals 1920 ticks");
+
+    // 小節跨ぎカード（1枚が小節線を越える）も保存・復元できる
+    Bar spanBar;
+    spanBar.timeNumerator = 4;
+    spanBar.timeDenominator = 4;
+    spanBar.chords.push_back(MakeTok("C", 2400));
+    Bar coveredBar;
+    coveredBar.timeNumerator = 4;
+    coveredBar.timeDenominator = 4;
+    coveredBar.chords.push_back(MakeRestTok(480));
+    coveredBar.chords.push_back(MakeTok("G", 1440));
+    parts[0].bars = { spanBar, coveredBar };
+    parts[0].rawProgressionText = ProgressionParser::Format(parts[0].bars);
+
+    std::string spanJson = pm.SerializeProject("SpanTest", VoicingStyle::RootPosition, 0, 120);
+    PartManager spanLoaded;
+    int spanGrid = 0;
+    TEST_ASSERT(spanLoaded.DeserializeProject(spanJson, title, voicing, bassMode, spanGrid), "Span project deserializes");
+    TEST_ASSERT(spanLoaded.GetParts()[0].bars.size() == 2, "Two bars restored");
+    const Bar& sb = spanLoaded.GetParts()[0].bars[0];
+    TEST_ASSERT(sb.chords.size() == 1 && sb.chords[0].durationTicks == 2400,
+                "Spanning card keeps its 5-beat (2400 tick) length across reload");
+    const Bar& cb = spanLoaded.GetParts()[0].bars[1];
+    TEST_ASSERT(cb.chords.size() == 2, "Covered bar keeps two tokens");
+    TEST_ASSERT(cb.chords[0].isRest && cb.chords[0].durationTicks == 480, "Covered region stays a 480-tick rest");
+    TEST_ASSERT(cb.chords[1].rootName == "G" && cb.chords[1].durationTicks == 1440, "Following chord stays trimmed");
+}
+
 int main() {
     std::cout << "========================================\n";
     std::cout << "ChordLaunch C++20 Core Test Suite\n";
@@ -1267,6 +1656,9 @@ int main() {
     TestCardResizeLeftWithRestPadding();
     TestDropGridSnapPreview();
     TestCrossBarDragAndRestNormalization();
+    TestTimelineEditInsertAndResize();
+    TestSyncopationPersistence();
+    TestOctaveAndGridSeparation();
 
     std::cout << "========================================\n";
     std::cout << "Tests Passed: " << g_passCount << ", Failed: " << g_failCount << "\n";

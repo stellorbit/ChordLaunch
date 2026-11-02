@@ -82,6 +82,7 @@ struct ChordToken {
     int durationTicks = TICKS_PER_BEAT; // 音価（Tick時間：480 ticks = 1拍。一次情報）
     bool isRest = false;       // 休符フラグ
     int inversion = 0;         // 転回形 (0: 基本形, 1: 第1転回, 2: 第2転回, 3: 第3転回)
+    int octaveOffset = 0;      // コード単位のオクターブシフト (-3〜+3)
 
     // tick から拍数を更新するヘルパー
     void SetTicks(int ticks) {

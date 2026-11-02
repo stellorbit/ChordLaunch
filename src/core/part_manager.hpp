@@ -38,7 +38,8 @@ public:
         std::string_view projectTitle = "Untitled",
         VoicingStyle voicing = VoicingStyle::RootPosition,
         int bassMode = 0,
-        int gridTicks = TICKS_PER_BEAT
+        int gridTicks = TICKS_PER_BEAT,
+        int inputGridTicks = 0
     ) const;
 
     bool DeserializeProject(
@@ -46,7 +47,8 @@ public:
         std::string& outTitle,
         VoicingStyle& outVoicing,
         int& outBassMode,
-        int& outGridTicks
+        int& outGridTicks,
+        int* outInputGridTicks = nullptr
     );
 
     // ファイル保存・読み込み
@@ -55,7 +57,8 @@ public:
         std::string_view projectTitle = "Untitled",
         VoicingStyle voicing = VoicingStyle::RootPosition,
         int bassMode = 0,
-        int gridTicks = TICKS_PER_BEAT
+        int gridTicks = TICKS_PER_BEAT,
+        int inputGridTicks = 0
     ) const;
 
     bool LoadFromFile(
@@ -63,7 +66,8 @@ public:
         std::string& outTitle,
         VoicingStyle& outVoicing,
         int& outBassMode,
-        int& outGridTicks
+        int& outGridTicks,
+        int* outInputGridTicks = nullptr
     );
 
     // 自動バックアップ保存 (最新5件保持ローテーション)

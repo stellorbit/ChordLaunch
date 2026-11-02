@@ -30,6 +30,13 @@ void AppWindow::OnLButtonDown(float x, float y) {
                 InvalidateRect(m_hwnd, nullptr, FALSE);
                 return;
             }
+            curX += 74.0f;
+
+            // 全体マージ (新規パート生成)
+            if (PtInRectF(D2D1::RectF(curX + 6.0f, r1Y, curX + 116.0f, r1Y + r1H), x, y)) {
+                DoMergeAllToNewPart();
+                return;
+            }
 
             // 右側ボタン群
             float rightCurX = m_width - 12.0f;
@@ -149,18 +156,20 @@ void AppWindow::OnLButtonDown(float x, float y) {
         }
         curX += 119.0f;
 
-        // グリッド (プルダウン)
+        // 入力グリッド (プルダウン)
+        if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 100.0f, r2Y + r2H), x, y)) {
+            POINT btnPt = { static_cast<LONG>(curX), static_cast<LONG>(r2Y + r2H) };
+            ClientToScreen(m_hwnd, &btnPt);
+            ShowInputGridMenu(static_cast<float>(btnPt.x), static_cast<float>(btnPt.y));
+            return;
+        }
+        curX += 104.0f;
+
+        // タイムライングリッド (プルダウン)
         if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 110.0f, r2Y + r2H), x, y)) {
             POINT btnPt = { static_cast<LONG>(curX), static_cast<LONG>(r2Y + r2H) };
             ClientToScreen(m_hwnd, &btnPt);
             ShowGridMenu(static_cast<float>(btnPt.x), static_cast<float>(btnPt.y));
-            return;
-        }
-        curX += 116.0f + 8.0f;
-
-        // 全体マージ (新規パート生成)
-        if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 110.0f, r2Y + r2H), x, y)) {
-            DoMergeAllToNewPart();
             return;
         }
         return;
@@ -212,8 +221,8 @@ void AppWindow::OnLButtonDown(float x, float y) {
                     newChord.rootName = "R";
                     newChord.degreeRoman = "R";
                 }
-                newChord.durationTicks = m_selectedGridTicks;
-                newChord.durationBeats = std::max(1, (m_selectedGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
+                newChord.durationTicks = m_inputGridTicks;
+                newChord.durationBeats = std::max(1, (m_inputGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
 
                 AuditionChord(newChord);
                 m_dragMode = DragMode::PaletteCardDrag;
@@ -358,8 +367,8 @@ void AppWindow::OnLButtonDown(float x, float y) {
             }
             if (m_customBass != PitchClass::Unknown) sym += "/" + MusicEngine::PitchToNote(m_customBass);
             ChordToken c = MusicEngine::ParseChordSymbol(sym, keyRoot, mode);
-            c.durationTicks = m_selectedGridTicks;
-            c.durationBeats = std::max(1, (m_selectedGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
+            c.durationTicks = m_inputGridTicks;
+            c.durationBeats = std::max(1, (m_inputGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
 
             AuditionChord(c);
             AppendChordToTimeline(c);
@@ -585,8 +594,12 @@ void AppWindow::OnLButtonDown(float x, float y) {
                                 m_dragBarIndex = static_cast<int>(b);
                                 m_dragChordIndex = static_cast<int>(ci);
                                 m_dragStartX = x;
-                                m_dragInitialTicks = cTicks;
-                                m_dragInitialNextTicks = (ci + 1 < bars[b].chords.size() && bars[b].chords[ci + 1].isRest) ? bars[b].chords[ci + 1].durationTicks : 0;
+                                int barStartTick = TimelineEdit::BarStartTick(bars, static_cast<int>(b));
+                                m_dragChordStartTick = static_cast<int>(offsetTicks) - cTicks;
+                                m_dragChordEndTick = static_cast<int>(offsetTicks);
+                                m_dragChordStartGlobal = barStartTick + m_dragChordStartTick;
+                                m_dragChordEndGlobal = barStartTick + m_dragChordEndTick;
+                                m_dragBaseBars = pActive ? pActive->bars : std::vector<Bar>{};
                                 SetCapture(m_hwnd);
                                 SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
                                 return;
@@ -598,18 +611,12 @@ void AppWindow::OnLButtonDown(float x, float y) {
                                 m_dragBarIndex = static_cast<int>(b);
                                 m_dragChordIndex = static_cast<int>(ci);
                                 m_dragStartX = x;
-                                m_dragInitialTicks = cTicks;
+                                int barStartTick = TimelineEdit::BarStartTick(bars, static_cast<int>(b));
                                 m_dragChordStartTick = static_cast<int>(offsetTicks) - cTicks;
-                                m_dragInitialBarChords = bars[b].chords;
-
-                                int totalPrevRests = 0;
-                                int check = static_cast<int>(ci) - 1;
-                                while (check >= 0 && bars[b].chords[check].isRest) {
-                                    int rTicks = bars[b].chords[check].durationTicks > 0 ? bars[b].chords[check].durationTicks : (bars[b].chords[check].durationBeats * TICKS_PER_BEAT);
-                                    totalPrevRests += rTicks;
-                                    check--;
-                                }
-                                m_dragLeftLimitTick = std::max(0, m_dragChordStartTick - totalPrevRests);
+                                m_dragChordEndTick = static_cast<int>(offsetTicks);
+                                m_dragChordStartGlobal = barStartTick + m_dragChordStartTick;
+                                m_dragChordEndGlobal = barStartTick + m_dragChordEndTick;
+                                m_dragBaseBars = pActive ? pActive->bars : std::vector<Bar>{};
 
                                 SetCapture(m_hwnd);
                                 SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
@@ -625,7 +632,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
                             m_dragStartY = y;
                             m_dragCurrentX = x;
                             m_dragCurrentY = y;
-                            m_dragCardGrabOffsetX = std::clamp(x - cardRc.left, 0.0f, cardRc.right - cardRc.left);
+                            m_dragCardGrabOffsetX = std::clamp(x - cx, 0.0f, cw);
                             m_isPaletteDragging = false;
                             SetCapture(m_hwnd);
                         }
@@ -692,8 +699,8 @@ void AppWindow::OnLButtonDown(float x, float y) {
                 float cx = m_width - rightW + pad + i * (sCardW + 4.0f);
                 if (PtInRectF(D2D1::RectF(cx, curY, cx + sCardW, curY + sCardH), x, y)) {
                     ChordToken c = suggestions[i];
-                    c.durationTicks = m_selectedGridTicks;
-                    c.durationBeats = std::max(1, (m_selectedGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
+                    c.durationTicks = m_inputGridTicks;
+                    c.durationBeats = std::max(1, (m_inputGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
                     AuditionChord(c);
                     m_dragMode = DragMode::PaletteCardDrag;
                     m_dragPaletteChord = c;
@@ -729,8 +736,8 @@ void AppWindow::OnLButtonDown(float x, float y) {
                 float cy = curY + (i / 3) * (bCardH + 4.0f);
                 if (PtInRectF(D2D1::RectF(cx, cy, cx + bCardW, cy + bCardH), x, y)) {
                     ChordToken c = borrowChords[i];
-                    c.durationTicks = m_selectedGridTicks;
-                    c.durationBeats = std::max(1, (m_selectedGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
+                    c.durationTicks = m_inputGridTicks;
+                    c.durationBeats = std::max(1, (m_inputGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
                     AuditionChord(c);
                     m_dragMode = DragMode::PaletteCardDrag;
                     m_dragPaletteChord = c;
@@ -766,8 +773,8 @@ void AppWindow::OnLButtonDown(float x, float y) {
                 float cy = curY + (i / 3) * (scCardH + 4.0f);
                 if (PtInRectF(D2D1::RectF(cx, cy, cx + scCardW, cy + scCardH), x, y)) {
                     ChordToken c = secChords[i];
-                    c.durationTicks = m_selectedGridTicks;
-                    c.durationBeats = std::max(1, (m_selectedGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
+                    c.durationTicks = m_inputGridTicks;
+                    c.durationBeats = std::max(1, (m_inputGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
                     AuditionChord(c);
                     m_dragMode = DragMode::PaletteCardDrag;
                     m_dragPaletteChord = c;
@@ -839,8 +846,8 @@ bool AppWindow::HitTestPaletteCard(float x, float y, ChordToken& outChord) {
                     outChord.rootName = "R";
                     outChord.degreeRoman = "R";
                 }
-                outChord.durationTicks = m_selectedGridTicks;
-                outChord.durationBeats = std::max(1, (m_selectedGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
+                outChord.durationTicks = m_inputGridTicks;
+                outChord.durationBeats = std::max(1, (m_inputGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
                 return true;
             }
         }
@@ -873,8 +880,8 @@ bool AppWindow::HitTestPaletteCard(float x, float y, ChordToken& outChord) {
                 float cx = m_width - rightW + pad + i * (sCardW + 4.0f);
                 if (PtInRectF(D2D1::RectF(cx, curY, cx + sCardW, curY + sCardH), x, y)) {
                     outChord = suggestions[i];
-                    outChord.durationTicks = m_selectedGridTicks;
-                    outChord.durationBeats = std::max(1, (m_selectedGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
+                    outChord.durationTicks = m_inputGridTicks;
+                    outChord.durationBeats = std::max(1, (m_inputGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
                     return true;
                 }
             }
@@ -892,8 +899,8 @@ bool AppWindow::HitTestPaletteCard(float x, float y, ChordToken& outChord) {
                 float cy = curY + (i / 3) * (bCardH + 4.0f);
                 if (PtInRectF(D2D1::RectF(cx, cy, cx + bCardW, cy + bCardH), x, y)) {
                     outChord = borrowChords[i];
-                    outChord.durationTicks = m_selectedGridTicks;
-                    outChord.durationBeats = std::max(1, (m_selectedGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
+                    outChord.durationTicks = m_inputGridTicks;
+                    outChord.durationBeats = std::max(1, (m_inputGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
                     return true;
                 }
             }
@@ -911,8 +918,8 @@ bool AppWindow::HitTestPaletteCard(float x, float y, ChordToken& outChord) {
                 float cy = curY + (i / 3) * (scCardH + 4.0f);
                 if (PtInRectF(D2D1::RectF(cx, cy, cx + scCardW, cy + scCardH), x, y)) {
                     outChord = secChords[i];
-                    outChord.durationTicks = m_selectedGridTicks;
-                    outChord.durationBeats = std::max(1, (m_selectedGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
+                    outChord.durationTicks = m_inputGridTicks;
+                    outChord.durationBeats = std::max(1, (m_inputGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
                     return true;
                 }
             }
@@ -1021,47 +1028,27 @@ void AppWindow::OnMouseMove(float x, float y) {
     if (m_dragMode == DragMode::CardResizeRight) {
         SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
         Part* pActive = m_partManager.GetActivePart();
-        if (pActive && m_dragBarIndex >= 0 && m_dragBarIndex < static_cast<int>(pActive->bars.size())) {
-            auto& bar = pActive->bars[m_dragBarIndex];
-            if (m_dragChordIndex >= 0 && m_dragChordIndex < static_cast<int>(bar.chords.size())) {
-                float dx = x - m_dragStartX;
-                float pxPerTick = (m_pixelsPerBeat * 4.0f) / std::max(1, bar.GetTotalTicks());
-                int deltaTicks = static_cast<int>(dx / pxPerTick);
+        if (pActive && !m_dragBaseBars.empty()) {
+            int barTicks = m_dragBaseBars[0].GetTotalTicks();
+            if (m_dragBarIndex >= 0 && m_dragBarIndex < static_cast<int>(m_dragBaseBars.size())) {
+                barTicks = m_dragBaseBars[m_dragBarIndex].GetTotalTicks();
+            }
+            if (barTicks <= 0) barTicks = TICKS_PER_BAR_4_4;
+            float pxPerTick = (m_pixelsPerBeat * 4.0f) / static_cast<float>(barTicks);
+            float dx = x - m_dragStartX;
+            int snapTicks = std::max(1, m_timelineGridTicks);
+            int deltaTicks = static_cast<int>(std::lround(dx / pxPerTick / static_cast<float>(snapTicks))) * snapTicks;
 
-                int snapTicks = std::max(1, m_selectedGridTicks);
-                deltaTicks = (deltaTicks / snapTicks) * snapTicks;
-
-                int minTicks = snapTicks;
-                int maxTicks = m_dragInitialTicks + m_dragInitialNextTicks;
-                if (maxTicks <= minTicks) maxTicks = bar.GetTotalTicks();
-
-                int newTicks = std::clamp(m_dragInitialTicks + deltaTicks, minTicks, maxTicks);
-                int diff = m_dragInitialTicks - newTicks;
-
-                bar.chords[m_dragChordIndex].SetTicks(newTicks);
-
-                // 直後の休符を調整、または新規休符を挿入して左詰めを防止
-                size_t nextIdx = m_dragChordIndex + 1;
-                if (m_dragInitialNextTicks > 0 && nextIdx < bar.chords.size() && bar.chords[nextIdx].isRest) {
-                    int nextTicks = m_dragInitialNextTicks + diff;
-                    if (nextTicks > 0) {
-                        bar.chords[nextIdx].SetTicks(nextTicks);
-                    } else {
-                        bar.chords.erase(bar.chords.begin() + nextIdx);
-                        m_dragInitialNextTicks = 0;
-                    }
-                } else if (diff > 0) {
-                    ChordToken restTok;
-                    restTok.isRest = true;
-                    restTok.quality = ChordQuality::Rest;
-                    restTok.rootName = "R";
-                    restTok.degreeRoman = "R";
-                    restTok.rawText = "_";
-                    restTok.SetTicks(diff);
-                    bar.chords.insert(bar.chords.begin() + nextIdx, restTok);
-                    m_dragInitialNextTicks = diff;
-                }
-
+            // 開始位置を固定したまま右端を動かす。小節線を越えると次小節の先頭を切り詰める。
+            auto res = TimelineEdit::ResizeChordSpan(m_dragBaseBars, m_dragChordStartGlobal,
+                                                     m_dragChordStartGlobal,
+                                                     m_dragChordEndGlobal + deltaTicks,
+                                                     snapTicks);
+            if (res.selectedBar >= 0) {
+                pActive->bars = std::move(res.bars);
+                m_selectedBarIndex = res.selectedBar;
+                m_selectedChordIndex = res.selectedChord;
+                EnsureVisible(m_selectedBarIndex);
                 SyncTimelineToText();
                 InvalidateRect(m_hwnd, nullptr, FALSE);
             }
@@ -1072,56 +1059,27 @@ void AppWindow::OnMouseMove(float x, float y) {
     if (m_dragMode == DragMode::CardResizeLeft) {
         SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
         Part* pActive = m_partManager.GetActivePart();
-        if (pActive && m_dragBarIndex >= 0 && m_dragBarIndex < static_cast<int>(pActive->bars.size())) {
-            auto& bar = pActive->bars[m_dragBarIndex];
-            if (m_dragChordIndex >= 0 && m_dragChordIndex < static_cast<int>(m_dragInitialBarChords.size())) {
-                int barTotalTicks = std::max(1, bar.GetTotalTicks());
-                float pxPerTick = (m_pixelsPerBeat * 4.0f) / static_cast<float>(barTotalTicks);
-                float dx = x - m_dragStartX; // 右へ動かすと正 (縮小)、左へ動かすと負 (伸長)
+        if (pActive && !m_dragBaseBars.empty()) {
+            int barTicks = m_dragBaseBars[0].GetTotalTicks();
+            if (m_dragBarIndex >= 0 && m_dragBarIndex < static_cast<int>(m_dragBaseBars.size())) {
+                barTicks = m_dragBaseBars[m_dragBarIndex].GetTotalTicks();
+            }
+            if (barTicks <= 0) barTicks = TICKS_PER_BAR_4_4;
+            float pxPerTick = (m_pixelsPerBeat * 4.0f) / static_cast<float>(barTicks);
+            float dx = x - m_dragStartX; // 右へ動かすと正 (縮小)、左へ動かすと負 (伸長)
+            int snapTicks = std::max(1, m_timelineGridTicks);
+            int deltaTicks = static_cast<int>(std::lround(dx / pxPerTick / static_cast<float>(snapTicks))) * snapTicks;
 
-                int snapTicks = std::max(1, m_selectedGridTicks);
-                int deltaTicks = static_cast<int>(std::round(dx / pxPerTick / static_cast<float>(snapTicks))) * snapTicks;
-
-                int origEndTick = m_dragChordStartTick + m_dragInitialTicks;
-                int maxStartTick = origEndTick - snapTicks; // 最低1グリッド残して右へ縮小可能
-                int minStartTick = m_dragLeftLimitTick;      // 手前休符をすべて消費するまで左へ伸長可能
-
-                int newStartTick = std::clamp(m_dragChordStartTick + deltaTicks, minStartTick, maxStartTick);
-                int newChordTicks = origEndTick - newStartTick;
-
-                // スナップショット m_dragInitialBarChords をベースに小節コード列を決定論的に再構築
-                std::vector<ChordToken> rebuilt = m_dragInitialBarChords;
-                bool hadPrevRest = (m_dragChordIndex > 0 && rebuilt[m_dragChordIndex - 1].isRest);
-
-                if (hadPrevRest) {
-                    int prevRestTicks = newStartTick - m_dragLeftLimitTick;
-                    if (prevRestTicks > 0) {
-                        rebuilt[m_dragChordIndex - 1].SetTicks(prevRestTicks);
-                        rebuilt[m_dragChordIndex].SetTicks(newChordTicks);
-                    } else {
-                        // 手前休符が完全に消費された -> 休符を削除してコードのみに
-                        rebuilt[m_dragChordIndex].SetTicks(newChordTicks);
-                        rebuilt.erase(rebuilt.begin() + (m_dragChordIndex - 1));
-                    }
-                } else {
-                    int insertedRestTicks = newStartTick - m_dragChordStartTick;
-                    if (insertedRestTicks > 0) {
-                        // 右へ縮小された -> 手前に休符を自動生成して左詰めを防止
-                        ChordToken restTok;
-                        restTok.isRest = true;
-                        restTok.quality = ChordQuality::Rest;
-                        restTok.rootName = "R";
-                        restTok.degreeRoman = "R";
-                        restTok.rawText = "_";
-                        restTok.SetTicks(insertedRestTicks);
-                        rebuilt[m_dragChordIndex].SetTicks(newChordTicks);
-                        rebuilt.insert(rebuilt.begin() + m_dragChordIndex, restTok);
-                    } else {
-                        rebuilt[m_dragChordIndex].SetTicks(newChordTicks);
-                    }
-                }
-
-                bar.chords = std::move(rebuilt);
+            // 終端を固定したまま左端を動かす。小節線を越えると前小節の末尾を切り詰める。
+            auto res = TimelineEdit::ResizeChordSpan(m_dragBaseBars, m_dragChordStartGlobal,
+                                                     m_dragChordStartGlobal + deltaTicks,
+                                                     m_dragChordEndGlobal,
+                                                     snapTicks);
+            if (res.selectedBar >= 0) {
+                pActive->bars = std::move(res.bars);
+                m_selectedBarIndex = res.selectedBar;
+                m_selectedChordIndex = res.selectedChord;
+                EnsureVisible(m_selectedBarIndex);
                 SyncTimelineToText();
                 InvalidateRect(m_hwnd, nullptr, FALSE);
             }
@@ -1275,7 +1233,7 @@ void AppWindow::OnLButtonUp(float x, float y) {
             float centerW = m_width - rightW - centerX;
             float curDockH = m_showKeyboard ? m_bottomDockHeight : 28.0f;
             if (x >= centerX && x <= centerX + centerW && y >= m_toolbarHeight && y <= m_height - curDockH) {
-                InsertChordAtTimelineX(droppedChord, x);
+                InsertChordAtTimelineX(droppedChord, x, true, m_inputGridTicks);
             }
             InvalidateRect(m_hwnd, nullptr, FALSE);
         }
@@ -1283,19 +1241,8 @@ void AppWindow::OnLButtonUp(float x, float y) {
     }
 
     if (m_dragMode == DragMode::CardResizeLeft) {
-        Part* pActive = m_partManager.GetActivePart();
-        if (pActive && m_dragBarIndex >= 0 && m_dragBarIndex < static_cast<int>(pActive->bars.size())) {
-            auto& bar = pActive->bars[m_dragBarIndex];
-            for (auto it = bar.chords.begin(); it != bar.chords.end(); ) {
-                if (it->isRest && it->durationTicks <= 1) {
-                    it = bar.chords.erase(it);
-                } else {
-                    ++it;
-                }
-            }
-        }
         m_dragMode = DragMode::None;
-        m_dragInitialBarChords.clear();
+        m_dragBaseBars.clear();
         ReleaseCapture();
         SyncTimelineToText();
         InvalidateRect(m_hwnd, nullptr, FALSE);
@@ -1304,6 +1251,7 @@ void AppWindow::OnLButtonUp(float x, float y) {
 
     if (m_dragMode != DragMode::None) {
         m_dragMode = DragMode::None;
+        m_dragBaseBars.clear();
         ReleaseCapture();
     }
 }
@@ -1382,6 +1330,15 @@ void AppWindow::OnRButtonUp(float x, float y) {
                     AppendMenuW(hMenu, (chord.inversion == 3) ? (MF_STRING | MF_CHECKED) : MF_STRING, IDM_CTX_CARD_INV3, TR(L"第3転回形 (3rd Inv)", L"3rd Inversion"));
                     if (!chord.isRest && chord.rootPitch != PitchClass::Unknown) {
                         AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+                        HMENU hOctSub = CreatePopupMenu();
+                        std::wstring octCur = TR(L"現在: ", L"Current: ");
+                        octCur += (chord.octaveOffset > 0 ? L"+" : L"") + std::to_wstring(chord.octaveOffset) + L" Oct";
+                        AppendMenuW(hOctSub, MF_STRING | MF_GRAYED, 0, octCur.c_str());
+                        AppendMenuW(hOctSub, MF_SEPARATOR, 0, nullptr);
+                        AppendMenuW(hOctSub, (chord.octaveOffset < 3) ? MF_STRING : (MF_STRING | MF_GRAYED), IDM_CTX_CARD_OCT_UP, TR(L"1オクターブ上へ (Ctrl+↑)", L"Octave Up (Ctrl+Up)"));
+                        AppendMenuW(hOctSub, (chord.octaveOffset > -3) ? MF_STRING : (MF_STRING | MF_GRAYED), IDM_CTX_CARD_OCT_DOWN, TR(L"1オクターブ下へ (Ctrl+↓)", L"Octave Down (Ctrl+Down)"));
+                        AppendMenuW(hOctSub, (chord.octaveOffset != 0) ? MF_STRING : (MF_STRING | MF_GRAYED), IDM_CTX_CARD_OCT_RESET, TR(L"オクターブをリセット", L"Reset Octave"));
+                        AppendMenuW(hMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hOctSub), TR(L"オクターブ変更", L"Change Octave"));
                         HMENU hBassSub = CreatePopupMenu();
                         AppendMenuW(hBassSub, chord.bassName.empty() ? (MF_STRING | MF_CHECKED) : MF_STRING, IDM_CTX_CARD_BASS_NONE, TR(L"オンベース解除 (通常コード)", L"Clear Slash Bass (Normal)"));
                         AppendMenuW(hBassSub, MF_STRING, IDM_CTX_CARD_BASS_3RD, TR(L"第3音ベース (1st Inv / On 3rd)", L"Bass on 3rd (1st Inv)"));
@@ -1496,33 +1453,45 @@ void AppWindow::OnKeyDown(WPARAM key) {
     }
 
     bool isCtrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    bool isShift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
     if (isCtrl) {
-        if (key == '1' || key == VK_NUMPAD1) {
-            m_selectedGridTicks = TICKS_PER_BAR_4_4;
-            SetStatusMessage(TR(L"グリッド: 1小節 (Ctrl+1)", L"Grid: 1 Bar (Ctrl+1)"));
+        int gridIndex = -1;
+        if (key == '1' || key == VK_NUMPAD1) gridIndex = 0;
+        else if (key == '2' || key == VK_NUMPAD2) gridIndex = 1;
+        else if (key == '3' || key == VK_NUMPAD3) gridIndex = 2;
+        else if (key == '4' || key == VK_NUMPAD4) gridIndex = 3;
+        else if (key == '5' || key == VK_NUMPAD5) gridIndex = 4;
+
+        if (gridIndex >= 0) {
+            const int grids[] = { TICKS_PER_BAR_4_4, TICKS_PER_BEAT * 2, TICKS_PER_BEAT, TICKS_PER_BEAT / 2, TICKS_PER_BEAT / 4 };
+            const wchar_t* jaNames[] = { L"1小節", L"2拍", L"1拍", L"1/2拍", L"1/4拍" };
+            const wchar_t* enNames[] = { L"1 Bar", L"2 Beats", L"1 Beat", L"1/2 Beat", L"1/4 Beat" };
+            std::wstring msg;
+            std::wstring combo = L" (Ctrl+" + std::wstring(isShift ? L"Shift+" : L"") + std::to_wstring(gridIndex + 1) + L")";
+            if (isShift) {
+                m_inputGridTicks = grids[gridIndex];
+                msg = TR(L"入力グリッド: ", L"Input grid: ");
+                msg += (m_settingLanguage == 1 ? enNames[gridIndex] : jaNames[gridIndex]);
+                msg += combo;
+            } else {
+                m_timelineGridTicks = grids[gridIndex];
+                msg = TR(L"タイムライングリッド: ", L"Timeline grid: ");
+                msg += (m_settingLanguage == 1 ? enNames[gridIndex] : jaNames[gridIndex]);
+                msg += combo;
+            }
+            SetStatusMessage(msg);
             InvalidateRect(m_hwnd, nullptr, FALSE);
             return;
-        } else if (key == '2' || key == VK_NUMPAD2) {
-            m_selectedGridTicks = TICKS_PER_BEAT * 2;
-            SetStatusMessage(TR(L"グリッド: 2拍 (Ctrl+2)", L"Grid: 2 Beats (Ctrl+2)"));
-            InvalidateRect(m_hwnd, nullptr, FALSE);
+        }
+        if (key == VK_UP) {
+            ShiftSelectedChordOctave(1);
             return;
-        } else if (key == '3' || key == VK_NUMPAD3) {
-            m_selectedGridTicks = TICKS_PER_BEAT;
-            SetStatusMessage(TR(L"グリッド: 1拍 (Ctrl+3)", L"Grid: 1 Beat (Ctrl+3)"));
-            InvalidateRect(m_hwnd, nullptr, FALSE);
+        }
+        if (key == VK_DOWN) {
+            ShiftSelectedChordOctave(-1);
             return;
-        } else if (key == '4' || key == VK_NUMPAD4) {
-            m_selectedGridTicks = TICKS_PER_BEAT / 2;
-            SetStatusMessage(TR(L"グリッド: 1/2拍 (Ctrl+4)", L"Grid: 1/2 Beat (Ctrl+4)"));
-            InvalidateRect(m_hwnd, nullptr, FALSE);
-            return;
-        } else if (key == '5' || key == VK_NUMPAD5) {
-            m_selectedGridTicks = TICKS_PER_BEAT / 4;
-            SetStatusMessage(TR(L"グリッド: 1/4拍 (Ctrl+5)", L"Grid: 1/4 Beat (Ctrl+5)"));
-            InvalidateRect(m_hwnd, nullptr, FALSE);
-            return;
-        } else if (key == 'D' || key == 'd') {
+        }
+        if (key == 'D' || key == 'd') {
             DuplicateSelectedChord();
             return;
         }

@@ -752,7 +752,9 @@ std::vector<int> MusicEngine::GetChordMidiNotes(
         return {};
     }
 
-    int rootMidi = 12 * (baseOctave + 1) + static_cast<int>(chord.rootPitch);
+    // コード単位のオクターブシフトを反映（全体の基準オクターブに加算）
+    int effectiveOctave = std::clamp(baseOctave + chord.octaveOffset, 0, 8);
+    int rootMidi = 12 * (effectiveOctave + 1) + static_cast<int>(chord.rootPitch);
     std::vector<int> intervals = GetQualityIntervals(chord.quality);
 
     std::vector<int> notes;
@@ -806,7 +808,7 @@ std::vector<int> MusicEngine::GetChordMidiNotes(
     PitchClass bp = (chord.bassPitch != PitchClass::Unknown) ? chord.bassPitch : chord.rootPitch;
     if (bp != PitchClass::Unknown) {
         int bassPitchVal = static_cast<int>(bp);
-        int baseMidi = 12 * (baseOctave) + bassPitchVal; // C3 (48) at baseOctave=4
+        int baseMidi = 12 * (effectiveOctave) + bassPitchVal; // C3 (48) at baseOctave=4
         if (bassOctaveMode == 0) {
             // オンコード指定時のみベース音を追加、通常時は追加ベースなし
             if (chord.bassPitch != PitchClass::Unknown) {

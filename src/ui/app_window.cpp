@@ -237,6 +237,11 @@ void AppWindow::RebuildMainMenu() {
     AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_SPLIT, TR(L"選択コードの分割(&S)\tB", L"Split Chord(&S)\tB"));
     AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_DUPLICATE, TR(L"選択コードの複製(&D)\tCtrl+D", L"Duplicate Chord(&D)\tCtrl+D"));
     AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_DELETE, TR(L"選択コードの削除(&D)\tDel", L"Delete Chord(&D)\tDel"));
+    AppendMenuW(hEditMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_OCTAVE_UP, TR(L"選択コードをオクターブ上へ(&U)\tCtrl+↑", L"Octave Up(&U)\tCtrl+Up"));
+    AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_OCTAVE_DOWN, TR(L"選択コードをオクターブ下へ(&L)\tCtrl+↓", L"Octave Down(&L)\tCtrl+Down"));
+    AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_OCTAVE_RESET, TR(L"選択コードのオクターブをリセット", L"Reset Chord Octave"));
+    AppendMenuW(hEditMenu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_SELECTALL, TR(L"すべて選択(&A)\tCtrl+A", L"Select All(&A)\tCtrl+A"));
     AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_CLEARALL, TR(L"全クリア(&C)", L"Clear All(&C)"));
     AppendMenuW(hNewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hEditMenu), TR(L"編集(&E)", L"Edit(&E)"));
@@ -662,7 +667,13 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             }
             if (wmId >= IDM_GRID_BASE && wmId < IDM_GRID_BASE + 5) {
                 int grids[] = { TICKS_PER_BAR_4_4, TICKS_PER_BEAT * 2, TICKS_PER_BEAT, TICKS_PER_BEAT / 2, TICKS_PER_BEAT / 4 };
-                m_selectedGridTicks = grids[wmId - IDM_GRID_BASE];
+                m_timelineGridTicks = grids[wmId - IDM_GRID_BASE];
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return 0;
+            }
+            if (wmId >= IDM_INPUT_GRID_BASE && wmId < IDM_INPUT_GRID_BASE + 5) {
+                int grids[] = { TICKS_PER_BAR_4_4, TICKS_PER_BEAT * 2, TICKS_PER_BEAT, TICKS_PER_BEAT / 2, TICKS_PER_BEAT / 4 };
+                m_inputGridTicks = grids[wmId - IDM_INPUT_GRID_BASE];
                 InvalidateRect(m_hwnd, nullptr, FALSE);
                 return 0;
             }
@@ -716,6 +727,12 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 }
                 return 0;
             }
+            if (wmId >= IDM_CTX_CARD_OCT_UP && wmId <= IDM_CTX_CARD_OCT_RESET) {
+                if (wmId == IDM_CTX_CARD_OCT_UP) ShiftSelectedChordOctave(1);
+                else if (wmId == IDM_CTX_CARD_OCT_DOWN) ShiftSelectedChordOctave(-1);
+                else ResetSelectedChordOctave();
+                return 0;
+            }
             if ((wmId >= IDM_CTX_CARD_BASS_NONE && wmId <= IDM_CTX_CARD_BASS_7TH) ||
                 (wmId >= IDM_CTX_CARD_BASS_BASE && wmId < IDM_CTX_CARD_BASS_BASE + 12)) {
                 Part* pActive = m_partManager.GetActivePart();
@@ -753,6 +770,7 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                             updated.durationTicks = selC.durationTicks;
                             updated.durationBeats = selC.durationBeats;
                             updated.inversion = selC.inversion;
+                            updated.octaveOffset = selC.octaveOffset;
                             selC = updated;
                             SyncTimelineToText();
                             AuditionChord(selC);
@@ -781,6 +799,9 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 case IDM_EDIT_UNDO: Undo(); break;
                 case IDM_EDIT_REDO: Redo(); break;
                 case IDM_EDIT_SPLIT: SplitSelectedChord(); break;
+                case IDM_EDIT_OCTAVE_UP: ShiftSelectedChordOctave(1); break;
+                case IDM_EDIT_OCTAVE_DOWN: ShiftSelectedChordOctave(-1); break;
+                case IDM_EDIT_OCTAVE_RESET: ResetSelectedChordOctave(); break;
                 case IDM_EDIT_DUPLICATE: DuplicateSelection(); break;
                 case IDM_EDIT_DELETE: DeleteSelection(); break;
                 case IDM_EDIT_SELECTALL: SelectAll(); break;
