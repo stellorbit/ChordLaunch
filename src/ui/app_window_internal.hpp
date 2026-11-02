@@ -22,6 +22,7 @@ namespace clp {
 
 #define IDM_FILE_NEW         1001
 #define IDM_FILE_OPEN        1002
+#define IDM_FILE_DASHBOARD   1007
 #define IDM_FILE_SAVE        1003
 #define IDM_FILE_SAVEAS      1004
 #define IDM_FILE_EXPORT_MIDI 1005

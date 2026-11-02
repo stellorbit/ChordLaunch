@@ -906,6 +906,33 @@ bool AppWindow::HitTestPaletteCard(float x, float y, ChordToken& outChord) {
 }
 
 void AppWindow::OnLButtonDblClk(float x, float y) {
+    if (m_activeModal == ModalType::Dashboard) {
+        float cardW = std::min(740.0f, m_width - 40.0f);
+        float cardH = std::min(520.0f, m_height - 40.0f);
+        float cardX = (m_width - cardW) * 0.5f;
+        float cardY = (m_height - cardH) * 0.5f;
+        D2D1_RECT_F bodyRc = D2D1::RectF(cardX + 16.0f, cardY + 44.0f + 12.0f, cardX + cardW - 16.0f, cardY + cardH - 16.0f);
+
+        float curY = bodyRc.top + 58.0f + 72.0f + 24.0f;
+        float rListH = bodyRc.bottom - curY - 44.0f;
+        D2D1_RECT_F rListBox = D2D1::RectF(bodyRc.left, curY, bodyRc.right, curY + rListH);
+        if (!m_recentFiles.empty() && PtInRectF(rListBox, x, y)) {
+            float itemH = 32.0f;
+            size_t maxItems = std::min<size_t>(m_recentFiles.size(), static_cast<size_t>(std::floor((rListH - 8.0f) / (itemH + 2.0f))));
+            for (size_t ri = 0; ri < maxItems; ++ri) {
+                float iy = rListBox.top + 6.0f + ri * (itemH + 2.0f);
+                D2D1_RECT_F itemRc = D2D1::RectF(rListBox.left + 6.0f, iy, rListBox.right - 6.0f, iy + itemH);
+                if (PtInRectF(itemRc, x, y)) {
+                    m_dashboardSelectedRecentIndex = static_cast<int>(ri);
+                    OpenRecentFile(static_cast<int>(ri));
+                    CloseModal();
+                    return;
+                }
+            }
+        }
+        return;
+    }
+
     if (m_activeModal != ModalType::None) return;
 
     // パートタブのダブルクリックで名前変更モーダルを開く
@@ -1320,6 +1347,43 @@ void AppWindow::OnMouseWheel(short delta, float /*x*/, float /*y*/) {
 }
 
 void AppWindow::OnKeyDown(WPARAM key) {
+    if (m_activeModal == ModalType::Dashboard) {
+        if (key == VK_RETURN) {
+            if (m_dashboardSelectedRecentIndex >= 0 && m_dashboardSelectedRecentIndex < static_cast<int>(m_recentFiles.size())) {
+                OpenRecentFile(m_dashboardSelectedRecentIndex);
+                CloseModal();
+            }
+            return;
+        }
+        if (key == VK_ESCAPE) {
+            CloseModal();
+            return;
+        }
+        if (key == VK_UP) {
+            if (!m_recentFiles.empty()) {
+                if (m_dashboardSelectedRecentIndex <= 0) {
+                    m_dashboardSelectedRecentIndex = static_cast<int>(m_recentFiles.size()) - 1;
+                } else {
+                    --m_dashboardSelectedRecentIndex;
+                }
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+            }
+            return;
+        }
+        if (key == VK_DOWN) {
+            if (!m_recentFiles.empty()) {
+                if (m_dashboardSelectedRecentIndex < 0 || m_dashboardSelectedRecentIndex >= static_cast<int>(m_recentFiles.size()) - 1) {
+                    m_dashboardSelectedRecentIndex = 0;
+                } else {
+                    ++m_dashboardSelectedRecentIndex;
+                }
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+            }
+            return;
+        }
+        return;
+    }
+
     if (m_activeModal == ModalType::RenamePart) {
         if (key == VK_RETURN) {
             auto& parts = m_partManager.GetParts();

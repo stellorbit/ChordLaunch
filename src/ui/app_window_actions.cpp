@@ -1256,4 +1256,9 @@ void AppWindow::OpenRenamePartModal(int partIndex) {
     OpenModal(ModalType::RenamePart);
 }
 
+void AppWindow::OpenDashboardModal() {
+    m_dashboardSelectedRecentIndex = -1;
+    OpenModal(ModalType::Dashboard);
+}
+
 } // namespace clp

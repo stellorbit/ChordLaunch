@@ -157,6 +157,7 @@ private:
     void ChooseDirectory(std::wstring& outDir, const wchar_t* title);
     void DoMergeAllToNewPart();
     void OpenRenamePartModal(int partIndex);
+    void OpenDashboardModal();
 
     // プルダウンメニュー表示・メニューバー言語更新
     void RebuildMainMenu();

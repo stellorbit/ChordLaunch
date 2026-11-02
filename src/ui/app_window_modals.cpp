@@ -170,13 +170,18 @@ void AppWindow::RenderDashboardModal(const D2D1_RECT_F& rc) {
             DrawTextSafe(fDir, m_pFontInspector, dirRc, m_pBrushTextMuted);
 
             D2D1_RECT_F bOpenItem = D2D1::RectF(itemRc.right - 72.0f, itemRc.top + 4.0f, itemRc.right - 6.0f, itemRc.bottom - 4.0f);
-            DrawButton(bOpenItem, TR(L"開く", L"Open"), IconType::None);
+            DrawButton(bOpenItem, TR(L"開く", L"Open"), IconType::None, false, false, isSel, isSel ? Theme::AccentAction : D2D1_COLOR_F{0, 0, 0, 0});
         }
     }
 
-    // 4. フッター (起動時表示チェックボックス & 閉じるボタン)
+    // 4. フッター (起動時表示チェックボックス & 選択項目を開く & 閉じるボタン)
     D2D1_RECT_F chkRc = D2D1::RectF(rc.left + 6.0f, rc.bottom - 32.0f, rc.left + 350.0f, rc.bottom - 4.0f);
     DrawCheckboxUI(m_pRenderTarget, m_pFontInspector, m_pBrushText, m_pBrushBorderLight, m_pBrushAccent, chkRc, m_showDashboardOnStartup, TR(L"起動時にこのダッシュボードを表示する", L"Show this dashboard on startup"));
+
+    if (m_dashboardSelectedRecentIndex >= 0 && m_dashboardSelectedRecentIndex < static_cast<int>(m_recentFiles.size())) {
+        D2D1_RECT_F bOpenSel = D2D1::RectF(rc.right - 310.0f, rc.bottom - 34.0f, rc.right - 120.0f, rc.bottom);
+        DrawButton(bOpenSel, TR(L"選択したプロジェクトを開く", L"Open Selected Project"), IconType::None, false, false, true, Theme::AccentAction);
+    }
 
     D2D1_RECT_F bClose = D2D1::RectF(rc.right - 110.0f, rc.bottom - 34.0f, rc.right, rc.bottom);
     DrawButton(bClose, TR(L"閉じる", L"Close"), IconType::None);
@@ -924,10 +929,17 @@ bool AppWindow::OnModalClick(float x, float y) {
                     float iy = rListBox.top + 6.0f + ri * (itemH + 2.0f);
                     D2D1_RECT_F itemRc = D2D1::RectF(rListBox.left + 6.0f, iy, rListBox.right - 6.0f, iy + itemH);
                     if (PtInRectF(itemRc, x, y)) {
-                        m_dashboardSelectedRecentIndex = static_cast<int>(ri);
-                        OpenRecentFile(static_cast<int>(ri));
-                        CloseModal();
-                        return true;
+                        D2D1_RECT_F bOpenItem = D2D1::RectF(itemRc.right - 72.0f, itemRc.top + 4.0f, itemRc.right - 6.0f, itemRc.bottom - 4.0f);
+                        if (PtInRectF(bOpenItem, x, y)) {
+                            m_dashboardSelectedRecentIndex = static_cast<int>(ri);
+                            OpenRecentFile(static_cast<int>(ri));
+                            CloseModal();
+                            return true;
+                        } else {
+                            m_dashboardSelectedRecentIndex = static_cast<int>(ri);
+                            InvalidateRect(m_hwnd, nullptr, FALSE);
+                            return true;
+                        }
                     }
                 }
             }
@@ -939,6 +951,15 @@ bool AppWindow::OnModalClick(float x, float y) {
                 SaveAppSettings();
                 InvalidateRect(m_hwnd, nullptr, FALSE);
                 return true;
+            }
+
+            if (m_dashboardSelectedRecentIndex >= 0 && m_dashboardSelectedRecentIndex < static_cast<int>(m_recentFiles.size())) {
+                D2D1_RECT_F bOpenSel = D2D1::RectF(bodyRc.right - 310.0f, bodyRc.bottom - 34.0f, bodyRc.right - 120.0f, bodyRc.bottom);
+                if (PtInRectF(bOpenSel, x, y)) {
+                    OpenRecentFile(m_dashboardSelectedRecentIndex);
+                    CloseModal();
+                    return true;
+                }
             }
 
             D2D1_RECT_F bClose = D2D1::RectF(bodyRc.right - 110.0f, bodyRc.bottom - 34.0f, bodyRc.right, bodyRc.bottom);

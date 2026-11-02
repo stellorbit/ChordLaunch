@@ -207,6 +207,7 @@ void AppWindow::RebuildMainMenu() {
     HMENU hFileMenu = CreatePopupMenu();
     AppendMenuW(hFileMenu, MF_STRING, IDM_FILE_NEW, TR(L"新規(&N)\tCtrl+N", L"New(&N)\tCtrl+N"));
     AppendMenuW(hFileMenu, MF_STRING, IDM_FILE_OPEN, TR(L"開く(&O)...\tCtrl+O", L"Open(&O)...\tCtrl+O"));
+    AppendMenuW(hFileMenu, MF_STRING, IDM_FILE_DASHBOARD, TR(L"ダッシュボード(&D)...", L"Dashboard(&D)..."));
 
     // 最近使ったファイル (MRU) サブメニュー
     HMENU hRecentMenu = CreatePopupMenu();
@@ -765,6 +766,7 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             switch (wmId) {
                 case IDM_FILE_NEW: DoFileNew(); break;
                 case IDM_FILE_OPEN: DoFileOpen(); break;
+                case IDM_FILE_DASHBOARD: OpenDashboardModal(); break;
                 default:
                     if (wmId >= IDM_FILE_MRU_BASE && wmId < IDM_FILE_MRU_BASE + 10) {
                         OpenRecentFile(wmId - IDM_FILE_MRU_BASE);

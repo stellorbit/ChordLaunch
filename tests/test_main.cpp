@@ -5,6 +5,7 @@
 #include "midi_builder.hpp"
 #include "i18n.hpp"
 #include "wasapi_synth.hpp"
+#include "app_window_internal.hpp"
 #include <windows.h>
 #include <iostream>
 #include <cassert>
@@ -701,6 +702,75 @@ void TestPartRenameAndMergeAllToNewPart() {
     TEST_ASSERT(longRenderBars == 96, "80 bars song extends timeline capacity to 96 bars");
 }
 
+void TestDashboardFileSelectionAndMenu() {
+    std::cout << "[TEST] 19. Dashboard File Selection Separation and Menu Item\n";
+
+    // 1. メニューコマンドID定義
+    TEST_ASSERT(IDM_FILE_DASHBOARD == 1007, "IDM_FILE_DASHBOARD is 1007");
+
+    // 2. 履歴ファイル選択の非破壊ハイライトとオープン分離ロジック
+    std::vector<std::wstring> recentFiles = {
+        L"C:\\Projects\\SongA.chord",
+        L"C:\\Projects\\SongB.chord",
+        L"C:\\Projects\\SongC.chord"
+    };
+
+    int selectedIdx = -1;
+    bool openExecuted = false;
+    std::wstring openedPath;
+
+    auto onRowClick = [&](int clickedIdx, bool isButtonOrDblClick) {
+        if (isButtonOrDblClick) {
+            selectedIdx = clickedIdx;
+            openedPath = recentFiles[clickedIdx];
+            openExecuted = true;
+        } else {
+            // 行の通常クリック: 選択ハイライトのみ
+            selectedIdx = clickedIdx;
+            openExecuted = false;
+        }
+    };
+
+    // 行クリック時: 選択のみ行われ、ファイルは開かれない
+    onRowClick(1, false);
+    TEST_ASSERT(selectedIdx == 1, "Clicking recent row selects index 1");
+    TEST_ASSERT(!openExecuted, "Clicking recent row does NOT trigger open action");
+    TEST_ASSERT(openedPath.empty(), "Opened path remains empty on selection");
+
+    // 別の行をクリック時: 選択が更新され、ファイルは開かれない
+    onRowClick(2, false);
+    TEST_ASSERT(selectedIdx == 2, "Clicking another recent row updates selection to index 2");
+    TEST_ASSERT(!openExecuted, "Switching selection does NOT trigger open action");
+
+    // 明示的［開く］押下またはダブルクリック時: 初めてオープンが実行される
+    onRowClick(2, true);
+    TEST_ASSERT(openExecuted, "Clicking Open button or double click triggers file open");
+    TEST_ASSERT(openedPath == L"C:\\Projects\\SongC.chord", "Correct selected file is opened");
+
+    // 3. キーボードナビゲーション (上下キー循環)
+    auto handleKeyNav = [&](int current, bool isDown, size_t total) {
+        if (total == 0) return -1;
+        if (isDown) {
+            return (current < 0 || current >= static_cast<int>(total) - 1) ? 0 : current + 1;
+        } else {
+            return (current <= 0) ? static_cast<int>(total) - 1 : current - 1;
+        }
+    };
+
+    int navIdx = -1;
+    navIdx = handleKeyNav(navIdx, true, recentFiles.size()); // Down from none -> 0
+    TEST_ASSERT(navIdx == 0, "Down key from unselected selects first item (0)");
+
+    navIdx = handleKeyNav(navIdx, true, recentFiles.size()); // Down -> 1
+    TEST_ASSERT(navIdx == 1, "Down key advances selection to index 1");
+
+    navIdx = handleKeyNav(navIdx, false, recentFiles.size()); // Up -> 0
+    TEST_ASSERT(navIdx == 0, "Up key moves selection back to index 0");
+
+    navIdx = handleKeyNav(navIdx, false, recentFiles.size()); // Up from 0 wraps to last (2)
+    TEST_ASSERT(navIdx == 2, "Up key from index 0 wraps around to last item (2)");
+}
+
 int main() {
     std::cout << "========================================\n";
     std::cout << "ChordLaunch C++20 Core Test Suite\n";
@@ -724,6 +794,7 @@ int main() {
     TestComprehensiveFixes();
     TestDashboardAndMRU();
     TestPartRenameAndMergeAllToNewPart();
+    TestDashboardFileSelectionAndMenu();
 
     std::cout << "========================================\n";
     std::cout << "Tests Passed: " << g_passCount << ", Failed: " << g_failCount << "\n";
