@@ -959,48 +959,110 @@ void TestCardResizeLeftWithRestPadding() {
 
     TEST_ASSERT(bar.chords.size() == 2, "Bar initially has 2 tokens (C, rest)");
 
-    // 2. 左端リサイズ開始: 手前に dummyRest (0 ticks) を挿入して正規化
-    int dragChordIdx = 0;
-    ChordToken dummyRest;
-    dummyRest.isRest = true;
-    dummyRest.quality = ChordQuality::Rest;
-    dummyRest.rootName = "R";
-    dummyRest.rawText = "_";
-    dummyRest.SetTicks(0);
-    bar.chords.insert(bar.chords.begin() + dragChordIdx, dummyRest);
-    dragChordIdx = 1;
-
-    int initialTicks = 960;
-    int initialPrevTicks = 0;
+    // 2. 決定論的スナップショットモデルによる左端リサイズ検証
+    std::vector<ChordToken> snapshot = bar.chords;
+    int dragChordIndex = 0;
+    int dragChordStartTick = 0;
+    int dragInitialTicks = 960;
+    int dragLeftLimitTick = 0;
     int snapTicks = 480; // 1拍グリッド
-    TEST_ASSERT(snapTicks == 480, "snapTicks is 480");
+    int origEndTick = dragChordStartTick + dragInitialTicks; // 960
 
-    // 右へ1拍 (480 ticks) ドラッグ: 縮小＆手前休符化
-    int deltaTicks = 480;
-    int newPrevTicks = initialPrevTicks + deltaTicks;
-    int newSelfTicks = initialTicks - deltaTicks;
-    bar.chords[dragChordIdx - 1].SetTicks(newPrevTicks);
-    bar.chords[dragChordIdx].SetTicks(newSelfTicks);
+    auto rebuildBar = [&](int deltaTicks) {
+        int maxStartTick = origEndTick - snapTicks;
+        int minStartTick = dragLeftLimitTick;
+        int newStartTick = std::clamp(dragChordStartTick + deltaTicks, minStartTick, maxStartTick);
+        int newChordTicks = origEndTick - newStartTick;
 
-    TEST_ASSERT(bar.chords[0].isRest && bar.chords[0].durationTicks == 480, "Preceding token became 1-beat rest (480 ticks)");
-    TEST_ASSERT(!bar.chords[1].isRest && bar.chords[1].rawText == "C" && bar.chords[1].durationTicks == 480, "Chord C trimmed to 1 beat (480 ticks)");
-    TEST_ASSERT(bar.chords[2].isRest && bar.chords[2].durationTicks == 960, "Tail rest remains 2 beats (960 ticks)");
+        std::vector<ChordToken> rebuilt = snapshot;
+        bool hadPrevRest = (dragChordIndex > 0 && rebuilt[dragChordIndex - 1].isRest);
 
-    // 3. 左へ1拍 (-480 ticks) ドラッグ: 手前休符を吸収して復元
-    deltaTicks = 0;
-    newPrevTicks = initialPrevTicks + deltaTicks;
-    newSelfTicks = initialTicks - deltaTicks;
-    bar.chords[dragChordIdx - 1].SetTicks(newPrevTicks);
-    bar.chords[dragChordIdx].SetTicks(newSelfTicks);
+        if (hadPrevRest) {
+            int prevRestTicks = newStartTick - dragLeftLimitTick;
+            if (prevRestTicks > 0) {
+                rebuilt[dragChordIndex - 1].SetTicks(prevRestTicks);
+                rebuilt[dragChordIndex].SetTicks(newChordTicks);
+            } else {
+                rebuilt[dragChordIndex].SetTicks(newChordTicks);
+                rebuilt.erase(rebuilt.begin() + (dragChordIndex - 1));
+            }
+        } else {
+            int insertedRestTicks = newStartTick - dragChordStartTick;
+            if (insertedRestTicks > 0) {
+                ChordToken restTok;
+                restTok.isRest = true;
+                restTok.quality = ChordQuality::Rest;
+                restTok.rootName = "R";
+                restTok.degreeRoman = "R";
+                restTok.rawText = "_";
+                restTok.SetTicks(insertedRestTicks);
+                rebuilt[dragChordIndex].SetTicks(newChordTicks);
+                rebuilt.insert(rebuilt.begin() + dragChordIndex, restTok);
+            } else {
+                rebuilt[dragChordIndex].SetTicks(newChordTicks);
+            }
+        }
+        return rebuilt;
+    };
 
-    // マウスアップ時のクリーンアップ (0 ticks 休符の消去)
-    if (bar.chords[dragChordIdx - 1].isRest && bar.chords[dragChordIdx - 1].durationTicks <= 1) {
-        bar.chords.erase(bar.chords.begin() + dragChordIdx - 1);
-    }
+    // (A) 右へ1拍 (480 ticks) ドラッグ: 縮小＆手前に休符を自動生成
+    auto chordsTrimmed = rebuildBar(480);
+    TEST_ASSERT(chordsTrimmed.size() == 3, "Trim right generated 3 tokens (rest, C, tail rest)");
+    TEST_ASSERT(chordsTrimmed[0].isRest && chordsTrimmed[0].durationTicks == 480, "Preceding inserted rest has 480 ticks (1 beat)");
+    TEST_ASSERT(!chordsTrimmed[1].isRest && chordsTrimmed[1].rawText == "C" && chordsTrimmed[1].durationTicks == 480, "Chord C trimmed to 480 ticks (1 beat)");
+    TEST_ASSERT(chordsTrimmed[2].isRest && chordsTrimmed[2].durationTicks == 960, "Tail rest preserved at 960 ticks");
 
-    TEST_ASSERT(bar.chords.size() == 2, "0-tick rest cleaned up, bar restored to 2 tokens");
-    TEST_ASSERT(!bar.chords[0].isRest && bar.chords[0].rawText == "C" && bar.chords[0].durationTicks == 960, "Chord C restored to original 2 beats (960 ticks)");
-    TEST_ASSERT(bar.chords[1].isRest && bar.chords[1].durationTicks == 960, "Tail rest remains intact");
+    // (B) 再び左へ戻す (0 ticks): 手前休符が消滅して元の状態へ完全復元
+    auto chordsRestored = rebuildBar(0);
+    TEST_ASSERT(chordsRestored.size() == 2, "Returned to 0 delta restores 2 tokens without dummy rests");
+    TEST_ASSERT(!chordsRestored[0].isRest && chordsRestored[0].rawText == "C" && chordsRestored[0].durationTicks == 960, "Chord C restored to 960 ticks");
+    TEST_ASSERT(chordsRestored[1].isRest && chordsRestored[1].durationTicks == 960, "Tail rest intact");
+
+    // 3. 手前に休符がある状態からの左端ドラッグ伸長 (シンコペーション) 検証
+    Bar bar2;
+    ChordToken restLead;
+    restLead.isRest = true;
+    restLead.rawText = "_";
+    restLead.SetTicks(480); // 1拍目休符
+    bar2.chords.push_back(restLead);
+
+    ChordToken chordG;
+    chordG.rawText = "G";
+    chordG.rootName = "G";
+    chordG.SetTicks(480); // 2拍目 G
+    bar2.chords.push_back(chordG);
+
+    std::vector<ChordToken> snapshot2 = bar2.chords;
+    int dragIdx2 = 1;
+    int startTick2 = 480;
+    int leftLimit2 = 0; // 手前休符の開始位置 = 0
+    int endTick2 = 960;
+
+    auto rebuildBar2 = [&](int deltaTicks) {
+        int newStart = std::clamp(startTick2 + deltaTicks, leftLimit2, endTick2 - 240);
+        int newTicks = endTick2 - newStart;
+        std::vector<ChordToken> rebuilt = snapshot2;
+        int prevRestTicks = newStart - leftLimit2;
+        if (prevRestTicks > 0) {
+            rebuilt[dragIdx2 - 1].SetTicks(prevRestTicks);
+            rebuilt[dragIdx2].SetTicks(newTicks);
+        } else {
+            rebuilt[dragIdx2].SetTicks(newTicks);
+            rebuilt.erase(rebuilt.begin() + (dragIdx2 - 1));
+        }
+        return rebuilt;
+    };
+
+    // 左へ1/2拍 (-240 ticks) ドラッグ: 8分音符裏拍へのシンコペーション伸長
+    auto chordsSynco = rebuildBar2(-240);
+    TEST_ASSERT(chordsSynco.size() == 2, "Synco bar has 2 tokens (compressed rest, expanded G)");
+    TEST_ASSERT(chordsSynco[0].isRest && chordsSynco[0].durationTicks == 240, "Lead rest compressed to 240 ticks (half beat)");
+    TEST_ASSERT(!chordsSynco[1].isRest && chordsSynco[1].durationTicks == 720, "Chord G expanded to 720 ticks (1.5 beats, syncopated)");
+
+    // 左へ1拍 (-480 ticks) ドラッグ: 手前休符を完全消費して小節頭まで伸長
+    auto chordsFull = rebuildBar2(-480);
+    TEST_ASSERT(chordsFull.size() == 1, "Full expansion consumed lead rest completely (1 token)");
+    TEST_ASSERT(!chordsFull[0].isRest && chordsFull[0].rawText == "G" && chordsFull[0].durationTicks == 960, "Chord G now starts at beat 1 with 960 ticks (2 beats)");
 }
 
 void TestDropGridSnapPreview() {
@@ -1035,11 +1097,11 @@ void TestDropGridSnapPreview() {
 
     // 2. 左端リサイズ掴み判定マージンの検証
     auto calcMargin = [](float cardW) {
-        return std::min(14.0f, cardW * 0.35f);
+        return std::min(16.0f, cardW * 0.35f);
     };
 
     float mStandard = calcMargin(64.0f); // 1拍カード
-    TEST_ASSERT(mStandard == 14.0f, "1-beat card has 14px grab margin");
+    TEST_ASSERT(mStandard == 16.0f, "1-beat card has 16px grab margin");
 
     float mSmall = calcMargin(24.0f); // 極小カード
     TEST_ASSERT(mSmall == 8.4f, "Small card caps margin at 35% (8.4px), leaving >= 30% for drag-move");

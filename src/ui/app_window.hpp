@@ -306,6 +306,9 @@ private:
     int   m_dragInitialTicks = 0;
     int   m_dragInitialNextTicks = 0;
     int   m_dragInitialPrevTicks = 0;
+    int   m_dragChordStartTick = 0;
+    int   m_dragLeftLimitTick = 0;
+    std::vector<ChordToken> m_dragInitialBarChords;
     float m_dragCardGrabOffsetX = 0.0f; // カード左端からのクリック位置オフセット
 
     // 再生状態 (tick時間管理)
