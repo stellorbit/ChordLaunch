@@ -83,7 +83,7 @@ void AppWindow::AppendChordToTimeline(const ChordToken& chord) {
     InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
-void AppWindow::InsertChordAtTimelinePosition(const ChordToken& chord, int targetBarIdx, int targetBeat) {
+void AppWindow::InsertChordAtTimelineTick(const ChordToken& chord, int targetBarIdx, int targetTickInBar) {
     Part* pActive = m_partManager.GetActivePart();
     if (!pActive) return;
 
@@ -99,118 +99,108 @@ void AppWindow::InsertChordAtTimelinePosition(const ChordToken& chord, int targe
     PushUndo();
     m_isMergedView = false;
     auto& targetBar = pActive->bars[targetBarIdx];
-    int barBeats = targetBar.timeNumerator > 0 ? targetBar.timeNumerator : 4;
-    int chordBeats = std::clamp(chord.durationBeats > 0 ? chord.durationBeats : 1, 1, barBeats);
-    // 右端にドロップした際にコードが勝手に縮まないよう、小節末尾に収まるようスナップ
-    targetBeat = std::clamp(targetBeat, 0, std::max(0, barBeats - chordBeats));
+    int barNumerator = targetBar.timeNumerator > 0 ? targetBar.timeNumerator : 4;
+    int barTotalTicks = barNumerator * TICKS_PER_BEAT;
 
-    // 既存コードを区間 (startBeat, durationBeats) として収集 (休符以外)
-    struct PlacedItem {
-        int startBeat = 0;
-        int durationBeats = 1;
+    int chordTicks = chord.durationTicks > 0 ? chord.durationTicks : (chord.durationBeats > 0 ? chord.durationBeats * TICKS_PER_BEAT : TICKS_PER_BEAT);
+    chordTicks = std::clamp(chordTicks, 1, barTotalTicks);
+
+    // 小節末尾に収まるようスナップ
+    targetTickInBar = std::clamp(targetTickInBar, 0, std::max(0, barTotalTicks - chordTicks));
+
+    struct PlacedTickItem {
+        int startTick = 0;
+        int durationTicks = TICKS_PER_BEAT;
         ChordToken chord;
     };
-    std::vector<PlacedItem> placed;
-    int curBeat = 0;
+    std::vector<PlacedTickItem> placed;
+    int curTick = 0;
     for (const auto& existing : targetBar.chords) {
-        int eBeats = existing.durationBeats > 0 ? existing.durationBeats : std::max(1, existing.durationTicks / TICKS_PER_BEAT);
+        int eTicks = existing.durationTicks > 0 ? existing.durationTicks : (existing.durationBeats * TICKS_PER_BEAT);
         if (!existing.isRest) {
-            placed.push_back(PlacedItem{curBeat, eBeats, existing});
+            placed.push_back(PlacedTickItem{curTick, eTicks, existing});
         }
-        curBeat += eBeats;
+        curTick += eTicks;
     }
 
-    int newStart = targetBeat;
-    int newEnd = targetBeat + chordBeats;
+    int newStart = targetTickInBar;
+    int newEnd = targetTickInBar + chordTicks;
 
-    // 衝突判定: [newStart, newEnd) に重なる既存コードがあるか？
     bool hasCollision = false;
     for (const auto& pt : placed) {
-        int ptStart = pt.startBeat;
-        int ptEnd = pt.startBeat + pt.durationBeats;
+        int ptStart = pt.startTick;
+        int ptEnd = pt.startTick + pt.durationTicks;
         if (std::max(ptStart, newStart) < std::min(ptEnd, newEnd)) {
             hasCollision = true;
             break;
         }
     }
 
-    std::vector<PlacedItem> resolved;
-    std::vector<PlacedItem> overflowItems;
+    std::vector<PlacedTickItem> resolved;
+    std::vector<PlacedTickItem> overflowItems;
 
     if (!hasCollision) {
-        // 衝突なし: 既存コードをそのまま残し、新規コードを追加
         resolved = placed;
         if (!chord.isRest) {
-            PlacedItem newPt;
-            newPt.startBeat = newStart;
-            newPt.durationBeats = chordBeats;
+            PlacedTickItem newPt;
+            newPt.startTick = newStart;
+            newPt.durationTicks = chordTicks;
             newPt.chord = chord;
-            newPt.chord.durationBeats = chordBeats;
-            newPt.chord.durationTicks = chordBeats * TICKS_PER_BEAT;
+            newPt.chord.SetTicks(chordTicks);
             resolved.push_back(newPt);
         }
     } else {
-        // 衝突あり: 既存コードを消去せず、後ろへ押し出しシフト
         for (const auto& pt : placed) {
-            int ptStart = pt.startBeat;
-            int ptEnd = pt.startBeat + pt.durationBeats;
+            int ptStart = pt.startTick;
+            int ptEnd = pt.startTick + pt.durationTicks;
 
             if (ptEnd <= newStart) {
-                // 新規コードより前: そのまま
                 resolved.push_back(pt);
             } else if (ptStart >= newStart) {
-                // 新規コード以降: chordBeats 分シフト
-                PlacedItem shifted = pt;
-                shifted.startBeat += chordBeats;
-                if (shifted.startBeat >= barBeats) {
+                PlacedTickItem shifted = pt;
+                shifted.startTick += chordTicks;
+                if (shifted.startTick >= barTotalTicks) {
                     overflowItems.push_back(shifted);
-                } else if (shifted.startBeat + shifted.durationBeats > barBeats) {
-                    int inBarBeats = barBeats - shifted.startBeat;
-                    int overBeats = shifted.durationBeats - inBarBeats;
-                    PlacedItem inBar = shifted;
-                    inBar.durationBeats = inBarBeats;
-                    inBar.chord.durationBeats = inBarBeats;
-                    inBar.chord.durationTicks = inBarBeats * TICKS_PER_BEAT;
+                } else if (shifted.startTick + shifted.durationTicks > barTotalTicks) {
+                    int inBarTicks = barTotalTicks - shifted.startTick;
+                    int overTicks = shifted.durationTicks - inBarTicks;
+                    PlacedTickItem inBar = shifted;
+                    inBar.durationTicks = inBarTicks;
+                    inBar.chord.SetTicks(inBarTicks);
                     resolved.push_back(inBar);
 
-                    PlacedItem over = shifted;
-                    over.startBeat = 0;
-                    over.durationBeats = overBeats;
-                    over.chord.durationBeats = overBeats;
-                    over.chord.durationTicks = overBeats * TICKS_PER_BEAT;
+                    PlacedTickItem over = shifted;
+                    over.startTick = 0;
+                    over.durationTicks = overTicks;
+                    over.chord.SetTicks(overTicks);
                     overflowItems.push_back(over);
                 } else {
                     resolved.push_back(shifted);
                 }
             } else {
-                // 新規コードの開始点をまたぐ既存コード: 分割して右側をシフト
-                PlacedItem left = pt;
-                left.durationBeats = newStart - ptStart;
-                left.chord.durationBeats = left.durationBeats;
-                left.chord.durationTicks = left.durationBeats * TICKS_PER_BEAT;
+                PlacedTickItem left = pt;
+                left.durationTicks = newStart - ptStart;
+                left.chord.SetTicks(left.durationTicks);
                 resolved.push_back(left);
 
-                PlacedItem right = pt;
-                right.startBeat = newStart + chordBeats;
-                right.durationBeats = ptEnd - newStart;
-                right.chord.durationBeats = right.durationBeats;
-                right.chord.durationTicks = right.durationBeats * TICKS_PER_BEAT;
-                if (right.startBeat >= barBeats) {
+                PlacedTickItem right = pt;
+                right.startTick = newStart + chordTicks;
+                right.durationTicks = ptEnd - newStart;
+                right.chord.SetTicks(right.durationTicks);
+                if (right.startTick >= barTotalTicks) {
                     overflowItems.push_back(right);
-                } else if (right.startBeat + right.durationBeats > barBeats) {
-                    int inBarBeats = barBeats - right.startBeat;
-                    int overBeats = right.durationBeats - inBarBeats;
-                    PlacedItem inBar = right;
-                    inBar.durationBeats = inBarBeats;
-                    inBar.chord.durationBeats = inBarBeats;
-                    inBar.chord.durationTicks = inBarBeats * TICKS_PER_BEAT;
+                } else if (right.startTick + right.durationTicks > barTotalTicks) {
+                    int inBarTicks = barTotalTicks - right.startTick;
+                    int overTicks = right.durationTicks - inBarTicks;
+                    PlacedTickItem inBar = right;
+                    inBar.durationTicks = inBarTicks;
+                    inBar.chord.SetTicks(inBarTicks);
                     resolved.push_back(inBar);
 
-                    PlacedItem over = right;
-                    over.startBeat = 0;
-                    over.durationBeats = overBeats;
-                    over.chord.durationBeats = overBeats;
-                    over.chord.durationTicks = overBeats * TICKS_PER_BEAT;
+                    PlacedTickItem over = right;
+                    over.startTick = 0;
+                    over.durationTicks = overTicks;
+                    over.chord.SetTicks(overTicks);
                     overflowItems.push_back(over);
                 } else {
                     resolved.push_back(right);
@@ -218,77 +208,75 @@ void AppWindow::InsertChordAtTimelinePosition(const ChordToken& chord, int targe
             }
         }
 
-        // 新規コードを追加
         if (!chord.isRest) {
-            PlacedItem newPt;
-            newPt.startBeat = newStart;
-            newPt.durationBeats = chordBeats;
+            PlacedTickItem newPt;
+            newPt.startTick = newStart;
+            newPt.durationTicks = chordTicks;
             newPt.chord = chord;
-            newPt.chord.durationBeats = chordBeats;
-            newPt.chord.durationTicks = chordBeats * TICKS_PER_BEAT;
+            newPt.chord.SetTicks(chordTicks);
             resolved.push_back(newPt);
         }
     }
 
-    // 開始拍順にソート (同一コードでも決してマージせず独立カードとして保持)
-    std::sort(resolved.begin(), resolved.end(), [](const PlacedItem& a, const PlacedItem& b) {
-        return a.startBeat < b.startBeat;
+    std::sort(resolved.begin(), resolved.end(), [](const PlacedTickItem& a, const PlacedTickItem& b) {
+        return a.startTick < b.startTick;
     });
 
-    // 小節内の隙間（空き拍）を休符トークン (_) で埋めて finalChords を構築
     std::vector<ChordToken> finalChords;
-    int walkerBeat = 0;
+    int walkerTick = 0;
     for (const auto& pt : resolved) {
-        if (pt.startBeat > walkerBeat) {
-            int gap = pt.startBeat - walkerBeat;
+        if (pt.startTick > walkerTick) {
+            int gap = pt.startTick - walkerTick;
             ChordToken restTok;
             restTok.isRest = true;
             restTok.quality = ChordQuality::Rest;
             restTok.rootName = "R";
             restTok.degreeRoman = "R";
             restTok.rawText = "_";
-            restTok.durationBeats = gap;
-            restTok.durationTicks = gap * TICKS_PER_BEAT;
+            restTok.SetTicks(gap);
             finalChords.push_back(restTok);
-            walkerBeat = pt.startBeat;
+            walkerTick = pt.startTick;
         }
         finalChords.push_back(pt.chord);
-        walkerBeat += pt.durationBeats;
+        walkerTick += pt.durationTicks;
     }
 
-    if (walkerBeat < barBeats) {
-        int gap = barBeats - walkerBeat;
+    if (walkerTick < barTotalTicks) {
+        int gap = barTotalTicks - walkerTick;
         ChordToken restTok;
         restTok.isRest = true;
         restTok.quality = ChordQuality::Rest;
         restTok.rootName = "R";
         restTok.degreeRoman = "R";
         restTok.rawText = "_";
-        restTok.durationBeats = gap;
-        restTok.durationTicks = gap * TICKS_PER_BEAT;
+        restTok.SetTicks(gap);
         finalChords.push_back(restTok);
     }
 
     targetBar.chords = std::move(finalChords);
 
     for (const auto& over : overflowItems) {
-        InsertChordAtTimelinePosition(over.chord, targetBarIdx + 1, over.startBeat);
+        InsertChordAtTimelineTick(over.chord, targetBarIdx + 1, over.startTick);
     }
     m_selectedBarIndex = targetBarIdx;
 
     m_selectedChordIndex = 0;
-    int acc = 0;
+    int accTick = 0;
     for (size_t ci = 0; ci < targetBar.chords.size(); ++ci) {
-        if (targetBeat >= acc && targetBeat < acc + targetBar.chords[ci].durationBeats) {
+        if (targetTickInBar >= accTick && targetTickInBar < accTick + targetBar.chords[ci].durationTicks) {
             m_selectedChordIndex = static_cast<int>(ci);
             break;
         }
-        acc += targetBar.chords[ci].durationBeats;
+        accTick += targetBar.chords[ci].durationTicks;
     }
 
     EnsureVisible(m_selectedBarIndex);
     SyncTimelineToText();
     InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::InsertChordAtTimelinePosition(const ChordToken& chord, int targetBarIdx, int targetBeat) {
+    InsertChordAtTimelineTick(chord, targetBarIdx, targetBeat * TICKS_PER_BEAT);
 }
 
 void AppWindow::SplitSelectedChord() {
@@ -342,10 +330,16 @@ void AppWindow::InsertChordAtTimelineX(const ChordToken& chord, float x) {
 
     int targetBarIdx = (barWidth > 0.0f) ? static_cast<int>(relX / barWidth) : 0;
     float barOffsetRatio = (barWidth > 0.0f) ? (std::fmod(relX, barWidth) / barWidth) : 0.0f;
-    int barBeats = (pActive->timeNumerator > 0) ? pActive->timeNumerator : 4;
-    int targetBeat = std::clamp(static_cast<int>(barOffsetRatio * barBeats), 0, barBeats - 1);
+    int barNumerator = (pActive->timeNumerator > 0) ? pActive->timeNumerator : 4;
+    int barTotalTicks = barNumerator * TICKS_PER_BEAT;
 
-    InsertChordAtTimelinePosition(chord, targetBarIdx, targetBeat);
+    int gridTicks = std::max(1, m_selectedGridTicks);
+    float rawTick = barOffsetRatio * static_cast<float>(barTotalTicks);
+    int snappedTick = static_cast<int>(std::round(rawTick / static_cast<float>(gridTicks))) * gridTicks;
+    int chordTicks = chord.durationTicks > 0 ? chord.durationTicks : (chord.durationBeats > 0 ? chord.durationBeats * TICKS_PER_BEAT : gridTicks);
+    snappedTick = std::clamp(snappedTick, 0, std::max(0, barTotalTicks - chordTicks));
+
+    InsertChordAtTimelineTick(chord, targetBarIdx, snappedTick);
 }
 
 void AppWindow::SyncTextToTimeline() {
@@ -1023,6 +1017,48 @@ std::string EscapeJson(std::string_view s) {
     return out;
 }
 
+std::string UnescapeJson(std::string_view s) {
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '\\' && i + 1 < s.size()) {
+            char next = s[i + 1];
+            if (next == '"') { out += '"'; ++i; }
+            else if (next == '\\') { out += '\\'; ++i; }
+            else if (next == '/') { out += '/'; ++i; }
+            else if (next == 'b') { out += '\b'; ++i; }
+            else if (next == 'f') { out += '\f'; ++i; }
+            else if (next == 'n') { out += '\n'; ++i; }
+            else if (next == 'r') { out += '\r'; ++i; }
+            else if (next == 't') { out += '\t'; ++i; }
+            else { out += next; ++i; }
+        } else {
+            out += s[i];
+        }
+    }
+    return out;
+}
+
+std::wstring NormalizePathString(const std::wstring& pathStr) {
+    if (pathStr.empty()) return L"";
+    std::wstring out;
+    out.reserve(pathStr.size());
+    bool prevSep = false;
+    for (size_t i = 0; i < pathStr.size(); ++i) {
+        wchar_t c = pathStr[i];
+        if (c == L'\\' || c == L'/') {
+            if (!prevSep || (i == 1 && out[0] == L'\\')) {
+                out += L'\\';
+            }
+            prevSep = true;
+        } else {
+            out += c;
+            prevSep = false;
+        }
+    }
+    return out;
+}
+
 std::string FindJsonStr(const std::string& json, std::string_view key) {
     std::string pattern = "\"" + std::string(key) + "\"";
     size_t pos = json.find(pattern);
@@ -1125,8 +1161,8 @@ void AppWindow::LoadAppSettings() {
             }
         }
 
-        m_projectDirectory = ToWString(FindJsonStr(content, "projectDirectory"));
-        m_autoBackupDirectory = ToWString(FindJsonStr(content, "autoBackupDirectory"));
+        m_projectDirectory = NormalizePathString(ToWString(UnescapeJson(FindJsonStr(content, "projectDirectory"))));
+        m_autoBackupDirectory = NormalizePathString(ToWString(UnescapeJson(FindJsonStr(content, "autoBackupDirectory"))));
 
         m_recentFiles.clear();
         size_t posRec = content.find("\"recentFiles\"");
@@ -1144,7 +1180,7 @@ void AppWindow::LoadAppSettings() {
                     }
                     if (eQuote == std::string::npos || eQuote >= arrEnd) break;
                     std::string item = content.substr(sQuote + 1, eQuote - sQuote - 1);
-                    std::wstring witem = ToWString(item);
+                    std::wstring witem = NormalizePathString(ToWString(UnescapeJson(item)));
                     if (!witem.empty() && std::filesystem::exists(witem)) {
                         m_recentFiles.push_back(witem);
                     }

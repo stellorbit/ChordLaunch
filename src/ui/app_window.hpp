@@ -148,6 +148,7 @@ private:
     bool HitTestPaletteCard(float x, float y, ChordToken& outChord);
     void InsertChordAtTimelineX(const ChordToken& chord, float x);
     void InsertChordAtTimelinePosition(const ChordToken& chord, int targetBarIdx, int targetBeat);
+    void InsertChordAtTimelineTick(const ChordToken& chord, int targetBarIdx, int targetTickInBar);
     void SplitSelectedChord();
     void DuplicateSelectedChord();
     void AddRecentFile(const std::wstring& path);
@@ -331,7 +332,7 @@ private:
     std::string m_customSuffix = "";
     int8_t m_customTension = 0;
     PitchClass m_customBass = PitchClass::Unknown;
-    int m_diatonicChordTypeTab = 1;
+    int m_diatonicChordTypeTab = 0;
     bool m_accCustomBuilderOpen = true;
 
     // 表示切り替え

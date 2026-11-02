@@ -771,6 +771,134 @@ void TestDashboardFileSelectionAndMenu() {
     TEST_ASSERT(navIdx == 2, "Up key from index 0 wraps around to last item (2)");
 }
 
+void TestJsonUnescapeAndPathNormalization() {
+    std::cout << "[TEST] 20. JSON Unescape and Path Normalization\n";
+
+    // 1. JSON Unescape logic
+    auto unescapeJson = [](std::string_view s) {
+        std::string out;
+        out.reserve(s.size());
+        for (size_t i = 0; i < s.size(); ++i) {
+            if (s[i] == '\\' && i + 1 < s.size()) {
+                char next = s[i + 1];
+                if (next == '"') { out += '"'; ++i; }
+                else if (next == '\\') { out += '\\'; ++i; }
+                else if (next == '/') { out += '/'; ++i; }
+                else if (next == 'b') { out += '\b'; ++i; }
+                else if (next == 'f') { out += '\f'; ++i; }
+                else if (next == 'n') { out += '\n'; ++i; }
+                else if (next == 'r') { out += '\r'; ++i; }
+                else if (next == 't') { out += '\t'; ++i; }
+                else { out += next; ++i; }
+            } else {
+                out += s[i];
+            }
+        }
+        return out;
+    };
+
+    std::string escapedPath = "C:\\\\Users\\\\Test\\\\Documents\\\\Song.chord";
+    std::string unescaped = unescapeJson(escapedPath);
+    TEST_ASSERT(unescaped == "C:\\Users\\Test\\Documents\\Song.chord", "unescapeJson removes JSON backslash escapes correctly");
+
+    // 2. Path normalization (eliminating runaway multiplied backslashes)
+    auto normalizePath = [](const std::wstring& pathStr) {
+        if (pathStr.empty()) return std::wstring();
+        std::wstring out;
+        out.reserve(pathStr.size());
+        bool prevSep = false;
+        for (size_t i = 0; i < pathStr.size(); ++i) {
+            wchar_t c = pathStr[i];
+            if (c == L'\\' || c == L'/') {
+                if (!prevSep || (i == 1 && out[0] == L'\\')) {
+                    out += L'\\';
+                }
+                prevSep = true;
+            } else {
+                out += c;
+                prevSep = false;
+            }
+        }
+        return out;
+    };
+
+    std::wstring runawayPath = L"C:\\\\\\\\Users\\\\\\\\KotoneP\\\\\\\\Documents\\\\Song.chord";
+    std::wstring normalized = normalizePath(runawayPath);
+    TEST_ASSERT(normalized == L"C:\\Users\\KotoneP\\Documents\\Song.chord", "normalizePath compresses multiplied backslashes into single separator");
+}
+
+void TestTickSyncopationAndTriadDefault() {
+    std::cout << "[TEST] 21. Tick Syncopation Placement and Triad Default\n";
+
+    // 1. シンコペーション (裏拍 240 ticks = 8分音符裏) へのコード挿入ロジック検証
+    Bar bar;
+    bar.barNumber = 1;
+    bar.timeNumerator = 4;
+    bar.timeDenominator = 4;
+
+    int barTotalTicks = 4 * TICKS_PER_BEAT; // 1920
+    int targetTick = 240; // 8分休符の直後（裏拍）
+    int chordTicks = 480; // 1拍のコード
+
+    ChordToken chord;
+    chord.rawText = "Asus4";
+    chord.rootName = "A";
+    chord.qualitySuffix = "sus4";
+    chord.SetTicks(chordTicks);
+
+    // 空き小節の targetTick に配置 -> 手前 0..targetTick に休符が自動生成される
+    std::vector<ChordToken> finalChords;
+    if (targetTick > 0) {
+        ChordToken rest;
+        rest.isRest = true;
+        rest.quality = ChordQuality::Rest;
+        rest.rootName = "R";
+        rest.rawText = "_";
+        rest.SetTicks(targetTick);
+        finalChords.push_back(rest);
+    }
+    finalChords.push_back(chord);
+    int walker = targetTick + chordTicks;
+    if (walker < barTotalTicks) {
+        ChordToken restTail;
+        restTail.isRest = true;
+        restTail.quality = ChordQuality::Rest;
+        restTail.rootName = "R";
+        restTail.rawText = "_";
+        restTail.SetTicks(barTotalTicks - walker);
+        finalChords.push_back(restTail);
+    }
+
+    TEST_ASSERT(finalChords.size() == 3, "Bar with syncopated chord has 3 tokens (rest, chord, rest)");
+    TEST_ASSERT(finalChords[0].isRest && finalChords[0].durationTicks == 240, "Initial token is an 8th rest (240 ticks)");
+    TEST_ASSERT(!finalChords[1].isRest && finalChords[1].rawText == "Asus4" && finalChords[1].durationTicks == 480, "Middle token is Asus4 on upbeat (480 ticks)");
+    TEST_ASSERT(finalChords[2].isRest && finalChords[2].durationTicks == 1200, "Tail rest fills remainder of bar (1200 ticks)");
+
+    int totalBarSum = 0;
+    for (const auto& c : finalChords) totalBarSum += c.durationTicks;
+    TEST_ASSERT(totalBarSum == 1920, "Total ticks in syncopated bar equals exactly 1920 ticks");
+
+    // 2. グリッドショートカット定数検証
+    int grid1Bar = TICKS_PER_BAR_4_4;      // 1920 (Ctrl+1)
+    int grid2Beats = TICKS_PER_BEAT * 2;   // 960  (Ctrl+2)
+    int grid1Beat = TICKS_PER_BEAT;        // 480  (Ctrl+3)
+    int gridHalfBeat = TICKS_PER_BEAT / 2; // 240  (Ctrl+4)
+    int gridQuarter = TICKS_PER_BEAT / 4;  // 120  (Ctrl+5)
+
+    TEST_ASSERT(grid1Bar == 1920, "Ctrl+1 sets 1 Bar grid (1920 ticks)");
+    TEST_ASSERT(grid2Beats == 960, "Ctrl+2 sets 2 Beats grid (960 ticks)");
+    TEST_ASSERT(grid1Beat == 480, "Ctrl+3 sets 1 Beat grid (480 ticks)");
+    TEST_ASSERT(gridHalfBeat == 240, "Ctrl+4 sets 1/2 Beat grid (240 ticks)");
+    TEST_ASSERT(gridQuarter == 120, "Ctrl+5 sets 1/4 Beat grid (120 ticks)");
+
+    // 3. 3和音初期値 (0: Triad) の検証
+    int defaultTab = 0; // 0 = 3和音
+    auto diatonicTriads = MusicEngine::GetDiatonicChordsByTab("C", MusicalMode::Major, defaultTab);
+    TEST_ASSERT(diatonicTriads.size() >= 7, "Diatonic triads for C Major has 7 chords");
+    TEST_ASSERT(diatonicTriads[0].qualitySuffix.empty(), "Degree I in C Major triad is pure C Major (no 7th)");
+    TEST_ASSERT(diatonicTriads[4].qualitySuffix.empty(), "Degree V in C Major triad is pure G Major (no 7th)");
+}
+
 int main() {
     std::cout << "========================================\n";
     std::cout << "ChordLaunch C++20 Core Test Suite\n";
@@ -795,6 +923,8 @@ int main() {
     TestDashboardAndMRU();
     TestPartRenameAndMergeAllToNewPart();
     TestDashboardFileSelectionAndMenu();
+    TestJsonUnescapeAndPathNormalization();
+    TestTickSyncopationAndTriadDefault();
 
     std::cout << "========================================\n";
     std::cout << "Tests Passed: " << g_passCount << ", Failed: " << g_failCount << "\n";

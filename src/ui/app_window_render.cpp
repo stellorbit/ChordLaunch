@@ -99,16 +99,18 @@ void AppWindow::RenderToolbar(float x, float y, float width, float height) {
     DrawButton(rcLoop, TR(L"ループ", L"Loop"), IconType::Loop, false, false, m_isLooping, Theme::AccentAction);
     curX += 74.0f;
 
-    // 小節 / 拍カウンター (BAR 1 : 1)
-    D2D1_RECT_F rcCounter = D2D1::RectF(curX, r1Y, curX + 104.0f, r1Y + r1H);
+    // 小節 / 拍カウンター (BAR 1 : 1) - ツールバー中央に配置して視認性を向上
+    float counterW = 124.0f;
+    float counterX = x + (width - counterW) * 0.5f;
+    D2D1_RECT_F rcCounter = D2D1::RectF(counterX, r1Y, counterX + counterW, r1Y + r1H);
     m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(rcCounter, 4.0f, 4.0f), m_pBrushCardBg);
-    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(rcCounter, 4.0f, 4.0f), m_pBrushBorder, 1.0f);
+    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(rcCounter, 4.0f, 4.0f), m_pBrushAccent, 1.2f);
 
     int curBar = static_cast<int>(m_playbackTick / TICKS_PER_BAR_4_4) + 1;
     int curBeat = static_cast<int>(std::fmod(m_playbackTick, static_cast<double>(TICKS_PER_BAR_4_4)) / TICKS_PER_BEAT) + 1;
     wchar_t counterBuf[32];
     swprintf_s(counterBuf, L"BAR %d : %d", curBar, curBeat);
-    DrawTextSafe(counterBuf, m_pFontButton, rcCounter, m_pBrushAccent);
+    DrawTextSafe(counterBuf, m_pFontCardTitle, rcCounter, m_pBrushAccent);
 
     // 右側: テンプレート集, ヘルプ, 設定, MIDI保存, DAWへドラッグ
     float rightCurX = x + width - 12.0f;

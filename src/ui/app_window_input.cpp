@@ -590,17 +590,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
                                 return;
                             }
 
-                            if (x <= cardRc.left + 12.0f) {
-                                m_dragMode = DragMode::CardResizeLeft;
-                                m_dragBarIndex = static_cast<int>(b);
-                                m_dragChordIndex = static_cast<int>(ci);
-                                m_dragStartX = x;
-                                m_dragInitialTicks = cTicks;
-                                SetCapture(m_hwnd);
-                                SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
-                                return;
-                            }
-
+                            // カード面全体のドラッグ移動（左側を掴んでも縮まない・自由に左右移動可能）
                             m_dragMode = DragMode::CardTimelineDrag;
                             m_dragPaletteChord = chord;
                             m_dragBarIndex = static_cast<int>(b);
@@ -1142,7 +1132,7 @@ void AppWindow::OnMouseMove(float x, float y) {
                         float cw = (static_cast<float>(cTicks) / barTicks) * barWidth;
                         offsetTicks += cTicks;
                         D2D1_RECT_F cardRc = D2D1::RectF(cx + 2.0f, cardY, cx + cw - 2.0f, cardY + cardH);
-                        if (PtInRectF(cardRc, x, y) && (x <= cardRc.left + 12.0f || x >= cardRc.right - 12.0f)) {
+                        if (PtInRectF(cardRc, x, y) && (x >= cardRc.right - 12.0f)) {
                             SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
                             return;
                         }
@@ -1408,10 +1398,42 @@ void AppWindow::OnKeyDown(WPARAM key) {
         return;
     }
 
+    bool isCtrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    if (isCtrl) {
+        if (key == '1' || key == VK_NUMPAD1) {
+            m_selectedGridTicks = TICKS_PER_BAR_4_4;
+            SetStatusMessage(TR(L"グリッド: 1小節 (Ctrl+1)", L"Grid: 1 Bar (Ctrl+1)"));
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        } else if (key == '2' || key == VK_NUMPAD2) {
+            m_selectedGridTicks = TICKS_PER_BEAT * 2;
+            SetStatusMessage(TR(L"グリッド: 2拍 (Ctrl+2)", L"Grid: 2 Beats (Ctrl+2)"));
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        } else if (key == '3' || key == VK_NUMPAD3) {
+            m_selectedGridTicks = TICKS_PER_BEAT;
+            SetStatusMessage(TR(L"グリッド: 1拍 (Ctrl+3)", L"Grid: 1 Beat (Ctrl+3)"));
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        } else if (key == '4' || key == VK_NUMPAD4) {
+            m_selectedGridTicks = TICKS_PER_BEAT / 2;
+            SetStatusMessage(TR(L"グリッド: 1/2拍 (Ctrl+4)", L"Grid: 1/2 Beat (Ctrl+4)"));
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        } else if (key == '5' || key == VK_NUMPAD5) {
+            m_selectedGridTicks = TICKS_PER_BEAT / 4;
+            SetStatusMessage(TR(L"グリッド: 1/4拍 (Ctrl+5)", L"Grid: 1/4 Beat (Ctrl+5)"));
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        } else if (key == 'D' || key == 'd') {
+            DuplicateSelectedChord();
+            return;
+        }
+    }
+
     if (key == VK_SPACE) TogglePlayback();
     else if (key == VK_ESCAPE) StopPlayback();
     else if (key == 'B' || key == 'b') SplitSelectedChord();
-    else if ((GetKeyState(VK_CONTROL) & 0x8000) && (key == 'D' || key == 'd')) DuplicateSelectedChord();
     else if (key == VK_DELETE) DeleteSelection();
 }
 
