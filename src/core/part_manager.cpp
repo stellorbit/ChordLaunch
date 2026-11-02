@@ -238,8 +238,13 @@ std::string PartManager::SerializeProject(
             ss << "          \"chords\": [\n";
             for (size_t ci = 0; ci < bar.chords.size(); ++ci) {
                 const auto& c = bar.chords[ci];
+                std::string rawToSave = c.rawText;
+                if (rawToSave.empty() && !c.isRest && !c.rootName.empty()) {
+                    rawToSave = c.rootName + c.qualitySuffix;
+                    if (!c.bassName.empty()) rawToSave += "/" + c.bassName;
+                }
                 ss << "            {\n";
-                ss << "              \"rawText\": \"" << EscapeJsonString(c.rawText) << "\",\n";
+                ss << "              \"rawText\": \"" << EscapeJsonString(rawToSave) << "\",\n";
                 ss << "              \"rootName\": \"" << EscapeJsonString(c.rootName) << "\",\n";
                 ss << "              \"quality\": " << static_cast<int>(c.quality) << ",\n";
                 ss << "              \"qualitySuffix\": \"" << EscapeJsonString(c.qualitySuffix) << "\",\n";
@@ -371,29 +376,31 @@ static ChordToken ParseChordJson(const std::string& obj, const Part& part) {
     bool isRest = LooksLikeJsonTrue(obj, "isRest");
 
     ChordToken tok;
-    if (!isRest && !raw.empty()) {
-        auto parsed = ProgressionParser::Parse("| " + raw + " |", part.keyRoot, part.mode,
-                                               part.timeNumerator, part.timeDenominator);
-        if (!parsed.empty()) {
-            for (const auto& c : parsed[0].chords) {
-                if (!c.isRest) {
-                    tok = c;
-                    break;
-                }
+    if (!isRest) {
+        std::string symbol = raw;
+        if (symbol.empty() || symbol == "_") {
+            if (!suffix.empty() && root.size() >= suffix.size() && root.rfind(suffix) == (root.size() - suffix.size())) {
+                symbol = root;
+            } else {
+                symbol = root + suffix;
             }
         }
-        if (tok.rawText.empty()) tok.rawText = raw;
+        if (!symbol.empty()) {
+            tok = MusicEngine::ParseChordSymbol(symbol, part.keyRoot, part.mode);
+        }
+        if (tok.rootPitch == PitchClass::Unknown && !root.empty()) {
+            tok.rootPitch = MusicEngine::NoteToPitch(root);
+            tok.rootName = root;
+            if (quality >= 0) tok.quality = static_cast<ChordQuality>(quality);
+            tok.qualitySuffix = suffix;
+        }
+        if (tok.rawText.empty()) tok.rawText = symbol;
         if (tok.rootName.empty()) tok.rootName = root;
-    } else if (!isRest) {
-        tok.rawText = raw;
-        tok.rootName = root;
-        tok.qualitySuffix = suffix;
-        if (quality >= 0) tok.quality = static_cast<ChordQuality>(quality);
-    }
-    if (tok.qualitySuffix.empty() && !suffix.empty()) tok.qualitySuffix = suffix;
-    if (tok.rootName.empty() && !root.empty()) tok.rootName = root;
-
-    if (isRest) {
+        if (tok.qualitySuffix.empty()) tok.qualitySuffix = suffix;
+        if (quality >= 0 && tok.quality == ChordQuality::Major && static_cast<ChordQuality>(quality) != ChordQuality::Major) {
+            tok.quality = static_cast<ChordQuality>(quality);
+        }
+    } else {
         tok = ChordToken{};
         tok.isRest = true;
         tok.quality = ChordQuality::Rest;
@@ -545,6 +552,36 @@ bool PartManager::DeserializeProject(
     }
 
     if (newParts.empty()) return false;
+
+    // 既存・旧形式データの救済: 全小節の全コードで rootPitch / rawText / degreeRoman の健全性を保証する
+    for (auto& part : newParts) {
+        PitchClass pKey = MusicEngine::NoteToPitch(part.keyRoot);
+        if (pKey == PitchClass::Unknown) pKey = PitchClass::C;
+        for (auto& bar : part.bars) {
+            for (auto& chord : bar.chords) {
+                if (chord.isRest) continue;
+                if (chord.rootPitch == PitchClass::Unknown) {
+                    if (!chord.rootName.empty()) {
+                        chord.rootPitch = MusicEngine::NoteToPitch(chord.rootName);
+                    } else if (!chord.rawText.empty()) {
+                        auto rep = MusicEngine::ParseChordSymbol(chord.rawText, part.keyRoot, part.mode);
+                        chord.rootPitch = rep.rootPitch;
+                        if (chord.rootName.empty()) chord.rootName = rep.rootName;
+                        if (chord.qualitySuffix.empty()) chord.qualitySuffix = rep.qualitySuffix;
+                    }
+                }
+                if (chord.rawText.empty()) {
+                    chord.rawText = chord.rootName + chord.qualitySuffix;
+                    if (!chord.bassName.empty()) chord.rawText += "/" + chord.bassName;
+                }
+                if (chord.degreeRoman.empty() && chord.rootPitch != PitchClass::Unknown) {
+                    chord.degreeRoman = MusicEngine::CalculateDegree(
+                        chord.rootPitch, chord.quality, pKey, part.mode, chord.bassPitch
+                    );
+                }
+            }
+        }
+    }
 
     m_parts = std::move(newParts);
     m_activePartIndex = std::clamp(activeIdx, 0, static_cast<int>(m_parts.size()) - 1);

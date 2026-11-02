@@ -576,6 +576,7 @@ std::vector<ChordToken> MusicEngine::GetDiatonicChordsByTab(
         ct.quality = q;
         ct.qualitySuffix = QualityToSuffix(q);
         ct.degreeRoman = CalculateDegree(chordPitch, q, keyP, mode);
+        ct.rawText = ct.rootName + ct.qualitySuffix;
         chords.push_back(ct);
     }
     return chords;
@@ -598,6 +599,7 @@ std::vector<ChordToken> MusicEngine::GetModalInterchangeChords(
         ct.quality = q;
         ct.qualitySuffix = QualityToSuffix(q);
         ct.degreeRoman = CalculateDegree(cp, q, keyP, mode);
+        ct.rawText = ct.rootName + ct.qualitySuffix;
         chords.push_back(ct);
     };
 
@@ -657,6 +659,7 @@ std::vector<ChordToken> MusicEngine::GetSecondaryDominants(
         ct.quality = ChordQuality::Dominant7;
         ct.qualitySuffix = "7";
         ct.degreeRoman = label;
+        ct.rawText = ct.rootName + ct.qualitySuffix;
         chords.push_back(ct);
     };
 
@@ -686,6 +689,7 @@ std::vector<ChordToken> MusicEngine::GetTritoneSubstitutions(
         ct.quality = ChordQuality::Dominant7;
         ct.qualitySuffix = "7";
         ct.degreeRoman = label;
+        ct.rawText = ct.rootName + ct.qualitySuffix;
         chords.push_back(ct);
     };
 

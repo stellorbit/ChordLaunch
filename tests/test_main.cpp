@@ -1690,6 +1690,128 @@ void TestOneBarChordCrossBarInsertion() {
     TEST_ASSERT(bar3.chords.size() == 2 && bar3.chords[1].durationTicks == 960, "Bar 3 has rest (960) + A (960)");
 }
 
+void TestExistingProjectDeserializationRestoresPitch() {
+    std::cout << "[TEST] 28. Deserializing project with empty rawText restores rootPitch, notes, and rawText\n";
+
+    // 1. パレット生成関数群で rawText が正しく設定されていること
+    auto diatonic = MusicEngine::GetDiatonicChordsByTab("C", MusicalMode::Major, 0);
+    TEST_ASSERT(!diatonic.empty(), "Diatonic chords not empty");
+    for (const auto& c : diatonic) {
+        TEST_ASSERT(!c.rawText.empty(), "Palette chord has non-empty rawText: " + c.rawText);
+        TEST_ASSERT(c.rootPitch != PitchClass::Unknown, "Palette chord has valid rootPitch: " + c.rawText);
+    }
+
+    auto modal = MusicEngine::GetModalInterchangeChords("C", MusicalMode::Major, false);
+    for (const auto& c : modal) {
+        TEST_ASSERT(!c.rawText.empty(), "Modal interchange chord has non-empty rawText: " + c.rawText);
+    }
+
+    // 2. 既存破損形式（rawText が空文字列）の JSON から復元
+    std::string brokenJson = R"({
+  "format": "ChordLaunchProject",
+  "version": 1,
+  "title": "BrokenProject",
+  "activePartIndex": 0,
+  "voicing": 0,
+  "bassMode": 0,
+  "gridTicks": 480,
+  "parts": [
+    {
+      "id": "part_1",
+      "name": "Intro",
+      "keyRoot": "C",
+      "mode": 0,
+      "bpm": 120,
+      "timeNumerator": 4,
+      "timeDenominator": 4,
+      "rawProgressionText": "",
+      "bars": [
+        {
+          "barNumber": 1,
+          "chords": [
+            {
+              "rawText": "",
+              "rootName": "Dm",
+              "quality": 1,
+              "qualitySuffix": "m",
+              "durationTicks": 1920,
+              "durationBeats": 4,
+              "isRest": false,
+              "octaveOffset": 0,
+              "degreeRoman": "IIm"
+            }
+          ]
+        },
+        {
+          "barNumber": 2,
+          "chords": [
+            {
+              "rawText": "",
+              "rootName": "C",
+              "quality": 0,
+              "qualitySuffix": "",
+              "durationTicks": 960,
+              "durationBeats": 2,
+              "isRest": false,
+              "octaveOffset": 0,
+              "degreeRoman": "bVII"
+            },
+            {
+              "rawText": "",
+              "rootName": "A",
+              "quality": 0,
+              "qualitySuffix": "",
+              "durationTicks": 960,
+              "durationBeats": 2,
+              "isRest": false,
+              "octaveOffset": -1,
+              "degreeRoman": "V"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+})";
+
+    PartManager pm;
+    std::string title;
+    VoicingStyle voicing;
+    int bassMode = 0;
+    int gridTicks = 0;
+    TEST_ASSERT(pm.DeserializeProject(brokenJson, title, voicing, bassMode, gridTicks), "Broken project deserializes successfully");
+
+    const auto& parts = pm.GetParts();
+    TEST_ASSERT(parts.size() == 1, "One part restored");
+    const auto& bars = parts[0].bars;
+    TEST_ASSERT(bars.size() == 2, "Two bars restored");
+
+    // Bar 1: Dm
+    const auto& cDm = bars[0].chords[0];
+    TEST_ASSERT(cDm.rootPitch == PitchClass::D, "Dm rootPitch restored to D");
+    TEST_ASSERT(cDm.rawText == "Dm", "Dm rawText restored to Dm");
+    auto dmNotes = MusicEngine::GetChordMidiNotes(cDm, 4, VoicingStyle::RootPosition, 0, 0);
+    TEST_ASSERT(!dmNotes.empty(), "Dm produces MIDI notes (not empty)");
+
+    // Bar 2: C and A
+    const auto& cC = bars[1].chords[0];
+    TEST_ASSERT(cC.rootPitch == PitchClass::C, "C rootPitch restored to C");
+    TEST_ASSERT(cC.rawText == "C", "C rawText restored to C");
+    auto cNotes = MusicEngine::GetChordMidiNotes(cC, 4, VoicingStyle::RootPosition, 0, 0);
+    TEST_ASSERT(!cNotes.empty(), "C produces MIDI notes");
+
+    const auto& cA = bars[1].chords[1];
+    TEST_ASSERT(cA.rootPitch == PitchClass::A, "A rootPitch restored to A");
+    TEST_ASSERT(cA.octaveOffset == -1, "A octaveOffset restored to -1");
+    auto aNotes = MusicEngine::GetChordMidiNotes(cA, 4, VoicingStyle::RootPosition, 0, 0);
+    TEST_ASSERT(!aNotes.empty(), "A produces MIDI notes");
+
+    // 3. 再保存時に rawText が空にならずシリアライズされること
+    std::string reSaved = pm.SerializeProject("Saved", VoicingStyle::RootPosition, 0, 480);
+    TEST_ASSERT(reSaved.find("\"rawText\": \"Dm\"") != std::string::npos, "Re-serialized project preserves rawText 'Dm'");
+    TEST_ASSERT(reSaved.find("\"rawText\": \"C\"") != std::string::npos, "Re-serialized project preserves rawText 'C'");
+}
+
 int main() {
     std::cout << "========================================\n";
     std::cout << "ChordLaunch C++20 Core Test Suite\n";
@@ -1723,6 +1845,7 @@ int main() {
     TestSyncopationPersistence();
     TestOctaveAndGridSeparation();
     TestOneBarChordCrossBarInsertion();
+    TestExistingProjectDeserializationRestoresPitch();
 
     std::cout << "========================================\n";
     std::cout << "Tests Passed: " << g_passCount << ", Failed: " << g_failCount << "\n";
