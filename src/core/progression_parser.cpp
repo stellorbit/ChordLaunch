@@ -12,7 +12,8 @@ bool ProgressionParser::IsRepeatToken(std::string_view token) {
 }
 
 bool ProgressionParser::IsRestToken(std::string_view token) {
-    return token == "R" || token == "r" || token == "N.C." || token == "NC" || token == "rest";
+    return token == "R" || token == "r" || token == "N.C." || token == "NC" || token == "rest" ||
+           token == "_" || token == "." || token == "__" || token == "___" || token == "____";
 }
 
 std::vector<std::string> ProgressionParser::NormalizeTokens(const std::vector<std::string>& tokens) {
@@ -29,6 +30,18 @@ std::vector<std::string> ProgressionParser::NormalizeTokens(const std::vector<st
         if (allHyphens) {
             for (size_t i = 0; i < raw.size(); ++i) {
                 normalized.push_back("-");
+            }
+            continue;
+        }
+
+        // すべてアンダースコアのみの場合 (例: "_", "__", "___")
+        bool allUnderscores = true;
+        for (char c : raw) {
+            if (c != '_') { allUnderscores = false; break; }
+        }
+        if (allUnderscores) {
+            for (size_t i = 0; i < raw.size(); ++i) {
+                normalized.push_back("_");
             }
             continue;
         }
@@ -334,17 +347,19 @@ std::string ProgressionParser::Format(const std::vector<Bar>& bars, int barsPerL
         if (bar.chords.empty()) {
             oss << "- ";
         } else {
+            int usedBeats = 0;
             for (size_t ci = 0; ci < bar.chords.size(); ++ci) {
                 const auto& chord = bar.chords[ci];
                 if (chord.isRest) {
-                    oss << "R";
+                    oss << ((chord.rawText == "_" || chord.rawText.empty()) ? "_" : "R");
                 } else {
                     oss << chord.rootName << chord.qualitySuffix;
                     if (!chord.bassName.empty()) {
                         oss << "/" << chord.bassName;
                     }
                 }
-                if (bar.chords.size() == 1 && chord.durationBeats > 1) {
+                usedBeats += chord.durationBeats;
+                if (bar.chords.size() == 1 && chord.durationBeats >= bar.timeNumerator) {
                     // 1コード1小節の場合は余計なハイフン不要
                 } else {
                     for (int h = 1; h < chord.durationBeats; ++h) {
@@ -353,6 +368,11 @@ std::string ProgressionParser::Format(const std::vector<Bar>& bars, int barsPerL
                 }
                 if (ci + 1 < bar.chords.size()) {
                     oss << " ";
+                }
+            }
+            if (bar.chords.size() == 1 && bar.chords[0].durationBeats < bar.timeNumerator) {
+                for (int b = usedBeats; b < bar.timeNumerator; ++b) {
+                    oss << " _";
                 }
             }
             oss << " ";

@@ -503,6 +503,22 @@ void AppWindow::OnLButtonDown(float x, float y) {
             return;
         }
 
+        // タイムラインルーラー (上部クリック・ドラッグで再生ヘッドをシーク移動)
+        float rulerY = mainY + m_partTabHeight;
+        if (y >= rulerY && y < rulerY + m_rulerHeight) {
+            float relX = (x - centerX) + m_timelineScrollX;
+            if (relX >= 0.0f) {
+                float barWidth = m_pixelsPerBeat * 4.0f;
+                double clickedTick = (relX / barWidth) * TICKS_PER_BAR_4_4;
+                int snapTicks = std::max(1, m_selectedGridTicks);
+                clickedTick = std::floor(clickedTick / snapTicks) * snapTicks;
+                SeekToTick(clickedTick);
+                m_dragMode = DragMode::RulerSeek;
+                SetCapture(m_hwnd);
+            }
+            return;
+        }
+
         // コードカードトラック
         float cardY = mainY + m_partTabHeight + m_rulerHeight + 5.0f;
         float cardH = m_cardTrackHeight - 10.0f;
@@ -872,7 +888,7 @@ void AppWindow::OnLButtonDblClk(float x, float y) {
     if (m_activeModal != ModalType::None) return;
     ChordToken chord;
     if (HitTestPaletteCard(x, y, chord)) {
-        if (m_dragMode == DragMode::PaletteCardDrag) {
+        if (m_dragMode == DragMode::PaletteCardDrag || m_dragMode == DragMode::CardTimelineDrag) {
             m_dragMode = DragMode::None;
             m_isPaletteDragging = false;
             ReleaseCapture();
@@ -884,7 +900,20 @@ void AppWindow::OnLButtonDblClk(float x, float y) {
 }
 
 void AppWindow::OnMouseMove(float x, float y) {
-    if (m_dragMode == DragMode::PaletteCardDrag) {
+    if (m_dragMode == DragMode::RulerSeek) {
+        float centerX = m_leftPaneWidth;
+        float relX = (x - centerX) + m_timelineScrollX;
+        if (relX >= 0.0f) {
+            float barWidth = m_pixelsPerBeat * 4.0f;
+            double clickedTick = (relX / barWidth) * TICKS_PER_BAR_4_4;
+            int snapTicks = std::max(1, m_selectedGridTicks);
+            clickedTick = std::floor(clickedTick / snapTicks) * snapTicks;
+            SeekToTick(clickedTick);
+        }
+        return;
+    }
+
+    if (m_dragMode == DragMode::PaletteCardDrag || m_dragMode == DragMode::CardTimelineDrag) {
         float dx = x - m_dragStartX;
         float dy = y - m_dragStartY;
         if (!m_isPaletteDragging && (dx * dx + dy * dy) >= 25.0f) {
@@ -998,6 +1027,45 @@ void AppWindow::OnMouseMove(float x, float y) {
 }
 
 void AppWindow::OnLButtonUp(float x, float y) {
+    if (m_dragMode == DragMode::RulerSeek) {
+        m_dragMode = DragMode::None;
+        ReleaseCapture();
+        return;
+    }
+
+    if (m_dragMode == DragMode::CardTimelineDrag) {
+        bool wasDragging = m_isPaletteDragging;
+        ChordToken movedChord = m_dragPaletteChord;
+        int srcBar = m_dragBarIndex;
+        int srcChord = m_dragChordIndex;
+        m_dragMode = DragMode::None;
+        m_isPaletteDragging = false;
+        ReleaseCapture();
+
+        if (wasDragging) {
+            float rightW = m_showRightPane ? m_rightPaneWidth : 0.0f;
+            float centerX = m_leftPaneWidth;
+            float centerW = m_width - rightW - centerX;
+            float curDockH = m_showKeyboard ? m_bottomDockHeight : 28.0f;
+            if (x >= centerX && x <= centerX + centerW && y >= m_toolbarHeight && y <= m_height - curDockH) {
+                Part* pActive = m_partManager.GetActivePart();
+                if (pActive && srcBar >= 0 && srcBar < static_cast<int>(pActive->bars.size())) {
+                    auto& sBar = pActive->bars[srcBar];
+                    if (srcChord >= 0 && srcChord < static_cast<int>(sBar.chords.size())) {
+                        PushUndo();
+                        sBar.chords.erase(sBar.chords.begin() + srcChord);
+                        if (sBar.chords.empty() && pActive->bars.size() > 1) {
+                            pActive->bars.erase(pActive->bars.begin() + srcBar);
+                        }
+                        InsertChordAtTimelineX(movedChord, x);
+                    }
+                }
+            }
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+        }
+        return;
+    }
+
     if (m_dragMode == DragMode::PaletteCardDrag) {
         bool wasDragging = m_isPaletteDragging;
         ChordToken droppedChord = m_dragPaletteChord;
@@ -1023,7 +1091,6 @@ void AppWindow::OnLButtonUp(float x, float y) {
         ReleaseCapture();
     }
 }
-
 void AppWindow::OnRButtonUp(float x, float y) {
     if (m_activeModal != ModalType::None) return;
 

@@ -182,6 +182,7 @@ private:
     void TogglePlayback();
     void StopPlayback();
     void AdvancePlayback(float deltaSeconds);
+    void SeekToTick(double tick);
 
     // クリップボード・ファイル・MIDIドラッグ
     void CopyProgressionToClipboard();
@@ -276,7 +277,7 @@ private:
     int   m_selectedChordIndex = -1;
 
     // リサイズ・ドラッグ＆ドロップ状態
-    enum class DragMode { None, CardMove, CardResizeLeft, CardResizeRight, ScrollBarThumb, PaletteCardDrag };
+    enum class DragMode { None, CardMove, CardResizeLeft, CardResizeRight, ScrollBarThumb, PaletteCardDrag, CardTimelineDrag, RulerSeek };
     DragMode m_dragMode = DragMode::None;
     int   m_dragBarIndex = -1;
     int   m_dragChordIndex = -1;

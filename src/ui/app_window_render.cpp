@@ -34,7 +34,7 @@ void AppWindow::OnRender() {
     RenderCenterPane(centerX, mainY, centerW, mainH);
 
     // パレットドラッグ中のゴーストカード＆ドロップ先ハイライト描画
-    if (m_dragMode == DragMode::PaletteCardDrag && m_isPaletteDragging) {
+    if ((m_dragMode == DragMode::PaletteCardDrag || m_dragMode == DragMode::CardTimelineDrag) && m_isPaletteDragging) {
         float dockH = m_showKeyboard ? m_bottomDockHeight : 28.0f;
         if (m_dragCurrentX >= centerX && m_dragCurrentX <= centerX + centerW &&
             m_dragCurrentY >= mainY && m_dragCurrentY <= h - dockH) {
@@ -94,6 +94,18 @@ void AppWindow::RenderToolbar(float x, float y, float width, float height) {
 
     D2D1_RECT_F rcLoop = D2D1::RectF(curX, r1Y, curX + 66.0f, r1Y + r1H);
     DrawButton(rcLoop, TR(L"ループ", L"Loop"), IconType::Loop, false, false, m_isLooping, Theme::AccentAction);
+    curX += 74.0f;
+
+    // 小節 / 拍カウンター (BAR 1 : 1)
+    D2D1_RECT_F rcCounter = D2D1::RectF(curX, r1Y, curX + 104.0f, r1Y + r1H);
+    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(rcCounter, 4.0f, 4.0f), m_pBrushCardBg);
+    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(rcCounter, 4.0f, 4.0f), m_pBrushBorder, 1.0f);
+
+    int curBar = static_cast<int>(m_playbackTick / TICKS_PER_BAR_4_4) + 1;
+    int curBeat = static_cast<int>(std::fmod(m_playbackTick, static_cast<double>(TICKS_PER_BAR_4_4)) / TICKS_PER_BEAT) + 1;
+    wchar_t counterBuf[32];
+    swprintf_s(counterBuf, L"BAR %d : %d", curBar, curBeat);
+    DrawTextSafe(counterBuf, m_pFontButton, rcCounter, m_pBrushAccent);
 
     // 右側: テンプレート集, ヘルプ, 設定, MIDI保存, DAWへドラッグ
     float rightCurX = x + width - 12.0f;
@@ -433,9 +445,26 @@ void AppWindow::RenderCenterPane(float x, float y, float width, float height) {
         }
         if (b < numBars) {
             std::wstring bNum = std::to_wstring(b + 1);
-            D2D1_RECT_F bNumRc = D2D1::RectF(std::max(x + 2.0f, bx + 4.0f), rulerY + 3.0f, bx + 40.0f, rulerY + m_rulerHeight);
+            D2D1_RECT_F bNumRc = D2D1::RectF(std::max(x + 2.0f, bx + 4.0f), rulerY + 2.0f, bx + 40.0f, rulerY + m_rulerHeight);
             if (bNumRc.right > bNumRc.left) {
-                DrawTextSafe(bNum, m_pFontRuler, bNumRc, m_pBrushTextMuted);
+                DrawTextSafe(bNum, m_pFontRuler, bNumRc, m_pBrushText);
+            }
+
+            // 拍（2, 3, 4拍目）のサブ目盛りレーン
+            float beatW = barWidth / 4.0f;
+            for (int beat = 1; beat < 4; ++beat) {
+                float beatX = bx + beat * beatW;
+                if (beatX >= x && beatX <= x + width) {
+                    m_pRenderTarget->DrawLine(
+                        D2D1::Point2F(beatX, rulerY + m_rulerHeight - 6.0f),
+                        D2D1::Point2F(beatX, rulerY + m_rulerHeight),
+                        m_pBrushBorderLight, 1.0f
+                    );
+                    if (beatW >= 28.0f) {
+                        D2D1_RECT_F beatRc = D2D1::RectF(beatX + 2.0f, rulerY + m_rulerHeight - 12.0f, beatX + 16.0f, rulerY + m_rulerHeight);
+                        DrawTextSafe(std::to_wstring(beat + 1), m_pFontRuler, beatRc, m_pBrushTextMuted);
+                    }
+                }
             }
         }
     }

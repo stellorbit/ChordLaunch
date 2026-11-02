@@ -354,6 +354,62 @@ void AppWindow::AdvancePlayback(float deltaSeconds) {
         }
         accTicks += barTicks;
     }
+
+    // コードが存在しない空白・休符区間に達した場合は確実に消音
+    if (m_lastSoundedChordUid != -1) {
+        m_lastSoundedChordUid = -1;
+        m_synth.AllNotesOff();
+    }
+}
+
+void AppWindow::SeekToTick(double tick) {
+    m_playbackTick = std::max(0.0, tick);
+    m_lastSoundedChordUid = -1;
+
+    std::vector<Bar> currentBars = m_isMergedView ?
+        m_partManager.GenerateMergedProgression() :
+        (m_partManager.GetActivePart() ? m_partManager.GetActivePart()->bars : std::vector<Bar>{});
+
+    int accTicks = 0;
+    int chordUidCounter = 0;
+    bool found = false;
+
+    for (size_t bi = 0; bi < currentBars.size(); ++bi) {
+        const auto& b = currentBars[bi];
+        int barTicks = b.GetTotalTicks();
+        if (barTicks <= 0) barTicks = TICKS_PER_BAR_4_4;
+
+        int chordOffset = 0;
+        for (size_t ci = 0; ci < b.chords.size(); ++ci) {
+            const auto& c = b.chords[ci];
+            int cTicks = c.durationTicks > 0 ? c.durationTicks : (c.durationBeats * TICKS_PER_BEAT);
+            int startTick = accTicks + chordOffset;
+            int endTick = startTick + cTicks;
+
+            if (m_playbackTick >= startTick && m_playbackTick < endTick) {
+                m_selectedBarIndex = static_cast<int>(bi);
+                m_selectedChordIndex = static_cast<int>(ci);
+                EnsureVisible(m_selectedBarIndex);
+                if (m_isPlaying) {
+                    m_lastSoundedChordUid = chordUidCounter;
+                    AuditionChord(c);
+                }
+                found = true;
+                break;
+            }
+
+            chordOffset += cTicks;
+            chordUidCounter++;
+        }
+        if (found) break;
+        accTicks += barTicks;
+    }
+
+    if (!found) {
+        m_synth.AllNotesOff();
+    }
+
+    InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
 // ---------------------------------------------------------------------------
