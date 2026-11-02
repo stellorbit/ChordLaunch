@@ -628,10 +628,19 @@ void AppWindow::RenderTimelineCards(float x, float y, float width, float height)
             D2D1_RECT_F cardRc = D2D1::RectF(cx + 2.0f, cardY, cx + cw - 2.0f, cardY + cardH);
 
             bool isSel = (static_cast<int>(b) == m_selectedBarIndex && static_cast<int>(ci) == m_selectedChordIndex);
-            std::wstring cName = chord.isRest ? L"Rest" : ToWString(chord.rootName + chord.qualitySuffix);
+            if (chord.isRest) {
+                // 休符・空白区間はカードを描画せず、背景グリッドを透過させてDAWライクな空白を表現
+                if (isSel) {
+                    D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(cardRc, 6.0f, 6.0f);
+                    m_pRenderTarget->DrawRoundedRectangle(rr, m_pBrushAccent, 1.5f);
+                }
+                continue;
+            }
+
+            std::wstring cName = ToWString(chord.rootName + chord.qualitySuffix);
             if (!chord.bassName.empty()) cName += L"/" + ToWString(chord.bassName);
 
-            DrawCard(cardRc, cName, ToWString(chord.degreeRoman), false, isSel, chord.isRest, true, false);
+            DrawCard(cardRc, cName, ToWString(chord.degreeRoman), false, isSel, false, true, false);
         }
     }
 }

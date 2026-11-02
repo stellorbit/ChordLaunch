@@ -261,7 +261,11 @@ std::vector<Bar> ProgressionParser::Parse(
 
             // 音価の計算
             std::vector<ChordToken> finalChords;
+            bool hasExplicitRestsOrHyphens = false;
             for (const auto& pt : parsedList) {
+                if (pt.isHyphen || pt.chord.isRest) {
+                    hasExplicitRestsOrHyphens = true;
+                }
                 if (pt.isHyphen) {
                     if (!finalChords.empty()) {
                         finalChords.back().durationBeats++;
@@ -281,13 +285,30 @@ std::vector<Bar> ProgressionParser::Parse(
 
             const int barTotalTicks = bar.GetTotalTicks();
             if (totalBeatsSpecified < defaultNumerator && !finalChords.empty()) {
-                size_t numChords = finalChords.size();
-                int baseBeats = defaultNumerator / static_cast<int>(numChords);
-                int remainder = defaultNumerator % static_cast<int>(numChords);
+                if (hasExplicitRestsOrHyphens) {
+                    // 明示的な休符やハイフンが指定されている場合、未指定の末尾拍を休符（_）で補完
+                    int missingBeats = defaultNumerator - totalBeatsSpecified;
+                    for (int mb = 0; mb < missingBeats; ++mb) {
+                        ChordToken restTok;
+                        restTok.isRest = true;
+                        restTok.quality = ChordQuality::Rest;
+                        restTok.rootName = "R";
+                        restTok.degreeRoman = "R";
+                        restTok.rawText = "_";
+                        restTok.durationBeats = 1;
+                        restTok.durationTicks = TICKS_PER_BEAT;
+                        finalChords.push_back(restTok);
+                    }
+                } else {
+                    // 伝統的リードシート略記（例: | C | や | C G |）は等分割配分
+                    size_t numChords = finalChords.size();
+                    int baseBeats = defaultNumerator / static_cast<int>(numChords);
+                    int remainder = defaultNumerator % static_cast<int>(numChords);
 
-                for (size_t i = 0; i < numChords; ++i) {
-                    finalChords[i].durationBeats = baseBeats + (i < static_cast<size_t>(remainder) ? 1 : 0);
-                    finalChords[i].durationTicks = finalChords[i].durationBeats * TICKS_PER_BEAT;
+                    for (size_t i = 0; i < numChords; ++i) {
+                        finalChords[i].durationBeats = baseBeats + (i < static_cast<size_t>(remainder) ? 1 : 0);
+                        finalChords[i].durationTicks = finalChords[i].durationBeats * TICKS_PER_BEAT;
+                    }
                 }
             } else if (totalBeatsSpecified > defaultNumerator && !finalChords.empty()) {
                 // 1小節に5個以上のコードが明示された場合も 0 tick にならないよう barTotalTicks を配分
@@ -363,14 +384,14 @@ std::string ProgressionParser::Format(const std::vector<Bar>& bars, int barsPerL
                     // 1コード1小節の場合は余計なハイフン不要
                 } else {
                     for (int h = 1; h < chord.durationBeats; ++h) {
-                        oss << " -";
+                        oss << (chord.isRest ? " _" : " -");
                     }
                 }
                 if (ci + 1 < bar.chords.size()) {
                     oss << " ";
                 }
             }
-            if (bar.chords.size() == 1 && bar.chords[0].durationBeats < bar.timeNumerator) {
+            if (usedBeats < bar.timeNumerator) {
                 for (int b = usedBeats; b < bar.timeNumerator; ++b) {
                     oss << " _";
                 }

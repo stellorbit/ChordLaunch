@@ -83,6 +83,92 @@ void AppWindow::AppendChordToTimeline(const ChordToken& chord) {
     InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
+void AppWindow::InsertChordAtTimelinePosition(const ChordToken& chord, int targetBarIdx, int targetBeat) {
+    Part* pActive = m_partManager.GetActivePart();
+    if (!pActive) return;
+
+    if (targetBarIdx < 0) targetBarIdx = 0;
+    while (targetBarIdx >= static_cast<int>(pActive->bars.size())) {
+        Bar newBar;
+        newBar.barNumber = static_cast<int>(pActive->bars.size()) + 1;
+        newBar.timeNumerator = pActive->timeNumerator > 0 ? pActive->timeNumerator : 4;
+        newBar.timeDenominator = pActive->timeDenominator > 0 ? pActive->timeDenominator : 4;
+        pActive->bars.push_back(newBar);
+    }
+
+    PushUndo();
+    m_isMergedView = false;
+    auto& targetBar = pActive->bars[targetBarIdx];
+    int barBeats = targetBar.timeNumerator > 0 ? targetBar.timeNumerator : 4;
+    targetBeat = std::clamp(targetBeat, 0, barBeats - 1);
+
+    int chordBeats = std::clamp(chord.durationBeats > 0 ? chord.durationBeats : 1, 1, barBeats);
+
+    // 小節内の拍スロット配列（1拍単位）を展開
+    std::vector<ChordToken> beatSlots(barBeats);
+    for (int b = 0; b < barBeats; ++b) {
+        beatSlots[b].isRest = true;
+        beatSlots[b].quality = ChordQuality::Rest;
+        beatSlots[b].rootName = "R";
+        beatSlots[b].degreeRoman = "R";
+        beatSlots[b].rawText = "_";
+        beatSlots[b].durationBeats = 1;
+        beatSlots[b].durationTicks = TICKS_PER_BEAT;
+    }
+
+    // 既存コードをスロットへ配置
+    int curBeat = 0;
+    for (const auto& existing : targetBar.chords) {
+        int eBeats = existing.durationBeats > 0 ? existing.durationBeats : std::max(1, existing.durationTicks / TICKS_PER_BEAT);
+        for (int b = 0; b < eBeats && curBeat < barBeats; ++b) {
+            beatSlots[curBeat] = existing;
+            beatSlots[curBeat].durationBeats = 1;
+            beatSlots[curBeat].durationTicks = TICKS_PER_BEAT;
+            curBeat++;
+        }
+    }
+
+    // 指定位置へコードを上書き配置
+    for (int b = 0; b < chordBeats && (targetBeat + b) < barBeats; ++b) {
+        beatSlots[targetBeat + b] = chord;
+        beatSlots[targetBeat + b].durationBeats = 1;
+        beatSlots[targetBeat + b].durationTicks = TICKS_PER_BEAT;
+    }
+
+    // 連続する同一コード／休符を結合して小節コード列を再構成
+    std::vector<ChordToken> newChords;
+    for (int b = 0; b < barBeats; ++b) {
+        if (!newChords.empty() &&
+            newChords.back().isRest == beatSlots[b].isRest &&
+            newChords.back().rootPitch == beatSlots[b].rootPitch &&
+            newChords.back().quality == beatSlots[b].quality &&
+            newChords.back().bassPitch == beatSlots[b].bassPitch &&
+            newChords.back().inversion == beatSlots[b].inversion) {
+            newChords.back().durationBeats++;
+            newChords.back().durationTicks = newChords.back().durationBeats * TICKS_PER_BEAT;
+        } else {
+            newChords.push_back(beatSlots[b]);
+        }
+    }
+
+    targetBar.chords = std::move(newChords);
+    m_selectedBarIndex = targetBarIdx;
+
+    m_selectedChordIndex = 0;
+    int acc = 0;
+    for (size_t ci = 0; ci < targetBar.chords.size(); ++ci) {
+        if (targetBeat >= acc && targetBeat < acc + targetBar.chords[ci].durationBeats) {
+            m_selectedChordIndex = static_cast<int>(ci);
+            break;
+        }
+        acc += targetBar.chords[ci].durationBeats;
+    }
+
+    EnsureVisible(m_selectedBarIndex);
+    SyncTimelineToText();
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
 void AppWindow::InsertChordAtTimelineX(const ChordToken& chord, float x) {
     Part* pActive = m_partManager.GetActivePart();
     if (!pActive) return;
@@ -90,34 +176,14 @@ void AppWindow::InsertChordAtTimelineX(const ChordToken& chord, float x) {
     float centerX = m_leftPaneWidth;
     float barWidth = m_pixelsPerBeat * 4.0f;
     float relX = (x - centerX) + m_timelineScrollX;
-    int targetBarIdx = (relX >= 0.0f && barWidth > 0.0f) ? static_cast<int>(relX / barWidth) : -1;
+    if (relX < 0.0f) relX = 0.0f;
 
-    if (targetBarIdx < 0 || targetBarIdx >= static_cast<int>(pActive->bars.size())) {
-        AppendChordToTimeline(chord);
-        return;
-    }
+    int targetBarIdx = (barWidth > 0.0f) ? static_cast<int>(relX / barWidth) : 0;
+    float barOffsetRatio = (barWidth > 0.0f) ? (std::fmod(relX, barWidth) / barWidth) : 0.0f;
+    int barBeats = (pActive->timeNumerator > 0) ? pActive->timeNumerator : 4;
+    int targetBeat = std::clamp(static_cast<int>(barOffsetRatio * barBeats), 0, barBeats - 1);
 
-    int addTicks = (chord.durationTicks > 0) ? chord.durationTicks : (chord.durationBeats * TICKS_PER_BEAT);
-    auto& targetBar = pActive->bars[targetBarIdx];
-    int usedTicks = 0;
-    for (const auto& existing : targetBar.chords) {
-        usedTicks += (existing.durationTicks > 0) ? existing.durationTicks : (existing.durationBeats * TICKS_PER_BEAT);
-    }
-    int maxBarTicks = targetBar.GetTotalTicks();
-    if (maxBarTicks <= 0) maxBarTicks = TICKS_PER_BAR_4_4;
-
-    if (usedTicks + addTicks <= maxBarTicks) {
-        PushUndo();
-        m_isMergedView = false;
-        targetBar.chords.push_back(chord);
-        m_selectedBarIndex = targetBarIdx;
-        m_selectedChordIndex = static_cast<int>(targetBar.chords.size()) - 1;
-        EnsureVisible(m_selectedBarIndex);
-        SyncTimelineToText();
-        InvalidateRect(m_hwnd, nullptr, FALSE);
-    } else {
-        AppendChordToTimeline(chord);
-    }
+    InsertChordAtTimelinePosition(chord, targetBarIdx, targetBeat);
 }
 
 void AppWindow::SyncTextToTimeline() {

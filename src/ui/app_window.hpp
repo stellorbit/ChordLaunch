@@ -143,6 +143,7 @@ private:
     void OnSize(UINT width, UINT height);
     bool HitTestPaletteCard(float x, float y, ChordToken& outChord);
     void InsertChordAtTimelineX(const ChordToken& chord, float x);
+    void InsertChordAtTimelinePosition(const ChordToken& chord, int targetBarIdx, int targetBeat);
 
     // プルダウンメニュー表示・メニューバー言語更新
     void RebuildMainMenu();

@@ -546,13 +546,28 @@ void AppWindow::OnLButtonDown(float x, float y) {
 
                     D2D1_RECT_F cardRc = D2D1::RectF(cx + 2.0f, cardY, cx + cw - 2.0f, cardY + cardH);
 
+                    if (chord.isRest) continue; // 空白スロットはカード掴み・削除判定をスキップ
+
                     if (PtInRectF(cardRc, x, y)) {
                         D2D1_RECT_F closeRc = D2D1::RectF(cardRc.right - 16.0f, cardRc.top + 2.0f, cardRc.right - 2.0f, cardRc.top + 16.0f);
                         if (!m_isMergedView && PtInRectF(closeRc, x, y)) {
                             PushUndo();
-                            bars[b].chords.erase(bars[b].chords.begin() + ci);
-                            if (bars[b].chords.empty() && bars.size() > 1) {
-                                bars.erase(bars.begin() + b);
+                            if (bars[b].chords.size() > 1) {
+                                bars[b].chords[ci].isRest = true;
+                                bars[b].chords[ci].quality = ChordQuality::Rest;
+                                bars[b].chords[ci].rootName = "R";
+                                bars[b].chords[ci].degreeRoman = "R";
+                                bars[b].chords[ci].rawText = "_";
+                            } else {
+                                if (bars.size() > 1) {
+                                    bars.erase(bars.begin() + b);
+                                } else {
+                                    bars[b].chords[ci].isRest = true;
+                                    bars[b].chords[ci].quality = ChordQuality::Rest;
+                                    bars[b].chords[ci].rootName = "R";
+                                    bars[b].chords[ci].degreeRoman = "R";
+                                    bars[b].chords[ci].rawText = "_";
+                                }
                             }
                             m_selectedBarIndex = -1;
                             m_selectedChordIndex = -1;
@@ -586,10 +601,15 @@ void AppWindow::OnLButtonDown(float x, float y) {
                                 return;
                             }
 
-                            m_dragMode = DragMode::CardMove;
+                            m_dragMode = DragMode::CardTimelineDrag;
+                            m_dragPaletteChord = chord;
                             m_dragBarIndex = static_cast<int>(b);
                             m_dragChordIndex = static_cast<int>(ci);
                             m_dragStartX = x;
+                            m_dragStartY = y;
+                            m_dragCurrentX = x;
+                            m_dragCurrentY = y;
+                            m_isPaletteDragging = false;
                             SetCapture(m_hwnd);
                         }
                         return;
@@ -1053,10 +1073,12 @@ void AppWindow::OnLButtonUp(float x, float y) {
                     auto& sBar = pActive->bars[srcBar];
                     if (srcChord >= 0 && srcChord < static_cast<int>(sBar.chords.size())) {
                         PushUndo();
-                        sBar.chords.erase(sBar.chords.begin() + srcChord);
-                        if (sBar.chords.empty() && pActive->bars.size() > 1) {
-                            pActive->bars.erase(pActive->bars.begin() + srcBar);
-                        }
+                        // 移動元のコード位置を休符（空白）化
+                        sBar.chords[srcChord].isRest = true;
+                        sBar.chords[srcChord].quality = ChordQuality::Rest;
+                        sBar.chords[srcChord].rootName = "R";
+                        sBar.chords[srcChord].degreeRoman = "R";
+                        sBar.chords[srcChord].rawText = "_";
                         InsertChordAtTimelineX(movedChord, x);
                     }
                 }

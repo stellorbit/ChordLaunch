@@ -153,6 +153,26 @@ void TestRestTokens() {
     TEST_ASSERT(bars[0].chords[0].rootName == "C" && bars[0].chords[0].durationBeats == 2, "C has 2 beats");
     TEST_ASSERT(bars[0].chords[1].isRest && bars[0].chords[1].durationBeats == 2, "Rest has 2 beats");
     TEST_ASSERT(bars[0].chords[1].degreeRoman == "R", "Rest degree is R");
+
+    // アンダースコア記法による空き拍・休符テスト
+    auto barsGap = ProgressionParser::Parse("| C _ G _ |");
+    TEST_ASSERT(barsGap.size() == 1, "Must parse 1 bar");
+    TEST_ASSERT(barsGap[0].chords.size() == 4, "Must have 4 items (C, _, G, _)");
+    TEST_ASSERT(barsGap[0].chords[0].rootName == "C" && barsGap[0].chords[0].durationBeats == 1, "C is 1 beat");
+    TEST_ASSERT(barsGap[0].chords[1].isRest && barsGap[0].chords[1].durationBeats == 1, "_ is 1 beat rest");
+    TEST_ASSERT(barsGap[0].chords[2].rootName == "G" && barsGap[0].chords[2].durationBeats == 1, "G is 1 beat");
+    TEST_ASSERT(barsGap[0].chords[3].isRest && barsGap[0].chords[3].durationBeats == 1, "_ is 1 beat rest");
+
+    // 先頭空白・ハイフンテスト
+    auto barsLeadGap = ProgressionParser::Parse("| _ _ C - |");
+    TEST_ASSERT(barsLeadGap.size() == 1, "Must parse 1 bar");
+    TEST_ASSERT(barsLeadGap[0].chords[0].isRest && barsLeadGap[0].chords[0].durationBeats == 1, "Leading rest 1 beat");
+    TEST_ASSERT(barsLeadGap[0].chords[1].isRest && barsLeadGap[0].chords[1].durationBeats == 1, "Leading rest 2nd beat");
+    TEST_ASSERT(barsLeadGap[0].chords[2].rootName == "C" && barsLeadGap[0].chords[2].durationBeats == 2, "C is 2 beats");
+
+    // 可逆フォーマットテスト
+    std::string fmt = ProgressionParser::Format(barsGap);
+    TEST_ASSERT(fmt.find("C _ G _") != std::string::npos, "Formatted output must retain gap underscores: " + fmt);
 }
 
 void TestPartManagerAndKeyChangeMerge() {
