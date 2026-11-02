@@ -149,7 +149,7 @@ std::vector<Bar> ProgressionParser::Parse(
             continue;
         }
 
-        // 小節線 '|' で分割
+        // 小節線 '|' で分割 (二重パイプ || や空セグメントを排除・正規化)
         std::vector<std::string> barSegments;
         if (line.find('|') != std::string::npos) {
             std::string seg;
@@ -157,7 +157,10 @@ std::vector<Bar> ProgressionParser::Parse(
                 if (c == '|') {
                     size_t s = seg.find_first_not_of(" \t");
                     if (s != std::string::npos) {
-                        barSegments.push_back(seg.substr(s, seg.find_last_not_of(" \t") - s + 1));
+                        std::string cleanSeg = seg.substr(s, seg.find_last_not_of(" \t") - s + 1);
+                        if (!cleanSeg.empty()) {
+                            barSegments.push_back(cleanSeg);
+                        }
                     }
                     seg.clear();
                 } else {
@@ -166,7 +169,10 @@ std::vector<Bar> ProgressionParser::Parse(
             }
             size_t s = seg.find_first_not_of(" \t");
             if (s != std::string::npos) {
-                barSegments.push_back(seg.substr(s, seg.find_last_not_of(" \t") - s + 1));
+                std::string cleanSeg = seg.substr(s, seg.find_last_not_of(" \t") - s + 1);
+                if (!cleanSeg.empty()) {
+                    barSegments.push_back(cleanSeg);
+                }
             }
         } else {
             // 小節線がない場合: トークン数が defaultNumerator (4) を超える場合は4拍ごとに小節を自動分割する
@@ -364,7 +370,9 @@ std::string ProgressionParser::Format(const std::vector<Bar>& bars, int barsPerL
             oss << "[Key: " << bar.keyChange << "]\n";
         }
 
-        oss << "| ";
+        if (countInLine == 0) {
+            oss << "| ";
+        }
         if (bar.chords.empty()) {
             oss << "- ";
         } else {
@@ -401,8 +409,10 @@ std::string ProgressionParser::Format(const std::vector<Bar>& bars, int barsPerL
 
         countInLine++;
         if (countInLine >= barsPerLine) {
-            oss << "|\n";
+            oss << "|\r\n";
             countInLine = 0;
+        } else if (i + 1 < bars.size()) {
+            oss << "| ";
         }
     }
 

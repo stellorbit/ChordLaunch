@@ -291,6 +291,7 @@ private:
     bool  m_isPaletteDragging = false;
     ChordToken m_dragPaletteChord;
     int   m_dragInitialTicks = 0;
+    int   m_dragInitialNextTicks = 0;
 
     // 再生状態 (tick時間管理)
     bool   m_isPlaying = false;

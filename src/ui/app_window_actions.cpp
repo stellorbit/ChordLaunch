@@ -100,9 +100,9 @@ void AppWindow::InsertChordAtTimelinePosition(const ChordToken& chord, int targe
     m_isMergedView = false;
     auto& targetBar = pActive->bars[targetBarIdx];
     int barBeats = targetBar.timeNumerator > 0 ? targetBar.timeNumerator : 4;
-    targetBeat = std::clamp(targetBeat, 0, barBeats - 1);
-
     int chordBeats = std::clamp(chord.durationBeats > 0 ? chord.durationBeats : 1, 1, barBeats);
+    // 右端にドロップした際にコードが勝手に縮まないよう、小節末尾に収まるようスナップ
+    targetBeat = std::clamp(targetBeat, 0, std::max(0, barBeats - chordBeats));
 
     // 既存コードを区間 (startBeat, durationBeats) として収集 (休符以外)
     struct PlacedItem {
@@ -438,7 +438,7 @@ void AppWindow::TogglePlayback() {
                 int startTick = accTicks + chordOffset;
                 int endTick = startTick + cTicks;
 
-                if (m_playbackTick >= startTick && m_playbackTick < endTick) {
+                if (cTicks > 0 && m_playbackTick >= startTick && m_playbackTick < endTick) {
                     m_lastSoundedChordUid = chordUidCounter;
                     m_selectedBarIndex = static_cast<int>(bi);
                     m_selectedChordIndex = static_cast<int>(ci);

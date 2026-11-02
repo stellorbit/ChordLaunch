@@ -50,7 +50,10 @@ void AppWindow::OnRender() {
             }
         }
 
-        D2D1_RECT_F ghostRc = D2D1::RectF(m_dragCurrentX + 10.0f, m_dragCurrentY - 22.0f, m_dragCurrentX + 94.0f, m_dragCurrentY + 24.0f);
+        int gTicks = m_dragPaletteChord.durationTicks > 0 ? m_dragPaletteChord.durationTicks : (m_dragPaletteChord.durationBeats * TICKS_PER_BEAT);
+        float gBarWidth = m_pixelsPerBeat * 4.0f;
+        float ghostW = std::max(48.0f, (static_cast<float>(gTicks) / TICKS_PER_BAR_4_4) * gBarWidth - 4.0f);
+        D2D1_RECT_F ghostRc = D2D1::RectF(m_dragCurrentX + 10.0f, m_dragCurrentY - 22.0f, m_dragCurrentX + 10.0f + ghostW, m_dragCurrentY + 24.0f);
         std::wstring gName = m_dragPaletteChord.isRest ? L"Rest" : ToWString(m_dragPaletteChord.rootName + m_dragPaletteChord.qualitySuffix);
         if (!m_dragPaletteChord.isRest && !m_dragPaletteChord.bassName.empty()) {
             gName += L"/" + ToWString(m_dragPaletteChord.bassName);

@@ -259,6 +259,11 @@ void TestNewAuditFixes() {
 
     auto diaAdd9 = MusicEngine::GetDiatonicChordsByTab("C", MusicalMode::Major, 3);
 
+    // 二重パイプ (||) 正規化テスト: 余分な空小節を作らず正確な小節数にパース
+    auto doublePipeBars = ProgressionParser::Parse("| C | C | Eb | Eb || Asus4 _ Asus4 _ |");
+    TEST_ASSERT(doublePipeBars.size() == 5, "Double pipe || must not create empty bar, count must be 5");
+    TEST_ASSERT(doublePipeBars[4].chords[0].rootName == "A", "5th bar must be Asus4");
+
     // 同一コード連続配置テスト (勝手にマージされず独立カードとして保持されること)
     auto repeatChords = ProgressionParser::Parse("| Asus4 Asus4 _ _ |");
     TEST_ASSERT(repeatChords.size() == 1, "Must parse 1 bar");

@@ -587,6 +587,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
                                 m_dragChordIndex = static_cast<int>(ci);
                                 m_dragStartX = x;
                                 m_dragInitialTicks = cTicks;
+                                m_dragInitialNextTicks = (ci + 1 < bars[b].chords.size() && bars[b].chords[ci + 1].isRest) ? bars[b].chords[ci + 1].durationTicks : 0;
                                 SetCapture(m_hwnd);
                                 return;
                             }
@@ -948,12 +949,62 @@ void AppWindow::OnMouseMove(float x, float y) {
         return;
     }
 
-    if (m_dragMode == DragMode::CardResizeRight || m_dragMode == DragMode::CardResizeLeft) {
+    if (m_dragMode == DragMode::CardResizeRight) {
         Part* pActive = m_partManager.GetActivePart();
         if (pActive && m_dragBarIndex >= 0 && m_dragBarIndex < static_cast<int>(pActive->bars.size())) {
             auto& bar = pActive->bars[m_dragBarIndex];
             if (m_dragChordIndex >= 0 && m_dragChordIndex < static_cast<int>(bar.chords.size())) {
-                float dx = (m_dragMode == DragMode::CardResizeRight) ? (x - m_dragStartX) : (m_dragStartX - x);
+                float dx = x - m_dragStartX;
+                float pxPerTick = (m_pixelsPerBeat * 4.0f) / std::max(1, bar.GetTotalTicks());
+                int deltaTicks = static_cast<int>(dx / pxPerTick);
+
+                int snapTicks = std::max(1, m_selectedGridTicks);
+                deltaTicks = (deltaTicks / snapTicks) * snapTicks;
+
+                int minTicks = snapTicks;
+                int maxTicks = m_dragInitialTicks + m_dragInitialNextTicks;
+                if (maxTicks <= minTicks) maxTicks = bar.GetTotalTicks();
+
+                int newTicks = std::clamp(m_dragInitialTicks + deltaTicks, minTicks, maxTicks);
+                int diff = m_dragInitialTicks - newTicks;
+
+                bar.chords[m_dragChordIndex].SetTicks(newTicks);
+
+                // 直後の休符を調整、または新規休符を挿入して左詰めを防止
+                size_t nextIdx = m_dragChordIndex + 1;
+                if (m_dragInitialNextTicks > 0 && nextIdx < bar.chords.size() && bar.chords[nextIdx].isRest) {
+                    int nextTicks = m_dragInitialNextTicks + diff;
+                    if (nextTicks > 0) {
+                        bar.chords[nextIdx].SetTicks(nextTicks);
+                    } else {
+                        bar.chords.erase(bar.chords.begin() + nextIdx);
+                        m_dragInitialNextTicks = 0;
+                    }
+                } else if (diff > 0) {
+                    ChordToken restTok;
+                    restTok.isRest = true;
+                    restTok.quality = ChordQuality::Rest;
+                    restTok.rootName = "R";
+                    restTok.degreeRoman = "R";
+                    restTok.rawText = "_";
+                    restTok.SetTicks(diff);
+                    bar.chords.insert(bar.chords.begin() + nextIdx, restTok);
+                    m_dragInitialNextTicks = diff;
+                }
+
+                SyncTimelineToText();
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+            }
+        }
+        return;
+    }
+
+    if (m_dragMode == DragMode::CardResizeLeft) {
+        Part* pActive = m_partManager.GetActivePart();
+        if (pActive && m_dragBarIndex >= 0 && m_dragBarIndex < static_cast<int>(pActive->bars.size())) {
+            auto& bar = pActive->bars[m_dragBarIndex];
+            if (m_dragChordIndex >= 0 && m_dragChordIndex < static_cast<int>(bar.chords.size())) {
+                float dx = m_dragStartX - x;
                 float pxPerTick = (m_pixelsPerBeat * 4.0f) / std::max(1, bar.GetTotalTicks());
                 int deltaTicks = static_cast<int>(dx / pxPerTick);
 
