@@ -214,4 +214,24 @@ inline std::wstring GetLocalizedTemplateDesc(const ProgressionTemplate& t, bool 
     return ToWString(t.description);
 }
 
+inline std::wstring NormalizePathString(const std::wstring& pathStr) {
+    if (pathStr.empty()) return L"";
+    std::wstring out;
+    out.reserve(pathStr.size());
+    bool prevSep = false;
+    for (size_t i = 0; i < pathStr.size(); ++i) {
+        wchar_t c = pathStr[i];
+        if (c == L'\\' || c == L'/') {
+            if (!prevSep || (i == 1 && out[0] == L'\\')) {
+                out += L'\\';
+            }
+            prevSep = true;
+        } else {
+            out += c;
+            prevSep = false;
+        }
+    }
+    return out;
+}
+
 } // namespace clp

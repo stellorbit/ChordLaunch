@@ -825,6 +825,43 @@ void TestJsonUnescapeAndPathNormalization() {
     std::wstring runawayPath = L"C:\\\\\\\\Users\\\\\\\\KotoneP\\\\\\\\Documents\\\\Song.chord";
     std::wstring normalized = normalizePath(runawayPath);
     TEST_ASSERT(normalized == L"C:\\Users\\KotoneP\\Documents\\Song.chord", "normalizePath compresses multiplied backslashes into single separator");
+
+    // 3. 複数回の保存・読込ループによるバックスラッシュ増殖防止検証 (Multi-cycle Save/Load idempotence)
+    auto escapeJsonW = [](const std::wstring& s) {
+        std::wstring out;
+        for (wchar_t c : s) {
+            if (c == L'"') out += L"\\\"";
+            else if (c == L'\\') out += L"\\\\";
+            else out += c;
+        }
+        return out;
+    };
+    auto unescapeJsonW = [](const std::wstring& s) {
+        std::wstring out;
+        for (size_t i = 0; i < s.size(); ++i) {
+            if (s[i] == L'\\' && i + 1 < s.size()) {
+                wchar_t next = s[i + 1];
+                if (next == L'"') { out += L'"'; ++i; }
+                else if (next == L'\\') { out += L'\\'; ++i; }
+                else { out += next; ++i; }
+            } else {
+                out += s[i];
+            }
+        }
+        return out;
+    };
+
+    std::wstring currentPath = L"C:\\Users\\KotoneP\\Documents\\Song.chord";
+    for (int cycle = 0; cycle < 5; ++cycle) {
+        // 保存時: JSONエスケープ
+        std::wstring jsonSaved = L"\"" + escapeJsonW(currentPath) + L"\"";
+        // 読込時: アンクォート＆アンエスケープ
+        std::wstring inner = jsonSaved.substr(1, jsonSaved.size() - 2);
+        std::wstring unesc = unescapeJsonW(inner);
+        // パス正規化
+        currentPath = normalizePath(unesc);
+    }
+    TEST_ASSERT(currentPath == L"C:\\Users\\KotoneP\\Documents\\Song.chord", "5 save/load cycles keep backslashes strictly single, preventing multiplication");
 }
 
 void TestTickSyncopationAndTriadDefault() {
@@ -966,6 +1003,48 @@ void TestCardResizeLeftWithRestPadding() {
     TEST_ASSERT(bar.chords[1].isRest && bar.chords[1].durationTicks == 960, "Tail rest remains intact");
 }
 
+void TestDropGridSnapPreview() {
+    std::cout << "[TEST] 23. Drop Grid Snap Preview & Edge Margin Verification\n";
+
+    // 1. グリッドスナップ計算ロジック
+    float pixelsPerBeat = 64.0f;
+    float barWidth = pixelsPerBeat * 4.0f; // 256.0f
+    int barTotalTicks = 1920;
+
+    auto calcSnap = [&](float relX, int gridTicks, int chordTicks) {
+        int targetBar = (barWidth > 0.0f) ? static_cast<int>(relX / barWidth) : 0;
+        float barOffsetRatio = (barWidth > 0.0f) ? (std::fmod(relX, barWidth) / barWidth) : 0.0f;
+        float rawTick = barOffsetRatio * static_cast<float>(barTotalTicks);
+        int snappedTick = static_cast<int>(std::round(rawTick / static_cast<float>(gridTicks))) * gridTicks;
+        snappedTick = std::clamp(snappedTick, 0, std::max(0, barTotalTicks - chordTicks));
+        return std::make_pair(targetBar, snappedTick);
+    };
+
+    // 1拍グリッド (480 ticks), 1拍コード
+    // barWidth = 256px (64px/beat). 276px = 256px + 20px (1拍目中央より手前 -> 1拍目 0 ticks)
+    auto [b1, t1] = calcSnap(276.0f, 480, 480);
+    TEST_ASSERT(b1 == 1 && t1 == 0, "relX 276px snaps to Bar 1, Tick 0 (Beat 1)");
+
+    // 330px = 256px + 74px (1拍目境界64pxを超え2拍目前半 -> 2拍目 480 ticks)
+    auto [b2, t2] = calcSnap(330.0f, 480, 480);
+    TEST_ASSERT(b2 == 1 && t2 == 480, "relX 330px snaps to Bar 1, Tick 480 (Beat 2)");
+
+    // 1/2拍グリッド (240 ticks = 8分音符裏拍), 1拍コード
+    auto [b3, t3] = calcSnap(345.0f, 240, 480); // 256 + 89 -> Bar 1, 720 ticks (2拍目裏)
+    TEST_ASSERT(b3 == 1 && t3 == 720, "relX 345px on 1/2-beat grid snaps to Bar 1, Tick 720 (Beat 2.5)");
+
+    // 2. 左端リサイズ掴み判定マージンの検証
+    auto calcMargin = [](float cardW) {
+        return std::min(14.0f, cardW * 0.35f);
+    };
+
+    float mStandard = calcMargin(64.0f); // 1拍カード
+    TEST_ASSERT(mStandard == 14.0f, "1-beat card has 14px grab margin");
+
+    float mSmall = calcMargin(24.0f); // 極小カード
+    TEST_ASSERT(mSmall == 8.4f, "Small card caps margin at 35% (8.4px), leaving >= 30% for drag-move");
+}
+
 int main() {
     std::cout << "========================================\n";
     std::cout << "ChordLaunch C++20 Core Test Suite\n";
@@ -993,6 +1072,7 @@ int main() {
     TestJsonUnescapeAndPathNormalization();
     TestTickSyncopationAndTriadDefault();
     TestCardResizeLeftWithRestPadding();
+    TestDropGridSnapPreview();
 
     std::cout << "========================================\n";
     std::cout << "Tests Passed: " << g_passCount << ", Failed: " << g_failCount << "\n";

@@ -578,7 +578,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
 
                         if (!m_isMergedView) {
                             PushUndo();
-                            float edgeMargin = std::min(10.0f, (cardRc.right - cardRc.left) * 0.25f);
+                            float edgeMargin = std::min(14.0f, (cardRc.right - cardRc.left) * 0.35f);
                             if (x >= cardRc.right - edgeMargin) {
                                 m_dragMode = DragMode::CardResizeRight;
                                 m_dragBarIndex = static_cast<int>(b);
@@ -1166,7 +1166,7 @@ void AppWindow::OnMouseMove(float x, float y) {
                         float cw = (static_cast<float>(cTicks) / barTicks) * barWidth;
                         offsetTicks += cTicks;
                         D2D1_RECT_F cardRc = D2D1::RectF(cx + 2.0f, cardY, cx + cw - 2.0f, cardY + cardH);
-                        float edgeMargin = std::min(10.0f, cw * 0.25f);
+                        float edgeMargin = std::min(14.0f, cw * 0.35f);
                         if (PtInRectF(cardRc, x, y) && (x <= cardRc.left + edgeMargin || x >= cardRc.right - edgeMargin)) {
                             SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
                             return;

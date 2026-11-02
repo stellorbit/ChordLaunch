@@ -1239,11 +1239,11 @@ void AppWindow::DrawCard(
     bool useCompactFont = (w < 84.0f && chordName.size() >= 5) || (chordName.size() >= 8);
     IDWriteTextFormat* pTitleFont = useCompactFont ? m_pFontButton : m_pFontCardTitle;
 
-    D2D1_RECT_F titleRect = D2D1::RectF(rect.left + 2.0f, rect.top + 3.0f, rect.right - 2.0f, degree.empty() ? (rect.bottom - 3.0f) : (rect.top + h * 0.56f));
+    D2D1_RECT_F titleRect = D2D1::RectF(rect.left + 8.0f, rect.top + 3.0f, rect.right - 14.0f, degree.empty() ? (rect.bottom - 3.0f) : (rect.top + h * 0.56f));
     DrawTextSafe(chordName, pTitleFont, titleRect, isRest ? m_pBrushTextMuted : m_pBrushText);
 
     if (!degree.empty()) {
-        D2D1_RECT_F degRect = D2D1::RectF(rect.left + 2.0f, rect.top + h * 0.55f, rect.right - 2.0f, rect.bottom - 2.0f);
+        D2D1_RECT_F degRect = D2D1::RectF(rect.left + 8.0f, rect.top + h * 0.55f, rect.right - 14.0f, rect.bottom - 2.0f);
         DrawTextSafe(degree, m_pFontCardDegree, degRect, m_pBrushAccent);
     }
 
@@ -1256,8 +1256,8 @@ void AppWindow::DrawCard(
         float hTop = rect.top + h * 0.35f;
         float hBottom = rect.bottom - h * 0.25f;
 
-        // 左端リサイズハンドル (縦線)
-        float leftHandleX = rect.left + 5.0f;
+        // 左端リサイズハンドル (縦線: 文字に被らないよう端から3.5px)
+        float leftHandleX = rect.left + 3.5f;
         m_pRenderTarget->DrawLine(
             D2D1::Point2F(leftHandleX, hTop),
             D2D1::Point2F(leftHandleX, hBottom),

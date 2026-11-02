@@ -161,7 +161,7 @@ void AppWindow::RenderDashboardModal(const D2D1_RECT_F& rc) {
 
             std::filesystem::path fp(m_recentFiles[ri]);
             std::wstring fName = fp.filename().wstring();
-            std::wstring fDir = fp.parent_path().wstring();
+            std::wstring fDir = NormalizePathString(fp.parent_path().wstring());
 
             D2D1_RECT_F nameRc = D2D1::RectF(itemRc.left + 10.0f, itemRc.top + 6.0f, itemRc.left + 220.0f, itemRc.bottom - 6.0f);
             DrawTextSafe(fName, m_pFontTab, nameRc, isSel ? m_pBrushAccent : m_pBrushText);

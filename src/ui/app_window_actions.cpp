@@ -1039,26 +1039,6 @@ std::string UnescapeJson(std::string_view s) {
     return out;
 }
 
-std::wstring NormalizePathString(const std::wstring& pathStr) {
-    if (pathStr.empty()) return L"";
-    std::wstring out;
-    out.reserve(pathStr.size());
-    bool prevSep = false;
-    for (size_t i = 0; i < pathStr.size(); ++i) {
-        wchar_t c = pathStr[i];
-        if (c == L'\\' || c == L'/') {
-            if (!prevSep || (i == 1 && out[0] == L'\\')) {
-                out += L'\\';
-            }
-            prevSep = true;
-        } else {
-            out += c;
-            prevSep = false;
-        }
-    }
-    return out;
-}
-
 std::string FindJsonStr(const std::string& json, std::string_view key) {
     std::string pattern = "\"" + std::string(key) + "\"";
     size_t pos = json.find(pattern);
@@ -1087,11 +1067,12 @@ std::filesystem::path GetSettingsFilePath() {
 
 void AppWindow::AddRecentFile(const std::wstring& path) {
     if (path.empty()) return;
-    auto it = std::find(m_recentFiles.begin(), m_recentFiles.end(), path);
+    std::wstring normPath = NormalizePathString(path);
+    auto it = std::find(m_recentFiles.begin(), m_recentFiles.end(), normPath);
     if (it != m_recentFiles.end()) {
         m_recentFiles.erase(it);
     }
-    m_recentFiles.insert(m_recentFiles.begin(), path);
+    m_recentFiles.insert(m_recentFiles.begin(), normPath);
     if (m_recentFiles.size() > 10) {
         m_recentFiles.resize(10);
     }
@@ -1175,8 +1156,20 @@ void AppWindow::LoadAppSettings() {
                     size_t sQuote = content.find('"', cur);
                     if (sQuote == std::string::npos || sQuote >= arrEnd) break;
                     size_t eQuote = content.find('"', sQuote + 1);
-                    while (eQuote != std::string::npos && eQuote < arrEnd && content[eQuote - 1] == '\\') {
-                        eQuote = content.find('"', eQuote + 1);
+                    while (eQuote != std::string::npos && eQuote < arrEnd) {
+                        // クォート直前の連続バックスラッシュ数をカウント
+                        size_t bCount = 0;
+                        size_t checkPos = eQuote;
+                        while (checkPos > sQuote && content[checkPos - 1] == '\\') {
+                            ++bCount;
+                            --checkPos;
+                        }
+                        // 奇数個のバックスラッシュはエスケープされた引用符 \" なので継続
+                        if (bCount % 2 == 1) {
+                            eQuote = content.find('"', eQuote + 1);
+                        } else {
+                            break;
+                        }
                     }
                     if (eQuote == std::string::npos || eQuote >= arrEnd) break;
                     std::string item = content.substr(sQuote + 1, eQuote - sQuote - 1);
@@ -1201,11 +1194,11 @@ void AppWindow::SaveAppSettings() {
         ofs << "{\n";
         ofs << "  \"showDashboardOnStartup\": " << (m_showDashboardOnStartup ? "true" : "false") << ",\n";
         ofs << "  \"autoBackupInProjectDir\": " << (m_autoBackupInProjectDir ? "true" : "false") << ",\n";
-        ofs << "  \"projectDirectory\": \"" << EscapeJson(ToUtf8String(m_projectDirectory)) << "\",\n";
-        ofs << "  \"autoBackupDirectory\": \"" << EscapeJson(ToUtf8String(m_autoBackupDirectory)) << "\",\n";
+        ofs << "  \"projectDirectory\": \"" << EscapeJson(ToUtf8String(NormalizePathString(m_projectDirectory))) << "\",\n";
+        ofs << "  \"autoBackupDirectory\": \"" << EscapeJson(ToUtf8String(NormalizePathString(m_autoBackupDirectory))) << "\",\n";
         ofs << "  \"recentFiles\": [\n";
         for (size_t i = 0; i < m_recentFiles.size(); ++i) {
-            ofs << "    \"" << EscapeJson(ToUtf8String(m_recentFiles[i])) << "\"" << (i + 1 < m_recentFiles.size() ? "," : "") << "\n";
+            ofs << "    \"" << EscapeJson(ToUtf8String(NormalizePathString(m_recentFiles[i]))) << "\"" << (i + 1 < m_recentFiles.size() ? "," : "") << "\n";
         }
         ofs << "  ]\n";
         ofs << "}\n";

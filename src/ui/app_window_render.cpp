@@ -33,32 +33,79 @@ void AppWindow::OnRender() {
     float centerW = rightX - centerX;
     RenderCenterPane(centerX, mainY, centerW, mainH);
 
-    // パレットドラッグ中のゴーストカード＆ドロップ先ハイライト描画
+    // パレットおよびタイムラインドラッグ中のドロップ先グリッドスナップ可視化（ゴーストカード描画）
     if ((m_dragMode == DragMode::PaletteCardDrag || m_dragMode == DragMode::CardTimelineDrag) && m_isPaletteDragging) {
         float dockH = m_showKeyboard ? m_bottomDockHeight : 28.0f;
-        if (m_dragCurrentX >= centerX && m_dragCurrentX <= centerX + centerW &&
+        float dragTargetX = (m_dragMode == DragMode::CardTimelineDrag) ? (m_dragCurrentX - m_dragCardGrabOffsetX) : m_dragCurrentX;
+
+        if (dragTargetX >= centerX - 20.0f && dragTargetX <= centerX + centerW + 20.0f &&
             m_dragCurrentY >= mainY && m_dragCurrentY <= h - dockH) {
             float barWidth = m_pixelsPerBeat * 4.0f;
-            float relX = (m_dragCurrentX - centerX) + m_timelineScrollX;
-            int targetBarIdx = (relX >= 0.0f && barWidth > 0.0f) ? static_cast<int>(relX / barWidth) : 0;
-            float hx = centerX + targetBarIdx * barWidth - m_timelineScrollX;
-            float hyTop = mainY + m_partTabHeight + m_rulerHeight;
-            float hyBot = h - dockH - m_scrollBarHeight;
-            D2D1_RECT_F dropHighlightRc = D2D1::RectF(std::max(centerX, hx + 1.0f), hyTop + 1.0f, std::min(centerX + centerW, hx + barWidth - 1.0f), hyBot - 1.0f);
-            if (dropHighlightRc.right > dropHighlightRc.left) {
-                m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(dropHighlightRc, 4.0f, 4.0f), m_pBrushAccent, 2.5f);
+            float relX = (dragTargetX - centerX) + m_timelineScrollX;
+            if (relX < 0.0f) relX = 0.0f;
+
+            Part* pActive = m_partManager.GetActivePart();
+            int barNumerator = (pActive && pActive->timeNumerator > 0) ? pActive->timeNumerator : 4;
+            int barTotalTicks = barNumerator * TICKS_PER_BEAT;
+
+            int targetBarIdx = (barWidth > 0.0f) ? static_cast<int>(relX / barWidth) : 0;
+            float barOffsetRatio = (barWidth > 0.0f) ? (std::fmod(relX, barWidth) / barWidth) : 0.0f;
+
+            int gridTicks = std::max(1, m_selectedGridTicks);
+            float rawTick = barOffsetRatio * static_cast<float>(barTotalTicks);
+            int snappedTick = static_cast<int>(std::round(rawTick / static_cast<float>(gridTicks))) * gridTicks;
+            int chordTicks = m_dragPaletteChord.durationTicks > 0 ? m_dragPaletteChord.durationTicks : (m_dragPaletteChord.durationBeats > 0 ? m_dragPaletteChord.durationBeats * TICKS_PER_BEAT : gridTicks);
+            snappedTick = std::clamp(snappedTick, 0, std::max(0, barTotalTicks - chordTicks));
+
+            float barLeftX = centerX + targetBarIdx * barWidth - m_timelineScrollX;
+            float slotX = barLeftX + (static_cast<float>(snappedTick) / static_cast<float>(barTotalTicks)) * barWidth;
+            float slotW = (static_cast<float>(chordTicks) / static_cast<float>(barTotalTicks)) * barWidth - 4.0f;
+
+            float cardTrackY = mainY + m_partTabHeight + m_rulerHeight + 5.0f;
+            float cardTrackH = m_cardTrackHeight - 10.0f;
+
+            // 1. ピアノロール上のグリッド列ハイライト
+            float rollYTop = cardTrackY + cardTrackH + 5.0f;
+            float rollYBot = h - dockH - m_scrollBarHeight;
+            if (rollYBot > rollYTop) {
+                D2D1_RECT_F rollSlotRc = D2D1::RectF(slotX + 2.0f, rollYTop, slotX + 2.0f + slotW, rollYBot);
+                D2D1_RECT_F clippedRollRc = D2D1::RectF(std::max(centerX, rollSlotRc.left), rollSlotRc.top, std::min(centerX + centerW, rollSlotRc.right), rollSlotRc.bottom);
+                if (clippedRollRc.right > clippedRollRc.left) {
+                    m_pRenderTarget->FillRectangle(clippedRollRc, m_pBrushCardActive);
+                }
+            }
+
+            // 2. カードトラック上のドロップ先ゴーストカード枠 (半透明青背景＆アクセント枠線)
+            D2D1_RECT_F slotCardRc = D2D1::RectF(slotX + 2.0f, cardTrackY, slotX + 2.0f + slotW, cardTrackY + cardTrackH);
+            D2D1_RECT_F clippedSlotRc = D2D1::RectF(std::max(centerX, slotCardRc.left), slotCardRc.top, std::min(centerX + centerW, slotCardRc.right), slotCardRc.bottom);
+            if (clippedSlotRc.right > clippedSlotRc.left) {
+                m_pRenderTarget->PushAxisAlignedClip(D2D1::RectF(centerX, cardTrackY, centerX + centerW, cardTrackY + cardTrackH), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+                m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(slotCardRc, 6.0f, 6.0f), m_pBrushCardSelected);
+                m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(slotCardRc, 6.0f, 6.0f), m_pBrushAccent, 2.0f);
+
+                std::wstring gName = m_dragPaletteChord.isRest ? L"Rest" : ToWString(m_dragPaletteChord.rootName + m_dragPaletteChord.qualitySuffix);
+                if (!m_dragPaletteChord.isRest && !m_dragPaletteChord.bassName.empty()) {
+                    gName += L"/" + ToWString(m_dragPaletteChord.bassName);
+                }
+
+                int beatNum = (snappedTick / TICKS_PER_BEAT) + 1;
+                int subBeat = ((snappedTick % TICKS_PER_BEAT) * 4) / TICKS_PER_BEAT;
+                wchar_t slotHint[64];
+                if (subBeat == 0) {
+                    swprintf_s(slotHint, L"Bar %d : %d拍", targetBarIdx + 1, beatNum);
+                } else {
+                    swprintf_s(slotHint, L"Bar %d : %d.%d拍", targetBarIdx + 1, beatNum, subBeat);
+                }
+
+                D2D1_RECT_F tRc = D2D1::RectF(slotCardRc.left + 6.0f, slotCardRc.top + 4.0f, slotCardRc.right - 6.0f, slotCardRc.top + cardTrackH * 0.55f);
+                DrawTextSafe(gName, m_pFontCardTitle, tRc, m_pBrushAccent);
+
+                D2D1_RECT_F dRc = D2D1::RectF(slotCardRc.left + 6.0f, slotCardRc.top + cardTrackH * 0.52f, slotCardRc.right - 6.0f, slotCardRc.bottom - 4.0f);
+                DrawTextSafe(slotHint, m_pFontCardDegree, dRc, m_pBrushTextMuted);
+
+                m_pRenderTarget->PopAxisAlignedClip();
             }
         }
-
-        int gTicks = m_dragPaletteChord.durationTicks > 0 ? m_dragPaletteChord.durationTicks : (m_dragPaletteChord.durationBeats * TICKS_PER_BEAT);
-        float gBarWidth = m_pixelsPerBeat * 4.0f;
-        float ghostW = std::max(48.0f, (static_cast<float>(gTicks) / TICKS_PER_BAR_4_4) * gBarWidth - 4.0f);
-        D2D1_RECT_F ghostRc = D2D1::RectF(m_dragCurrentX + 10.0f, m_dragCurrentY - 22.0f, m_dragCurrentX + 10.0f + ghostW, m_dragCurrentY + 24.0f);
-        std::wstring gName = m_dragPaletteChord.isRest ? L"Rest" : ToWString(m_dragPaletteChord.rootName + m_dragPaletteChord.qualitySuffix);
-        if (!m_dragPaletteChord.isRest && !m_dragPaletteChord.bassName.empty()) {
-            gName += L"/" + ToWString(m_dragPaletteChord.bassName);
-        }
-        DrawCard(ghostRc, gName, TR(L"＋ドロップで追加", L"+ Drop to Add"), true, true, m_dragPaletteChord.isRest);
     }
 
     // 5. モーダルダイアログ
