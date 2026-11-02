@@ -1253,9 +1253,20 @@ void AppWindow::DrawCard(
     }
 
     if (showCloseButton && !isRest) {
-        float handleX = rect.right - 5.0f;
         float hTop = rect.top + h * 0.35f;
         float hBottom = rect.bottom - h * 0.25f;
+
+        // 左端リサイズハンドル (縦線)
+        float leftHandleX = rect.left + 5.0f;
+        m_pRenderTarget->DrawLine(
+            D2D1::Point2F(leftHandleX, hTop),
+            D2D1::Point2F(leftHandleX, hBottom),
+            isSelected ? m_pBrushAccent : m_pBrushBorder,
+            1.5f
+        );
+
+        // 右端リサイズハンドル (縦線)
+        float handleX = rect.right - 5.0f;
         m_pRenderTarget->DrawLine(
             D2D1::Point2F(handleX, hTop),
             D2D1::Point2F(handleX, hBottom),

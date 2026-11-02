@@ -305,6 +305,7 @@ private:
     ChordToken m_dragPaletteChord;
     int   m_dragInitialTicks = 0;
     int   m_dragInitialNextTicks = 0;
+    int   m_dragInitialPrevTicks = 0;
     float m_dragCardGrabOffsetX = 0.0f; // カード左端からのクリック位置オフセット
 
     // 再生状態 (tick時間管理)

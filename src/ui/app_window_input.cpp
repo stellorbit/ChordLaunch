@@ -578,7 +578,8 @@ void AppWindow::OnLButtonDown(float x, float y) {
 
                         if (!m_isMergedView) {
                             PushUndo();
-                            if (x >= cardRc.right - 12.0f) {
+                            float edgeMargin = std::min(10.0f, (cardRc.right - cardRc.left) * 0.25f);
+                            if (x >= cardRc.right - edgeMargin) {
                                 m_dragMode = DragMode::CardResizeRight;
                                 m_dragBarIndex = static_cast<int>(b);
                                 m_dragChordIndex = static_cast<int>(ci);
@@ -590,7 +591,33 @@ void AppWindow::OnLButtonDown(float x, float y) {
                                 return;
                             }
 
-                            // カード面全体のドラッグ移動（左側を掴んでも縮まない・自由に左右移動可能）
+                            if (x <= cardRc.left + edgeMargin) {
+                                m_dragMode = DragMode::CardResizeLeft;
+                                m_dragBarIndex = static_cast<int>(b);
+                                m_dragStartX = x;
+                                m_dragInitialTicks = cTicks;
+
+                                if (ci > 0 && bars[b].chords[ci - 1].isRest) {
+                                    m_dragChordIndex = static_cast<int>(ci);
+                                    m_dragInitialPrevTicks = bars[b].chords[ci - 1].durationTicks;
+                                } else {
+                                    ChordToken dummyRest;
+                                    dummyRest.isRest = true;
+                                    dummyRest.quality = ChordQuality::Rest;
+                                    dummyRest.rootName = "R";
+                                    dummyRest.degreeRoman = "R";
+                                    dummyRest.rawText = "_";
+                                    dummyRest.SetTicks(0);
+                                    bars[b].chords.insert(bars[b].chords.begin() + ci, dummyRest);
+                                    m_dragChordIndex = static_cast<int>(ci) + 1;
+                                    m_dragInitialPrevTicks = 0;
+                                }
+                                SetCapture(m_hwnd);
+                                SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
+                                return;
+                            }
+
+                            // カード面全体のドラッグ移動（中央を掴んだ場合は自由に左右移動可能）
                             m_dragMode = DragMode::CardTimelineDrag;
                             m_dragPaletteChord = chord;
                             m_dragBarIndex = static_cast<int>(b);
@@ -1048,16 +1075,23 @@ void AppWindow::OnMouseMove(float x, float y) {
         Part* pActive = m_partManager.GetActivePart();
         if (pActive && m_dragBarIndex >= 0 && m_dragBarIndex < static_cast<int>(pActive->bars.size())) {
             auto& bar = pActive->bars[m_dragBarIndex];
-            if (m_dragChordIndex >= 0 && m_dragChordIndex < static_cast<int>(bar.chords.size())) {
-                float dx = m_dragStartX - x;
+            if (m_dragChordIndex > 0 && m_dragChordIndex < static_cast<int>(bar.chords.size())) {
+                float dx = x - m_dragStartX; // 右へ動かすと正 (縮小)、左へ動かすと負 (伸長)
                 float pxPerTick = (m_pixelsPerBeat * 4.0f) / std::max(1, bar.GetTotalTicks());
                 int deltaTicks = static_cast<int>(dx / pxPerTick);
 
                 int snapTicks = std::max(1, m_selectedGridTicks);
                 deltaTicks = (deltaTicks / snapTicks) * snapTicks;
 
-                int newTicks = std::max(snapTicks, m_dragInitialTicks + deltaTicks);
-                bar.chords[m_dragChordIndex].SetTicks(newTicks);
+                int minDelta = -m_dragInitialPrevTicks; // 手前休符をすべて消費するまで左へ伸長可能
+                int maxDelta = m_dragInitialTicks - snapTicks; // 最低1グリッド残して右へ縮小可能
+                deltaTicks = std::clamp(deltaTicks, minDelta, maxDelta);
+
+                int newPrevTicks = m_dragInitialPrevTicks + deltaTicks;
+                int newSelfTicks = m_dragInitialTicks - deltaTicks;
+
+                bar.chords[m_dragChordIndex - 1].SetTicks(newPrevTicks);
+                bar.chords[m_dragChordIndex].SetTicks(newSelfTicks);
 
                 SyncTimelineToText();
                 InvalidateRect(m_hwnd, nullptr, FALSE);
@@ -1132,7 +1166,8 @@ void AppWindow::OnMouseMove(float x, float y) {
                         float cw = (static_cast<float>(cTicks) / barTicks) * barWidth;
                         offsetTicks += cTicks;
                         D2D1_RECT_F cardRc = D2D1::RectF(cx + 2.0f, cardY, cx + cw - 2.0f, cardY + cardH);
-                        if (PtInRectF(cardRc, x, y) && (x >= cardRc.right - 12.0f)) {
+                        float edgeMargin = std::min(10.0f, cw * 0.25f);
+                        if (PtInRectF(cardRc, x, y) && (x <= cardRc.left + edgeMargin || x >= cardRc.right - edgeMargin)) {
                             SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
                             return;
                         }
@@ -1202,6 +1237,23 @@ void AppWindow::OnLButtonUp(float x, float y) {
             }
             InvalidateRect(m_hwnd, nullptr, FALSE);
         }
+        return;
+    }
+
+    if (m_dragMode == DragMode::CardResizeLeft) {
+        Part* pActive = m_partManager.GetActivePart();
+        if (pActive && m_dragBarIndex >= 0 && m_dragBarIndex < static_cast<int>(pActive->bars.size())) {
+            auto& bar = pActive->bars[m_dragBarIndex];
+            if (m_dragChordIndex > 0 && m_dragChordIndex < static_cast<int>(bar.chords.size())) {
+                if (bar.chords[m_dragChordIndex - 1].isRest && bar.chords[m_dragChordIndex - 1].durationTicks <= 1) {
+                    bar.chords.erase(bar.chords.begin() + m_dragChordIndex - 1);
+                }
+            }
+        }
+        m_dragMode = DragMode::None;
+        ReleaseCapture();
+        SyncTimelineToText();
+        InvalidateRect(m_hwnd, nullptr, FALSE);
         return;
     }
 

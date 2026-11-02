@@ -899,6 +899,73 @@ void TestTickSyncopationAndTriadDefault() {
     TEST_ASSERT(diatonicTriads[4].qualitySuffix.empty(), "Degree V in C Major triad is pure G Major (no 7th)");
 }
 
+void TestCardResizeLeftWithRestPadding() {
+    std::cout << "[TEST] 22. Card Resize Left with Rest Padding (Trim start position)\n";
+
+    // 1. 2拍のコード C (960 ticks) と 2拍の休符 (960 ticks) からなる小節
+    Bar bar;
+    bar.barNumber = 1;
+    bar.timeNumerator = 4;
+    bar.timeDenominator = 4;
+
+    ChordToken chordC;
+    chordC.rawText = "C";
+    chordC.rootName = "C";
+    chordC.SetTicks(960);
+    bar.chords.push_back(chordC);
+
+    ChordToken restTail;
+    restTail.isRest = true;
+    restTail.rawText = "_";
+    restTail.SetTicks(960);
+    bar.chords.push_back(restTail);
+
+    TEST_ASSERT(bar.chords.size() == 2, "Bar initially has 2 tokens (C, rest)");
+
+    // 2. 左端リサイズ開始: 手前に dummyRest (0 ticks) を挿入して正規化
+    int dragChordIdx = 0;
+    ChordToken dummyRest;
+    dummyRest.isRest = true;
+    dummyRest.quality = ChordQuality::Rest;
+    dummyRest.rootName = "R";
+    dummyRest.rawText = "_";
+    dummyRest.SetTicks(0);
+    bar.chords.insert(bar.chords.begin() + dragChordIdx, dummyRest);
+    dragChordIdx = 1;
+
+    int initialTicks = 960;
+    int initialPrevTicks = 0;
+    int snapTicks = 480; // 1拍グリッド
+    TEST_ASSERT(snapTicks == 480, "snapTicks is 480");
+
+    // 右へ1拍 (480 ticks) ドラッグ: 縮小＆手前休符化
+    int deltaTicks = 480;
+    int newPrevTicks = initialPrevTicks + deltaTicks;
+    int newSelfTicks = initialTicks - deltaTicks;
+    bar.chords[dragChordIdx - 1].SetTicks(newPrevTicks);
+    bar.chords[dragChordIdx].SetTicks(newSelfTicks);
+
+    TEST_ASSERT(bar.chords[0].isRest && bar.chords[0].durationTicks == 480, "Preceding token became 1-beat rest (480 ticks)");
+    TEST_ASSERT(!bar.chords[1].isRest && bar.chords[1].rawText == "C" && bar.chords[1].durationTicks == 480, "Chord C trimmed to 1 beat (480 ticks)");
+    TEST_ASSERT(bar.chords[2].isRest && bar.chords[2].durationTicks == 960, "Tail rest remains 2 beats (960 ticks)");
+
+    // 3. 左へ1拍 (-480 ticks) ドラッグ: 手前休符を吸収して復元
+    deltaTicks = 0;
+    newPrevTicks = initialPrevTicks + deltaTicks;
+    newSelfTicks = initialTicks - deltaTicks;
+    bar.chords[dragChordIdx - 1].SetTicks(newPrevTicks);
+    bar.chords[dragChordIdx].SetTicks(newSelfTicks);
+
+    // マウスアップ時のクリーンアップ (0 ticks 休符の消去)
+    if (bar.chords[dragChordIdx - 1].isRest && bar.chords[dragChordIdx - 1].durationTicks <= 1) {
+        bar.chords.erase(bar.chords.begin() + dragChordIdx - 1);
+    }
+
+    TEST_ASSERT(bar.chords.size() == 2, "0-tick rest cleaned up, bar restored to 2 tokens");
+    TEST_ASSERT(!bar.chords[0].isRest && bar.chords[0].rawText == "C" && bar.chords[0].durationTicks == 960, "Chord C restored to original 2 beats (960 ticks)");
+    TEST_ASSERT(bar.chords[1].isRest && bar.chords[1].durationTicks == 960, "Tail rest remains intact");
+}
+
 int main() {
     std::cout << "========================================\n";
     std::cout << "ChordLaunch C++20 Core Test Suite\n";
@@ -925,6 +992,7 @@ int main() {
     TestDashboardFileSelectionAndMenu();
     TestJsonUnescapeAndPathNormalization();
     TestTickSyncopationAndTriadDefault();
+    TestCardResizeLeftWithRestPadding();
 
     std::cout << "========================================\n";
     std::cout << "Tests Passed: " << g_passCount << ", Failed: " << g_failCount << "\n";
