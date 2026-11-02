@@ -146,9 +146,9 @@ private:
     void OnChar(WCHAR ch);
     void OnSize(UINT width, UINT height);
     bool HitTestPaletteCard(float x, float y, ChordToken& outChord);
-    void InsertChordAtTimelineX(const ChordToken& chord, float x);
+    void InsertChordAtTimelineX(const ChordToken& chord, float x, bool pushUndo = true);
     void InsertChordAtTimelinePosition(const ChordToken& chord, int targetBarIdx, int targetBeat);
-    void InsertChordAtTimelineTick(const ChordToken& chord, int targetBarIdx, int targetTickInBar);
+    void InsertChordAtTimelineTick(const ChordToken& chord, int targetBarIdx, int targetTickInBar, bool pushUndo = true);
     void SplitSelectedChord();
     void DuplicateSelectedChord();
     void AddRecentFile(const std::wstring& path);

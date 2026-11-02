@@ -577,10 +577,10 @@ void AppWindow::OnLButtonDown(float x, float y) {
                         AuditionChord(chord);
 
                         if (!m_isMergedView) {
-                            PushUndo();
                             float cardW = cardRc.right - cardRc.left;
-                            float edgeMargin = std::min(16.0f, cardW * 0.35f);
+                            float edgeMargin = std::min(8.0f, cardW * 0.20f);
                             if (x >= cardRc.right - edgeMargin) {
+                                PushUndo();
                                 m_dragMode = DragMode::CardResizeRight;
                                 m_dragBarIndex = static_cast<int>(b);
                                 m_dragChordIndex = static_cast<int>(ci);
@@ -593,6 +593,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
                             }
 
                             if (x <= cardRc.left + edgeMargin) {
+                                PushUndo();
                                 m_dragMode = DragMode::CardResizeLeft;
                                 m_dragBarIndex = static_cast<int>(b);
                                 m_dragChordIndex = static_cast<int>(ci);
@@ -601,12 +602,14 @@ void AppWindow::OnLButtonDown(float x, float y) {
                                 m_dragChordStartTick = static_cast<int>(offsetTicks) - cTicks;
                                 m_dragInitialBarChords = bars[b].chords;
 
-                                if (ci > 0 && bars[b].chords[ci - 1].isRest) {
-                                    int prevTicks = bars[b].chords[ci - 1].durationTicks > 0 ? bars[b].chords[ci - 1].durationTicks : (bars[b].chords[ci - 1].durationBeats * TICKS_PER_BEAT);
-                                    m_dragLeftLimitTick = std::max(0, m_dragChordStartTick - prevTicks);
-                                } else {
-                                    m_dragLeftLimitTick = m_dragChordStartTick;
+                                int totalPrevRests = 0;
+                                int check = static_cast<int>(ci) - 1;
+                                while (check >= 0 && bars[b].chords[check].isRest) {
+                                    int rTicks = bars[b].chords[check].durationTicks > 0 ? bars[b].chords[check].durationTicks : (bars[b].chords[check].durationBeats * TICKS_PER_BEAT);
+                                    totalPrevRests += rTicks;
+                                    check--;
                                 }
+                                m_dragLeftLimitTick = std::max(0, m_dragChordStartTick - totalPrevRests);
 
                                 SetCapture(m_hwnd);
                                 SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
@@ -1003,7 +1006,7 @@ void AppWindow::OnMouseMove(float x, float y) {
     if (m_dragMode == DragMode::PaletteCardDrag || m_dragMode == DragMode::CardTimelineDrag) {
         float dx = x - m_dragStartX;
         float dy = y - m_dragStartY;
-        if (!m_isPaletteDragging && (dx * dx + dy * dy) >= 36.0f) {
+        if (!m_isPaletteDragging && (dx * dx + dy * dy) >= 16.0f) {
             m_isPaletteDragging = true;
         }
         if (m_isPaletteDragging) {
@@ -1191,8 +1194,9 @@ void AppWindow::OnMouseMove(float x, float y) {
                         float cx = bx + (offsetTicks / barTicks) * barWidth;
                         float cw = (static_cast<float>(cTicks) / barTicks) * barWidth;
                         offsetTicks += cTicks;
+                        if (chord.isRest) continue; // 休符スロットはリサイズカーソルを表示しない
                         D2D1_RECT_F cardRc = D2D1::RectF(cx + 2.0f, cardY, cx + cw - 2.0f, cardY + cardH);
-                        float edgeMargin = std::min(16.0f, cw * 0.35f);
+                        float edgeMargin = std::min(8.0f, cw * 0.20f);
                         if (PtInRectF(cardRc, x, y) && (x <= cardRc.left + edgeMargin || x >= cardRc.right - edgeMargin)) {
                             SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
                             return;
@@ -1237,7 +1241,19 @@ void AppWindow::OnLButtonUp(float x, float y) {
                         sBar.chords[srcChord].rootName = "R";
                         sBar.chords[srcChord].degreeRoman = "R";
                         sBar.chords[srcChord].rawText = "_";
-                        InsertChordAtTimelineX(movedChord, x - m_dragCardGrabOffsetX);
+
+                        // 移動元小節内の連続する休符を結合整理
+                        std::vector<ChordToken> mergedChords;
+                        for (const auto& c : sBar.chords) {
+                            if (!mergedChords.empty() && mergedChords.back().isRest && c.isRest) {
+                                mergedChords.back().SetTicks(mergedChords.back().durationTicks + c.durationTicks);
+                            } else {
+                                mergedChords.push_back(c);
+                            }
+                        }
+                        sBar.chords = std::move(mergedChords);
+
+                        InsertChordAtTimelineX(movedChord, x - m_dragCardGrabOffsetX, false);
                     }
                 }
             }

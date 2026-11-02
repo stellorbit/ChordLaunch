@@ -1095,16 +1095,147 @@ void TestDropGridSnapPreview() {
     auto [b3, t3] = calcSnap(345.0f, 240, 480); // 256 + 89 -> Bar 1, 720 ticks (2拍目裏)
     TEST_ASSERT(b3 == 1 && t3 == 720, "relX 345px on 1/2-beat grid snaps to Bar 1, Tick 720 (Beat 2.5)");
 
-    // 2. 左端リサイズ掴み判定マージンの検証
+    // 2. 左端リサイズ掴み判定マージンの検証 (スリム化: 8pxかつ20%以下)
     auto calcMargin = [](float cardW) {
-        return std::min(16.0f, cardW * 0.35f);
+        return std::min(8.0f, cardW * 0.20f);
     };
 
     float mStandard = calcMargin(64.0f); // 1拍カード
-    TEST_ASSERT(mStandard == 16.0f, "1-beat card has 16px grab margin");
+    TEST_ASSERT(mStandard == 8.0f, "1-beat card has 8px grab margin, leaving 75% for drag-move");
 
     float mSmall = calcMargin(24.0f); // 極小カード
-    TEST_ASSERT(mSmall == 8.4f, "Small card caps margin at 35% (8.4px), leaving >= 30% for drag-move");
+    TEST_ASSERT(mSmall == 4.8f, "Small card caps margin at 20% (4.8px), leaving >= 60% for drag-move");
+}
+
+void TestCrossBarDragAndRestNormalization() {
+    std::cout << "[TEST] 24. Cross-bar Drag and Rest Normalization\n";
+
+    // 1. Bar 5: [Asus4 (480), _ (480), Asus4 (480), _ (480)]
+    Bar bar5;
+    bar5.barNumber = 5;
+    bar5.timeNumerator = 4;
+    bar5.timeDenominator = 4;
+
+    ChordToken asus1;
+    asus1.rawText = "Asus4";
+    asus1.rootName = "A";
+    asus1.qualitySuffix = "sus4";
+    asus1.SetTicks(480);
+    bar5.chords.push_back(asus1);
+
+    ChordToken rest1;
+    rest1.isRest = true;
+    rest1.rawText = "_";
+    rest1.SetTicks(480);
+    bar5.chords.push_back(rest1);
+
+    ChordToken asus2;
+    asus2.rawText = "Asus4";
+    asus2.rootName = "A";
+    asus2.qualitySuffix = "sus4";
+    asus2.SetTicks(480);
+    bar5.chords.push_back(asus2);
+
+    ChordToken rest2;
+    rest2.isRest = true;
+    rest2.rawText = "_";
+    rest2.SetTicks(480);
+    bar5.chords.push_back(rest2);
+
+    TEST_ASSERT(bar5.chords.size() == 4, "Bar 5 has 4 tokens initially");
+
+    // 2. 移動元コード (index 2: asus2) をドラッグ移動した際の休符化と連続休符結合
+    bar5.chords[2].isRest = true;
+    bar5.chords[2].quality = ChordQuality::Rest;
+    bar5.chords[2].rawText = "_";
+
+    std::vector<ChordToken> merged;
+    for (const auto& c : bar5.chords) {
+        if (!merged.empty() && merged.back().isRest && c.isRest) {
+            merged.back().SetTicks(merged.back().durationTicks + c.durationTicks);
+        } else {
+            merged.push_back(c);
+        }
+    }
+    bar5.chords = std::move(merged);
+
+    TEST_ASSERT(bar5.chords.size() == 2, "After moving chord, consecutive rests merged into 1 rest");
+    TEST_ASSERT(!bar5.chords[0].isRest && bar5.chords[0].durationTicks == 480, "First chord remains Asus4 (480 ticks)");
+    TEST_ASSERT(bar5.chords[1].isRest && bar5.chords[1].durationTicks == 1440, "Merged rest duration is 1440 ticks (3 beats)");
+
+    int totalTicksBar5 = 0;
+    for (const auto& c : bar5.chords) totalTicksBar5 += c.durationTicks;
+    TEST_ASSERT(totalTicksBar5 == 1920, "Total ticks in Bar 5 perfectly preserved at 1920 ticks");
+
+    // 3. 小節跨ぎドロップ先 Bar 4: [Eb (1440), _ (480)] への配置
+    Bar bar4;
+    bar4.barNumber = 4;
+    bar4.timeNumerator = 4;
+    bar4.timeDenominator = 4;
+
+    ChordToken chordEb;
+    chordEb.rawText = "Eb";
+    chordEb.rootName = "Eb";
+    chordEb.SetTicks(1440);
+    bar4.chords.push_back(chordEb);
+
+    ChordToken restEb;
+    restEb.isRest = true;
+    restEb.rawText = "_";
+    restEb.SetTicks(480);
+    bar4.chords.push_back(restEb);
+
+    // Asus4 を Bar 4 の 4拍目 (Tick 1440) にドロップ
+    struct PlacedItem {
+        int startTick;
+        int durationTicks;
+        ChordToken chord;
+    };
+    std::vector<PlacedItem> placed;
+    int curT = 0;
+    for (const auto& existing : bar4.chords) {
+        if (!existing.isRest) {
+            placed.push_back({curT, existing.durationTicks, existing});
+        }
+        curT += existing.durationTicks;
+    }
+    // ドロップアイテム追加
+    placed.push_back({1440, 480, asus2});
+
+    std::sort(placed.begin(), placed.end(), [](const PlacedItem& a, const PlacedItem& b) {
+        return a.startTick < b.startTick;
+    });
+
+    std::vector<ChordToken> finalBar4;
+    int walkT = 0;
+    for (const auto& pt : placed) {
+        if (pt.startTick > walkT) {
+            ChordToken r;
+            r.isRest = true;
+            r.rawText = "_";
+            r.SetTicks(pt.startTick - walkT);
+            finalBar4.push_back(r);
+            walkT = pt.startTick;
+        }
+        finalBar4.push_back(pt.chord);
+        walkT += pt.durationTicks;
+    }
+    if (walkT < 1920) {
+        ChordToken r;
+        r.isRest = true;
+        r.rawText = "_";
+        r.SetTicks(1920 - walkT);
+        finalBar4.push_back(r);
+    }
+    bar4.chords = std::move(finalBar4);
+
+    TEST_ASSERT(bar4.chords.size() == 2, "Bar 4 has 2 chords: Eb and Asus4");
+    TEST_ASSERT(bar4.chords[0].rootName == "Eb" && bar4.chords[0].durationTicks == 1440, "Eb is 1440 ticks (3 beats)");
+    TEST_ASSERT(bar4.chords[1].rootName == "A" && bar4.chords[1].durationTicks == 480, "Asus4 is placed at beat 4 (480 ticks)");
+
+    int totalTicksBar4 = 0;
+    for (const auto& c : bar4.chords) totalTicksBar4 += c.durationTicks;
+    TEST_ASSERT(totalTicksBar4 == 1920, "Total ticks in Bar 4 perfectly preserved at 1920 ticks");
 }
 
 int main() {
@@ -1135,6 +1266,7 @@ int main() {
     TestTickSyncopationAndTriadDefault();
     TestCardResizeLeftWithRestPadding();
     TestDropGridSnapPreview();
+    TestCrossBarDragAndRestNormalization();
 
     std::cout << "========================================\n";
     std::cout << "Tests Passed: " << g_passCount << ", Failed: " << g_failCount << "\n";

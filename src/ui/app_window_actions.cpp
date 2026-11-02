@@ -83,7 +83,7 @@ void AppWindow::AppendChordToTimeline(const ChordToken& chord) {
     InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
-void AppWindow::InsertChordAtTimelineTick(const ChordToken& chord, int targetBarIdx, int targetTickInBar) {
+void AppWindow::InsertChordAtTimelineTick(const ChordToken& chord, int targetBarIdx, int targetTickInBar, bool pushUndo) {
     Part* pActive = m_partManager.GetActivePart();
     if (!pActive) return;
 
@@ -93,10 +93,20 @@ void AppWindow::InsertChordAtTimelineTick(const ChordToken& chord, int targetBar
         newBar.barNumber = static_cast<int>(pActive->bars.size()) + 1;
         newBar.timeNumerator = pActive->timeNumerator > 0 ? pActive->timeNumerator : 4;
         newBar.timeDenominator = pActive->timeDenominator > 0 ? pActive->timeDenominator : 4;
+        ChordToken fullRest;
+        fullRest.isRest = true;
+        fullRest.quality = ChordQuality::Rest;
+        fullRest.rootName = "R";
+        fullRest.degreeRoman = "R";
+        fullRest.rawText = "_";
+        fullRest.SetTicks(newBar.GetTotalTicks());
+        newBar.chords.push_back(fullRest);
         pActive->bars.push_back(newBar);
     }
 
-    PushUndo();
+    if (pushUndo) {
+        PushUndo();
+    }
     m_isMergedView = false;
     auto& targetBar = pActive->bars[targetBarIdx];
     int barNumerator = targetBar.timeNumerator > 0 ? targetBar.timeNumerator : 4;
@@ -256,7 +266,7 @@ void AppWindow::InsertChordAtTimelineTick(const ChordToken& chord, int targetBar
     targetBar.chords = std::move(finalChords);
 
     for (const auto& over : overflowItems) {
-        InsertChordAtTimelineTick(over.chord, targetBarIdx + 1, over.startTick);
+        InsertChordAtTimelineTick(over.chord, targetBarIdx + 1, over.startTick, false);
     }
     m_selectedBarIndex = targetBarIdx;
 
@@ -319,7 +329,7 @@ void AppWindow::DuplicateSelectedChord() {
     DuplicateSelection();
 }
 
-void AppWindow::InsertChordAtTimelineX(const ChordToken& chord, float x) {
+void AppWindow::InsertChordAtTimelineX(const ChordToken& chord, float x, bool pushUndo) {
     Part* pActive = m_partManager.GetActivePart();
     if (!pActive) return;
 
@@ -339,7 +349,7 @@ void AppWindow::InsertChordAtTimelineX(const ChordToken& chord, float x) {
     int chordTicks = chord.durationTicks > 0 ? chord.durationTicks : (chord.durationBeats > 0 ? chord.durationBeats * TICKS_PER_BEAT : gridTicks);
     snappedTick = std::clamp(snappedTick, 0, std::max(0, barTotalTicks - chordTicks));
 
-    InsertChordAtTimelineTick(chord, targetBarIdx, snappedTick);
+    InsertChordAtTimelineTick(chord, targetBarIdx, snappedTick, pushUndo);
 }
 
 void AppWindow::SyncTextToTimeline() {
