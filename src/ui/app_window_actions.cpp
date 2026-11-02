@@ -21,7 +21,7 @@ void AppWindow::EnsureVisible(int barIndex) {
 
     Part* pActive = m_partManager.GetActivePart();
     size_t numBars = m_isMergedView ? m_partManager.GenerateMergedProgression().size() : (pActive ? pActive->bars.size() : 8);
-    float totalContentWidth = std::max<size_t>(numBars, 8) * barWidth;
+    float totalContentWidth = std::max<size_t>(numBars + 16, 64) * barWidth;
     float maxScroll = std::max(0.0f, totalContentWidth - viewWidth);
 
     if (barStart < m_timelineScrollX) {
@@ -120,60 +120,114 @@ void AppWindow::InsertChordAtTimelinePosition(const ChordToken& chord, int targe
         curBeat += eBeats;
     }
 
-    // 重なり判定・既存コードのクリッピング
-    std::vector<PlacedItem> resolved;
     int newStart = targetBeat;
-    int newEnd = std::min(barBeats, targetBeat + chordBeats);
+    int newEnd = targetBeat + chordBeats;
 
+    // 衝突判定: [newStart, newEnd) に重なる既存コードがあるか？
+    bool hasCollision = false;
     for (const auto& pt : placed) {
         int ptStart = pt.startBeat;
         int ptEnd = pt.startBeat + pt.durationBeats;
-        if (ptEnd <= newStart || ptStart >= newEnd) {
-            resolved.push_back(pt);
-        } else if (newStart <= ptStart && newEnd >= ptEnd) {
-            // 新規コードに完全に覆われるため削除
-            continue;
-        } else if (newStart > ptStart && newEnd < ptEnd) {
-            // 新規コードが既存コードの中央に割り込み -> 前後に2分割
-            PlacedItem left = pt;
-            left.durationBeats = newStart - ptStart;
-            left.chord.durationBeats = left.durationBeats;
-            left.chord.durationTicks = left.durationBeats * TICKS_PER_BEAT;
-            resolved.push_back(left);
-
-            PlacedItem right = pt;
-            right.startBeat = newEnd;
-            right.durationBeats = ptEnd - newEnd;
-            right.chord.durationBeats = right.durationBeats;
-            right.chord.durationTicks = right.durationBeats * TICKS_PER_BEAT;
-            resolved.push_back(right);
-        } else if (newStart > ptStart) {
-            // 右側が削られる
-            PlacedItem left = pt;
-            left.durationBeats = newStart - ptStart;
-            left.chord.durationBeats = left.durationBeats;
-            left.chord.durationTicks = left.durationBeats * TICKS_PER_BEAT;
-            resolved.push_back(left);
-        } else if (newEnd < ptEnd) {
-            // 左側が削られる
-            PlacedItem right = pt;
-            right.startBeat = newEnd;
-            right.durationBeats = ptEnd - newEnd;
-            right.chord.durationBeats = right.durationBeats;
-            right.chord.durationTicks = right.durationBeats * TICKS_PER_BEAT;
-            resolved.push_back(right);
+        if (std::max(ptStart, newStart) < std::min(ptEnd, newEnd)) {
+            hasCollision = true;
+            break;
         }
     }
 
-    // 新規コードを追加 (休符でなければ)
-    if (!chord.isRest) {
-        PlacedItem newPt;
-        newPt.startBeat = newStart;
-        newPt.durationBeats = newEnd - newStart;
-        newPt.chord = chord;
-        newPt.chord.durationBeats = newPt.durationBeats;
-        newPt.chord.durationTicks = newPt.durationBeats * TICKS_PER_BEAT;
-        resolved.push_back(newPt);
+    std::vector<PlacedItem> resolved;
+    std::vector<PlacedItem> overflowItems;
+
+    if (!hasCollision) {
+        // 衝突なし: 既存コードをそのまま残し、新規コードを追加
+        resolved = placed;
+        if (!chord.isRest) {
+            PlacedItem newPt;
+            newPt.startBeat = newStart;
+            newPt.durationBeats = chordBeats;
+            newPt.chord = chord;
+            newPt.chord.durationBeats = chordBeats;
+            newPt.chord.durationTicks = chordBeats * TICKS_PER_BEAT;
+            resolved.push_back(newPt);
+        }
+    } else {
+        // 衝突あり: 既存コードを消去せず、後ろへ押し出しシフト
+        for (const auto& pt : placed) {
+            int ptStart = pt.startBeat;
+            int ptEnd = pt.startBeat + pt.durationBeats;
+
+            if (ptEnd <= newStart) {
+                // 新規コードより前: そのまま
+                resolved.push_back(pt);
+            } else if (ptStart >= newStart) {
+                // 新規コード以降: chordBeats 分シフト
+                PlacedItem shifted = pt;
+                shifted.startBeat += chordBeats;
+                if (shifted.startBeat >= barBeats) {
+                    overflowItems.push_back(shifted);
+                } else if (shifted.startBeat + shifted.durationBeats > barBeats) {
+                    int inBarBeats = barBeats - shifted.startBeat;
+                    int overBeats = shifted.durationBeats - inBarBeats;
+                    PlacedItem inBar = shifted;
+                    inBar.durationBeats = inBarBeats;
+                    inBar.chord.durationBeats = inBarBeats;
+                    inBar.chord.durationTicks = inBarBeats * TICKS_PER_BEAT;
+                    resolved.push_back(inBar);
+
+                    PlacedItem over = shifted;
+                    over.startBeat = 0;
+                    over.durationBeats = overBeats;
+                    over.chord.durationBeats = overBeats;
+                    over.chord.durationTicks = overBeats * TICKS_PER_BEAT;
+                    overflowItems.push_back(over);
+                } else {
+                    resolved.push_back(shifted);
+                }
+            } else {
+                // 新規コードの開始点をまたぐ既存コード: 分割して右側をシフト
+                PlacedItem left = pt;
+                left.durationBeats = newStart - ptStart;
+                left.chord.durationBeats = left.durationBeats;
+                left.chord.durationTicks = left.durationBeats * TICKS_PER_BEAT;
+                resolved.push_back(left);
+
+                PlacedItem right = pt;
+                right.startBeat = newStart + chordBeats;
+                right.durationBeats = ptEnd - newStart;
+                right.chord.durationBeats = right.durationBeats;
+                right.chord.durationTicks = right.durationBeats * TICKS_PER_BEAT;
+                if (right.startBeat >= barBeats) {
+                    overflowItems.push_back(right);
+                } else if (right.startBeat + right.durationBeats > barBeats) {
+                    int inBarBeats = barBeats - right.startBeat;
+                    int overBeats = right.durationBeats - inBarBeats;
+                    PlacedItem inBar = right;
+                    inBar.durationBeats = inBarBeats;
+                    inBar.chord.durationBeats = inBarBeats;
+                    inBar.chord.durationTicks = inBarBeats * TICKS_PER_BEAT;
+                    resolved.push_back(inBar);
+
+                    PlacedItem over = right;
+                    over.startBeat = 0;
+                    over.durationBeats = overBeats;
+                    over.chord.durationBeats = overBeats;
+                    over.chord.durationTicks = overBeats * TICKS_PER_BEAT;
+                    overflowItems.push_back(over);
+                } else {
+                    resolved.push_back(right);
+                }
+            }
+        }
+
+        // 新規コードを追加
+        if (!chord.isRest) {
+            PlacedItem newPt;
+            newPt.startBeat = newStart;
+            newPt.durationBeats = chordBeats;
+            newPt.chord = chord;
+            newPt.chord.durationBeats = chordBeats;
+            newPt.chord.durationTicks = chordBeats * TICKS_PER_BEAT;
+            resolved.push_back(newPt);
+        }
     }
 
     // 開始拍順にソート (同一コードでも決してマージせず独立カードとして保持)
@@ -216,6 +270,10 @@ void AppWindow::InsertChordAtTimelinePosition(const ChordToken& chord, int targe
     }
 
     targetBar.chords = std::move(finalChords);
+
+    for (const auto& over : overflowItems) {
+        InsertChordAtTimelinePosition(over.chord, targetBarIdx + 1, over.startBeat);
+    }
     m_selectedBarIndex = targetBarIdx;
 
     m_selectedChordIndex = 0;
@@ -1148,6 +1206,54 @@ void AppWindow::ChooseDirectory(std::wstring& outDir, const wchar_t* title) {
         }
         pfd->Release();
     }
+}
+
+void AppWindow::DoMergeAllToNewPart() {
+    auto mergedBars = m_partManager.GenerateMergedProgression();
+    if (mergedBars.empty()) {
+        SetStatusMessage(TR(L"マージ対象のコード進行がありません", L"No progression to merge"));
+        return;
+    }
+
+    PushUndo();
+    m_isMergedView = false;
+
+    Part newPart;
+    newPart.id = "part_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+    newPart.name = "Full Song";
+    Part* pActive = m_partManager.GetActivePart();
+    newPart.keyRoot = pActive ? pActive->keyRoot : "C";
+    newPart.mode = pActive ? pActive->mode : MusicalMode::Major;
+    newPart.bpm = pActive ? pActive->bpm : 120;
+    newPart.timeNumerator = 4;
+    newPart.timeDenominator = 4;
+    newPart.bars = mergedBars;
+
+    std::string text;
+    for (size_t bi = 0; bi < mergedBars.size(); ++bi) {
+        text += "| ";
+        for (const auto& c : mergedBars[bi].chords) {
+            text += c.rawText + " ";
+        }
+    }
+    if (!text.empty()) text += "|";
+    newPart.rawProgressionText = text;
+
+    m_partManager.GetParts().push_back(newPart);
+    m_partManager.SetActiveIndex(static_cast<int>(m_partManager.GetParts().size()) - 1);
+
+    SyncTimelineToText();
+    SetStatusMessage(TR(L"全体マージパートを新規作成しました: Full Song", L"Created merged part: Full Song"));
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::OpenRenamePartModal(int partIndex) {
+    auto& parts = m_partManager.GetParts();
+    if (partIndex < 0 || partIndex >= static_cast<int>(parts.size())) return;
+
+    m_renamePartIndex = partIndex;
+    m_renamePartName = ToWString(parts[partIndex].name);
+    OpenModal(ModalType::RenamePart);
 }
 
 } // namespace clp

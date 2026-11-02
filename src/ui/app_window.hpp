@@ -41,7 +41,8 @@ enum class ModalType {
     Settings,
     Templates,
     Help,
-    TapTempo
+    TapTempo,
+    RenamePart
 };
 
 class AppWindow {
@@ -81,6 +82,7 @@ private:
     void RenderTemplatesModal(const D2D1_RECT_F& rc);
     void RenderHelpModal(const D2D1_RECT_F& rc);
     void RenderTapTempoModal(const D2D1_RECT_F& rc);
+    void RenderRenamePartModal(const D2D1_RECT_F& rc);
 
     // UIヘルパー描画
     void DrawButton(
@@ -153,6 +155,8 @@ private:
     void SaveAppSettings();
     void OpenRecentFile(int index);
     void ChooseDirectory(std::wstring& outDir, const wchar_t* title);
+    void DoMergeAllToNewPart();
+    void OpenRenamePartModal(int partIndex);
 
     // プルダウンメニュー表示・メニューバー言語更新
     void RebuildMainMenu();
@@ -343,6 +347,9 @@ private:
     int m_tmplListScroll = 0;
     int m_helpActiveTab = 0;
     int m_contextPartIndex = -1;
+    int m_renamePartIndex = -1;
+    std::wstring m_renamePartName;
+    bool m_isCardResizingHover = false;
 
     // テンプレート追加・編集サブダイアログ状態
     bool m_tmplEditorOpen = false;

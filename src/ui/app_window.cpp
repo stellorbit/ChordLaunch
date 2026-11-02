@@ -670,6 +670,10 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 InvalidateRect(m_hwnd, nullptr, FALSE);
                 return 0;
             }
+            if (wmId == IDM_CTX_PART_RENAME && m_contextPartIndex >= 0) {
+                OpenRenamePartModal(m_contextPartIndex);
+                return 0;
+            }
             if (wmId == IDM_CTX_PART_DUP && m_contextPartIndex >= 0) {
                 PushUndo();
                 m_partManager.DuplicatePart(m_contextPartIndex);
@@ -1244,6 +1248,18 @@ void AppWindow::DrawCard(
     if (showCloseButton) {
         D2D1_RECT_F closeRc = D2D1::RectF(rect.right - 16.0f, rect.top + 2.0f, rect.right - 2.0f, rect.top + 16.0f);
         DrawIconClose(closeRc, isCloseHovered ? m_pBrushStop : m_pBrushTextMuted);
+    }
+
+    if (showCloseButton && !isRest) {
+        float handleX = rect.right - 5.0f;
+        float hTop = rect.top + h * 0.35f;
+        float hBottom = rect.bottom - h * 0.25f;
+        m_pRenderTarget->DrawLine(
+            D2D1::Point2F(handleX, hTop),
+            D2D1::Point2F(handleX, hBottom),
+            isSelected ? m_pBrushAccent : m_pBrushBorder,
+            1.5f
+        );
     }
 
     m_pRenderTarget->PopAxisAlignedClip();

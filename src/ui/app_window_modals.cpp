@@ -7,8 +7,8 @@ void AppWindow::RenderModal(float width, float height) {
     D2D1_RECT_F fullRc = D2D1::RectF(0, 0, width, height);
     m_pRenderTarget->FillRectangle(fullRc, m_pBrushModalBackdrop);
 
-    float cardW = (m_activeModal == ModalType::TapTempo) ? 480.0f : std::min(740.0f, width - 40.0f);
-    float cardH = (m_activeModal == ModalType::TapTempo) ? 320.0f : std::min(520.0f, height - 40.0f);
+    float cardW = (m_activeModal == ModalType::TapTempo || m_activeModal == ModalType::RenamePart) ? 480.0f : std::min(740.0f, width - 40.0f);
+    float cardH = (m_activeModal == ModalType::RenamePart) ? 240.0f : ((m_activeModal == ModalType::TapTempo) ? 320.0f : std::min(520.0f, height - 40.0f));
     float cardX = (width - cardW) * 0.5f;
     float cardY = (height - cardH) * 0.5f;
 
@@ -54,6 +54,12 @@ void AppWindow::RenderModal(float width, float height) {
             D2D1_RECT_F titleRc = D2D1::RectF(cardX + 20.0f, cardY + 10.0f, cardX + cardW - 50.0f, cardY + 36.0f);
             DrawTextSafe(TR(L"TAP TEMPO (タップテンポ測定)", L"TAP TEMPO"), m_pFontModalTitle, titleRc, m_pBrushText);
             RenderTapTempoModal(bodyRc);
+            break;
+        }
+        case ModalType::RenamePart: {
+            D2D1_RECT_F titleRc = D2D1::RectF(cardX + 20.0f, cardY + 10.0f, cardX + cardW - 50.0f, cardY + 36.0f);
+            DrawTextSafe(TR(L"パート名の変更 (Rename Part)", L"Rename Part"), m_pFontModalTitle, titleRc, m_pBrushText);
+            RenderRenamePartModal(bodyRc);
             break;
         }
         default: break;
@@ -632,6 +638,29 @@ void AppWindow::RenderTapTempoModal(const D2D1_RECT_F& rc) {
     DrawButton(bCancel, TR(L"キャンセル (Esc)", L"Cancel (Esc)"), IconType::None);
 }
 
+void AppWindow::RenderRenamePartModal(const D2D1_RECT_F& rc) {
+    float curY = rc.top + 10.0f;
+
+    D2D1_RECT_F lTitle = D2D1::RectF(rc.left + 16.0f, curY, rc.right - 16.0f, curY + 24.0f);
+    DrawTextSafe(TR(L"パートの新しい名称を入力してください:", L"Enter new name for the part:"), m_pFontCardTitle, lTitle, m_pBrushText);
+
+    curY += 34.0f;
+
+    D2D1_RECT_F boxRc = D2D1::RectF(rc.left + 16.0f, curY, rc.right - 16.0f, curY + 44.0f);
+    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(boxRc, 4.0f, 4.0f), m_pBrushBg);
+    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(boxRc, 4.0f, 4.0f), m_pBrushAccent, 1.5f);
+
+    std::wstring displayText = m_renamePartName + L"|";
+    D2D1_RECT_F textRc = D2D1::RectF(boxRc.left + 12.0f, boxRc.top + 8.0f, boxRc.right - 12.0f, boxRc.bottom - 6.0f);
+    DrawTextSafe(displayText, m_pFontModalTitle, textRc, m_pBrushText);
+
+    D2D1_RECT_F bConfirm = D2D1::RectF(rc.right - 140.0f, rc.bottom - 36.0f, rc.right - 10.0f, rc.bottom);
+    DrawButton(bConfirm, TR(L"変更を確定", L"Confirm"), IconType::None, false, false, true, Theme::AccentAction);
+
+    D2D1_RECT_F bCancel = D2D1::RectF(rc.right - 250.0f, rc.bottom - 36.0f, rc.right - 150.0f, rc.bottom);
+    DrawButton(bCancel, TR(L"キャンセル", L"Cancel"), IconType::None);
+}
+
 // ---------------------------------------------------------------------------
 // タップテンポ計算ロジック
 // ---------------------------------------------------------------------------
@@ -806,8 +835,8 @@ void AppWindow::ShowGridMenu(float screenX, float screenY) {
 bool AppWindow::OnModalClick(float x, float y) {
     if (m_activeModal == ModalType::None) return false;
 
-    float cardW = (m_activeModal == ModalType::TapTempo) ? 480.0f : std::min(740.0f, m_width - 40.0f);
-    float cardH = (m_activeModal == ModalType::TapTempo) ? 320.0f : std::min(520.0f, m_height - 40.0f);
+    float cardW = (m_activeModal == ModalType::TapTempo || m_activeModal == ModalType::RenamePart) ? 480.0f : std::min(740.0f, m_width - 40.0f);
+    float cardH = (m_activeModal == ModalType::RenamePart) ? 240.0f : ((m_activeModal == ModalType::TapTempo) ? 320.0f : std::min(520.0f, m_height - 40.0f));
     float cardX = (m_width - cardW) * 0.5f;
     float cardY = (m_height - cardH) * 0.5f;
 
@@ -1180,6 +1209,28 @@ bool AppWindow::OnModalClick(float x, float y) {
 
             D2D1_RECT_F bClose = D2D1::RectF(bodyRc.right - 100.0f, bodyRc.bottom - 36.0f, bodyRc.right, bodyRc.bottom);
             if (PtInRectF(bClose, x, y)) {
+                CloseModal();
+                return true;
+            }
+            break;
+        }
+        case ModalType::RenamePart: {
+            D2D1_RECT_F bConfirm = D2D1::RectF(bodyRc.right - 140.0f, bodyRc.bottom - 36.0f, bodyRc.right - 10.0f, bodyRc.bottom);
+            if (PtInRectF(bConfirm, x, y)) {
+                if (!m_renamePartName.empty()) {
+                    auto& parts = m_partManager.GetParts();
+                    if (m_renamePartIndex >= 0 && m_renamePartIndex < static_cast<int>(parts.size())) {
+                        parts[m_renamePartIndex].name = ToUtf8String(m_renamePartName);
+                        SyncTimelineToText();
+                        InvalidateRect(m_hwnd, nullptr, FALSE);
+                    }
+                }
+                CloseModal();
+                return true;
+            }
+
+            D2D1_RECT_F bCancel = D2D1::RectF(bodyRc.right - 250.0f, bodyRc.bottom - 36.0f, bodyRc.right - 150.0f, bodyRc.bottom);
+            if (PtInRectF(bCancel, x, y)) {
                 CloseModal();
                 return true;
             }

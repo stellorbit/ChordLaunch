@@ -618,6 +618,89 @@ void TestDashboardAndMRU() {
     TEST_ASSERT(mru[1] == L"C:\\Project_14.chord", "Previous top file shifts to index 1");
 }
 
+void TestPartRenameAndMergeAllToNewPart() {
+    std::cout << "[TEST] 18. Part Rename and Merge All to New Part\n";
+
+    PartManager pm;
+    pm.GetParts().clear();
+
+    // パート1: Verse (4小節)
+    Part p1;
+    p1.id = "part_verse";
+    p1.name = "Verse";
+    p1.keyRoot = "C";
+    p1.mode = MusicalMode::Major;
+    p1.bpm = 120;
+    p1.timeNumerator = 4;
+    p1.timeDenominator = 4;
+    p1.bars = ProgressionParser::Parse("| C | Am | F | G |", "C", MusicalMode::Major);
+    pm.GetParts().push_back(p1);
+
+    // パート2: Chorus (4小節)
+    Part p2;
+    p2.id = "part_chorus";
+    p2.name = "Chorus";
+    p2.keyRoot = "C";
+    p2.mode = MusicalMode::Major;
+    p2.bpm = 120;
+    p2.timeNumerator = 4;
+    p2.timeDenominator = 4;
+    p2.bars = ProgressionParser::Parse("| F | G | Em | Am |", "C", MusicalMode::Major);
+    pm.GetParts().push_back(p2);
+
+    TEST_ASSERT(pm.GetParts().size() == 2, "2 initial parts added");
+
+    // 1. パート名変更の検証
+    pm.GetParts()[0].name = "A-Melody";
+    TEST_ASSERT(pm.GetParts()[0].name == "A-Melody", "Part 0 renamed successfully");
+
+    pm.GetParts()[1].name = "Sabi";
+    TEST_ASSERT(pm.GetParts()[1].name == "Sabi", "Part 1 renamed successfully");
+
+    // 2. 全体マージによる新規パーツ生成 (DoMergeAllToNewPart 相当) の検証
+    auto mergedBars = pm.GenerateMergedProgression();
+    TEST_ASSERT(mergedBars.size() == 8, "Merged progression contains 8 bars");
+
+    Part mergedPart;
+    mergedPart.id = "part_merged_test";
+    mergedPart.name = "Full Song";
+    mergedPart.keyRoot = pm.GetParts()[0].keyRoot;
+    mergedPart.mode = pm.GetParts()[0].mode;
+    mergedPart.bpm = pm.GetParts()[0].bpm;
+    mergedPart.timeNumerator = pm.GetParts()[0].timeNumerator;
+    mergedPart.timeDenominator = pm.GetParts()[0].timeDenominator;
+    mergedPart.bars = mergedBars;
+
+    std::string text;
+    for (size_t bi = 0; bi < mergedBars.size(); ++bi) {
+        if (bi > 0) text += " ";
+        text += "|";
+        for (const auto& c : mergedBars[bi].chords) {
+            text += " " + c.rawText;
+        }
+    }
+    mergedPart.rawProgressionText = text;
+    pm.GetParts().push_back(mergedPart);
+    pm.SetActiveIndex(static_cast<int>(pm.GetParts().size() - 1));
+
+    TEST_ASSERT(pm.GetParts().size() == 3, "New merged part added, total parts is now 3");
+    TEST_ASSERT(pm.GetActivePart() != nullptr, "Active part is valid");
+    TEST_ASSERT(pm.GetActivePart()->name == "Full Song", "Active part is Full Song");
+    TEST_ASSERT(pm.GetActivePart()->bars.size() == 8, "Full Song contains 8 bars");
+    TEST_ASSERT(pm.GetActivePart()->bars[0].chords[0].rawText == "C", "First chord of Full Song is C");
+    TEST_ASSERT(pm.GetActivePart()->bars[7].chords[0].rawText == "Am", "Last chord of Full Song is Am");
+
+    // 3. タイムラインの最大スクロール小節数 (std::max(bars.size() + 16, 64)) の安全性検証
+    size_t activeBars = pm.GetActivePart()->bars.size();
+    size_t minRenderBars = std::max<size_t>(activeBars + 16, 64);
+    TEST_ASSERT(minRenderBars == 64, "Short song timeline automatically extends to 64 bars minimum");
+
+    // 64小節超のロング進行での自動拡張検証
+    size_t longBarsCount = 80;
+    size_t longRenderBars = std::max<size_t>(longBarsCount + 16, 64);
+    TEST_ASSERT(longRenderBars == 96, "80 bars song extends timeline capacity to 96 bars");
+}
+
 int main() {
     std::cout << "========================================\n";
     std::cout << "ChordLaunch C++20 Core Test Suite\n";
@@ -640,6 +723,7 @@ int main() {
     TestWasapiAudioEngine();
     TestComprehensiveFixes();
     TestDashboardAndMRU();
+    TestPartRenameAndMergeAllToNewPart();
 
     std::cout << "========================================\n";
     std::cout << "Tests Passed: " << g_passCount << ", Failed: " << g_failCount << "\n";

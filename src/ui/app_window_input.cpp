@@ -156,6 +156,13 @@ void AppWindow::OnLButtonDown(float x, float y) {
             ShowGridMenu(static_cast<float>(btnPt.x), static_cast<float>(btnPt.y));
             return;
         }
+        curX += 116.0f + 8.0f;
+
+        // 全体マージ (新規パート生成)
+        if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 110.0f, r2Y + r2H), x, y)) {
+            DoMergeAllToNewPart();
+            return;
+        }
         return;
     }
 
@@ -378,23 +385,15 @@ void AppWindow::OnLButtonDown(float x, float y) {
             const auto& parts = m_partManager.GetParts();
             float rightReserve = m_showRightPane ? 8.0f : 114.0f;
             float availTotalW = std::max(200.0f, centerW - 8.0f - rightReserve);
-            size_t totalTabs = 1 + parts.size();
+            size_t totalTabs = parts.empty() ? 1 : parts.size();
             bool compactAdd = (availTotalW < totalTabs * 86.0f + 68.0f);
             float addBtnW = compactAdd ? 32.0f : 66.0f;
             float availTabsW = std::max(120.0f, availTotalW - addBtnW - 6.0f);
-            float pTabW = std::clamp((availTabsW - static_cast<float>(totalTabs) * 3.0f) / static_cast<float>(totalTabs), 24.0f, 96.0f);
-            float fullTabW = pTabW;
+            float pTabW = std::clamp((availTabsW - static_cast<float>(totalTabs) * 3.0f) / static_cast<float>(totalTabs), 32.0f, 120.0f);
 
             float curX = centerX + 8.0f;
             float tabH = m_partTabHeight - 3.0f;
             float ty = mainY + 3.0f;
-
-            if (PtInRectF(D2D1::RectF(curX, ty, curX + fullTabW, ty + tabH), x, y)) {
-                m_isMergedView = true;
-                InvalidateRect(m_hwnd, nullptr, FALSE);
-                return;
-            }
-            curX += fullTabW + 3.0f;
 
             for (size_t i = 0; i < parts.size(); ++i) {
                 if (PtInRectF(D2D1::RectF(curX, ty, curX + pTabW, ty + tabH), x, y)) {
@@ -579,7 +578,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
 
                         if (!m_isMergedView) {
                             PushUndo();
-                            if (x >= cardRc.right - 6.0f) {
+                            if (x >= cardRc.right - 12.0f) {
                                 m_dragMode = DragMode::CardResizeRight;
                                 m_dragBarIndex = static_cast<int>(b);
                                 m_dragChordIndex = static_cast<int>(ci);
@@ -587,16 +586,18 @@ void AppWindow::OnLButtonDown(float x, float y) {
                                 m_dragInitialTicks = cTicks;
                                 m_dragInitialNextTicks = (ci + 1 < bars[b].chords.size() && bars[b].chords[ci + 1].isRest) ? bars[b].chords[ci + 1].durationTicks : 0;
                                 SetCapture(m_hwnd);
+                                SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
                                 return;
                             }
 
-                            if (x <= cardRc.left + 6.0f) {
+                            if (x <= cardRc.left + 12.0f) {
                                 m_dragMode = DragMode::CardResizeLeft;
                                 m_dragBarIndex = static_cast<int>(b);
                                 m_dragChordIndex = static_cast<int>(ci);
                                 m_dragStartX = x;
                                 m_dragInitialTicks = cTicks;
                                 SetCapture(m_hwnd);
+                                SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
                                 return;
                             }
 
@@ -906,6 +907,34 @@ bool AppWindow::HitTestPaletteCard(float x, float y, ChordToken& outChord) {
 
 void AppWindow::OnLButtonDblClk(float x, float y) {
     if (m_activeModal != ModalType::None) return;
+
+    // パートタブのダブルクリックで名前変更モーダルを開く
+    float mainY = m_toolbarHeight;
+    float rightW = m_showRightPane ? m_rightPaneWidth : 0.0f;
+    float centerX = m_leftPaneWidth;
+    float centerW = m_width - rightW - centerX;
+    if (x >= centerX && x <= centerX + centerW && y >= mainY && y <= mainY + m_partTabHeight) {
+        const auto& parts = m_partManager.GetParts();
+        float rightReserve = m_showRightPane ? 8.0f : 114.0f;
+        float availTotalW = std::max(200.0f, centerW - 8.0f - rightReserve);
+        size_t totalTabs = parts.empty() ? 1 : parts.size();
+        bool compactAdd = (availTotalW < totalTabs * 86.0f + 68.0f);
+        float addBtnW = compactAdd ? 32.0f : 66.0f;
+        float availTabsW = std::max(120.0f, availTotalW - addBtnW - 6.0f);
+        float pTabW = std::clamp((availTabsW - static_cast<float>(totalTabs) * 3.0f) / static_cast<float>(totalTabs), 32.0f, 120.0f);
+
+        float curX = centerX + 8.0f;
+        float tabH = m_partTabHeight - 3.0f;
+        float ty = mainY + 3.0f;
+        for (size_t i = 0; i < parts.size(); ++i) {
+            if (PtInRectF(D2D1::RectF(curX, ty, curX + pTabW, ty + tabH), x, y)) {
+                OpenRenamePartModal(static_cast<int>(i));
+                return;
+            }
+            curX += pTabW + 3.0f;
+        }
+    }
+
     ChordToken chord;
     if (HitTestPaletteCard(x, y, chord)) {
         if (m_dragMode == DragMode::PaletteCardDrag || m_dragMode == DragMode::CardTimelineDrag) {
@@ -947,6 +976,7 @@ void AppWindow::OnMouseMove(float x, float y) {
     }
 
     if (m_dragMode == DragMode::CardResizeRight) {
+        SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
         Part* pActive = m_partManager.GetActivePart();
         if (pActive && m_dragBarIndex >= 0 && m_dragBarIndex < static_cast<int>(pActive->bars.size())) {
             auto& bar = pActive->bars[m_dragBarIndex];
@@ -997,6 +1027,7 @@ void AppWindow::OnMouseMove(float x, float y) {
     }
 
     if (m_dragMode == DragMode::CardResizeLeft) {
+        SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
         Part* pActive = m_partManager.GetActivePart();
         if (pActive && m_dragBarIndex >= 0 && m_dragBarIndex < static_cast<int>(pActive->bars.size())) {
             auto& bar = pActive->bars[m_dragBarIndex];
@@ -1051,7 +1082,7 @@ void AppWindow::OnMouseMove(float x, float y) {
         if (viewWidth > 0.0f) {
             Part* pActive = m_partManager.GetActivePart();
             size_t actualBars = m_isMergedView ? m_partManager.GenerateMergedProgression().size() : (pActive ? pActive->bars.size() : 0);
-            size_t numBars = std::max<size_t>(actualBars + 8, 32);
+            size_t numBars = std::max<size_t>(actualBars + 16, 64);
             float totalContentWidth = numBars * (m_pixelsPerBeat * 4.0f);
             float maxScroll = std::max(0.0f, totalContentWidth - viewWidth);
             float ratio = std::clamp((x - centerX) / viewWidth, 0.0f, 1.0f);
@@ -1084,7 +1115,7 @@ void AppWindow::OnMouseMove(float x, float y) {
                         float cw = (static_cast<float>(cTicks) / barTicks) * barWidth;
                         offsetTicks += cTicks;
                         D2D1_RECT_F cardRc = D2D1::RectF(cx + 2.0f, cardY, cx + cw - 2.0f, cardY + cardH);
-                        if (PtInRectF(cardRc, x, y) && (x <= cardRc.left + 6.0f || x >= cardRc.right - 6.0f)) {
+                        if (PtInRectF(cardRc, x, y) && (x <= cardRc.left + 12.0f || x >= cardRc.right - 12.0f)) {
                             SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
                             return;
                         }
@@ -1175,20 +1206,21 @@ void AppWindow::OnRButtonUp(float x, float y) {
         const auto& parts = m_partManager.GetParts();
         float rightReserve = m_showRightPane ? 8.0f : 114.0f;
         float availTotalW = std::max(200.0f, centerW - 8.0f - rightReserve);
-        size_t totalTabs = 1 + parts.size();
+        size_t totalTabs = parts.empty() ? 1 : parts.size();
         bool compactAdd = (availTotalW < totalTabs * 86.0f + 68.0f);
         float addBtnW = compactAdd ? 32.0f : 66.0f;
         float availTabsW = std::max(120.0f, availTotalW - addBtnW - 6.0f);
-        float pTabW = std::clamp((availTabsW - static_cast<float>(totalTabs) * 3.0f) / static_cast<float>(totalTabs), 24.0f, 96.0f);
-        float fullTabW = pTabW;
+        float pTabW = std::clamp((availTabsW - static_cast<float>(totalTabs) * 3.0f) / static_cast<float>(totalTabs), 32.0f, 120.0f);
 
-        float curX = centerX + 8.0f + fullTabW + 3.0f;
+        float curX = centerX + 8.0f;
         float tabH = m_partTabHeight - 3.0f;
         float ty = mainY + 3.0f;
         for (size_t i = 0; i < parts.size(); ++i) {
             if (PtInRectF(D2D1::RectF(curX, ty, curX + pTabW, ty + tabH), x, y)) {
                 m_contextPartIndex = static_cast<int>(i);
                 HMENU hMenu = CreatePopupMenu();
+                AppendMenuW(hMenu, MF_STRING, IDM_CTX_PART_RENAME, TR(L"名前の変更(&R)...", L"Rename Part(&R)..."));
+                AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
                 AppendMenuW(hMenu, MF_STRING, IDM_CTX_PART_DUP, TR(L"このパートを複製", L"Duplicate Part"));
                 AppendMenuW(hMenu, (parts.size() > 1) ? MF_STRING : (MF_STRING | MF_GRAYED), IDM_CTX_PART_DEL, TR(L"このパートを削除", L"Delete Part"));
                 AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
@@ -1277,7 +1309,7 @@ void AppWindow::OnMouseWheel(short delta, float /*x*/, float /*y*/) {
 
     Part* pActive = m_partManager.GetActivePart();
     size_t numBars = m_isMergedView ? m_partManager.GenerateMergedProgression().size() : (pActive ? pActive->bars.size() : 8);
-    float totalContentWidth = std::max<size_t>(numBars, 8) * (m_pixelsPerBeat * 4.0f);
+    float totalContentWidth = std::max<size_t>(numBars + 16, 64) * (m_pixelsPerBeat * 4.0f);
     float rightW = m_showRightPane ? m_rightPaneWidth : 0.0f;
     float viewWidth = m_width - m_leftPaneWidth - rightW;
 
@@ -1288,6 +1320,30 @@ void AppWindow::OnMouseWheel(short delta, float /*x*/, float /*y*/) {
 }
 
 void AppWindow::OnKeyDown(WPARAM key) {
+    if (m_activeModal == ModalType::RenamePart) {
+        if (key == VK_RETURN) {
+            auto& parts = m_partManager.GetParts();
+            if (m_renamePartIndex >= 0 && m_renamePartIndex < static_cast<int>(parts.size()) && !m_renamePartName.empty()) {
+                PushUndo();
+                parts[m_renamePartIndex].name = ToUtf8String(m_renamePartName);
+            }
+            CloseModal();
+            return;
+        }
+        if (key == VK_ESCAPE) {
+            CloseModal();
+            return;
+        }
+        if (key == VK_BACK) {
+            if (!m_renamePartName.empty()) {
+                m_renamePartName.pop_back();
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+            }
+            return;
+        }
+        return;
+    }
+
     if (key == VK_SPACE) TogglePlayback();
     else if (key == VK_ESCAPE) StopPlayback();
     else if (key == 'B' || key == 'b') SplitSelectedChord();
@@ -1296,6 +1352,15 @@ void AppWindow::OnKeyDown(WPARAM key) {
 }
 
 void AppWindow::OnChar(WCHAR ch) {
+    if (m_activeModal == ModalType::RenamePart) {
+        if (ch >= 0x20 && ch != 0x7F) {
+            if (m_renamePartName.size() < 30) {
+                m_renamePartName += ch;
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+            }
+        }
+        return;
+    }
     if (m_activeModal == ModalType::Templates && m_tmplEditorOpen) {
         if (ch >= 0x20 && ch != 0x7F) {
             std::wstring* pField = (m_tmplEditFocusField == 0) ? &m_tmplEditName : ((m_tmplEditFocusField == 1) ? &m_tmplEditProg : &m_tmplEditDesc);

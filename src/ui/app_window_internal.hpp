@@ -49,6 +49,7 @@ namespace clp {
 #define IDM_TOOL_TEMPLATES   1041
 #define IDM_TOOL_SETTINGS    1042
 #define IDM_TOOL_HELP        1043
+#define IDM_TOOL_MERGE_NEW   1044
 
 // プルダウンメニュー用コマンドID
 #define IDM_KEY_BASE         3000
@@ -61,6 +62,7 @@ namespace clp {
 #define IDM_CTX_PART_DEL     3602
 #define IDM_CTX_PART_LEFT    3603
 #define IDM_CTX_PART_RIGHT   3604
+#define IDM_CTX_PART_RENAME  3605
 #define IDM_CTX_CARD_INV0    3700
 #define IDM_CTX_CARD_INV1    3701
 #define IDM_CTX_CARD_INV2    3702

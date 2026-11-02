@@ -237,6 +237,14 @@ void AppWindow::RenderToolbar(float x, float y, float width, float height) {
 
     D2D1_RECT_F rcGrid = D2D1::RectF(curX, r2Y, curX + 110.0f, r2Y + r2H);
     DrawButton(rcGrid, gridStr, IconType::None);
+    curX += 116.0f;
+
+    m_pRenderTarget->DrawLine(D2D1::Point2F(curX, r2Y + 2.0f), D2D1::Point2F(curX, r2Y + r2H - 2.0f), m_pBrushBorderLight, 1.0f);
+    curX += 8.0f;
+
+    // 9. 全体マージ (新規パート生成ボタン)
+    D2D1_RECT_F rcMerge = D2D1::RectF(curX, r2Y, curX + 110.0f, r2Y + r2H);
+    DrawButton(rcMerge, TR(L"全体マージ", L"Merge All"), IconType::None, false, false, true, Theme::AccentAction);
 }
 
 // ---------------------------------------------------------------------------
@@ -438,7 +446,7 @@ void AppWindow::RenderCenterPane(float x, float y, float width, float height) {
     Part* pActive = m_partManager.GetActivePart();
     std::vector<Bar> bars = m_isMergedView ? m_partManager.GenerateMergedProgression() : (pActive ? pActive->bars : std::vector<Bar>{});
     float barWidth = m_pixelsPerBeat * 4.0f;
-    size_t numBars = std::max<size_t>(bars.size() + 8, 32);
+    size_t numBars = std::max<size_t>(bars.size() + 16, 64);
 
     for (size_t b = 0; b <= numBars; ++b) {
         float bx = x + b * barWidth - m_timelineScrollX;
@@ -532,21 +540,14 @@ void AppWindow::RenderPartTabs(float x, float y, float width, float height) {
     // 横幅縮小時にタブや［＋パート］ボタンが隠れないよう動的縮小計算
     float rightReserve = m_showRightPane ? 8.0f : 114.0f;
     float availTotalW = std::max(200.0f, width - 8.0f - rightReserve);
-    size_t totalTabs = 1 + parts.size();
+    size_t totalTabs = parts.empty() ? 1 : parts.size();
     bool compactAdd = (availTotalW < totalTabs * 86.0f + 68.0f);
     float addBtnW = compactAdd ? 32.0f : 66.0f;
     float availTabsW = std::max(120.0f, availTotalW - addBtnW - 6.0f);
-    float pTabW = std::clamp((availTabsW - static_cast<float>(totalTabs) * 3.0f) / static_cast<float>(totalTabs), 24.0f, 96.0f);
-    float fullTabW = pTabW;
+    float pTabW = std::clamp((availTabsW - static_cast<float>(totalTabs) * 3.0f) / static_cast<float>(totalTabs), 32.0f, 120.0f);
 
     float curX = x + 8.0f;
     float tabY = y + 3.0f;
-
-    // 全体マージタブ
-    D2D1_RECT_F rcFull = D2D1::RectF(curX, tabY, curX + fullTabW, bottomY);
-    std::wstring fullLabel = (fullTabW < 82.0f) ? TR(L"[全] マージ", L"[All] Song") : TR(L"[全] 全体マージ", L"[All] Full Song");
-    drawFolderTab(rcFull, fullLabel, m_isMergedView);
-    curX += fullTabW + 3.0f;
 
     for (size_t i = 0; i < parts.size(); ++i) {
         bool isActive = (!m_isMergedView && static_cast<int>(i) == activeIdx);
@@ -580,7 +581,7 @@ void AppWindow::RenderTimelineCards(float x, float y, float width, float height)
     Part* pActive = m_partManager.GetActivePart();
     std::vector<Bar> bars = m_isMergedView ? m_partManager.GenerateMergedProgression() : (pActive ? pActive->bars : std::vector<Bar>{});
     float barWidth = m_pixelsPerBeat * 4.0f;
-    size_t numBars = std::max<size_t>(bars.size() + 8, 32);
+    size_t numBars = std::max<size_t>(bars.size() + 16, 64);
     int gridDivisions = std::clamp(TICKS_PER_BAR_4_4 / std::max(120, m_selectedGridTicks), 1, 16);
 
     // 1. 背景グリッド線 (カードの下層に描画するため、コード文字の上に線が被らない)
@@ -710,7 +711,7 @@ void AppWindow::RenderPianoRoll(float x, float y, float width, float height) {
     }
 
     // 2. 垂直グリッド線 (ノートバーの背面に描画し、左端ガイド列 x+guideW より右側のみに制限)
-    size_t numBars = std::max<size_t>(bars.size() + 8, 32);
+    size_t numBars = std::max<size_t>(bars.size() + 16, 64);
     int gridDivisions = std::clamp(TICKS_PER_BAR_4_4 / std::max(120, m_selectedGridTicks), 1, 16);
     for (size_t b = 0; b <= numBars; ++b) {
         float bx = x + b * barWidth - m_timelineScrollX;
@@ -939,7 +940,7 @@ void AppWindow::RenderTimelineScrollBar(float x, float y, float width, float hei
 
     Part* pActive = m_partManager.GetActivePart();
     size_t actualBars = m_isMergedView ? m_partManager.GenerateMergedProgression().size() : (pActive ? pActive->bars.size() : 0);
-    size_t numBars = std::max<size_t>(actualBars + 8, 32);
+    size_t numBars = std::max<size_t>(actualBars + 16, 64);
 
     float totalContentWidth = numBars * (m_pixelsPerBeat * 4.0f);
     float viewWidth = width;
