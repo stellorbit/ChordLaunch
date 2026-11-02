@@ -219,6 +219,7 @@ void AppWindow::RebuildMainMenu() {
     AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_UNDO, TR(L"元に戻す(&U)\tCtrl+Z", L"Undo(&U)\tCtrl+Z"));
     AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_REDO, TR(L"やり直し(&R)\tCtrl+Y", L"Redo(&R)\tCtrl+Y"));
     AppendMenuW(hEditMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_SPLIT, TR(L"選択コードの分割(&S)\tB", L"Split Chord(&S)\tB"));
     AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_DUPLICATE, TR(L"選択コードの複製(&D)\tCtrl+D", L"Duplicate Chord(&D)\tCtrl+D"));
     AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_DELETE, TR(L"選択コードの削除(&D)\tDel", L"Delete Chord(&D)\tDel"));
     AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_SELECTALL, TR(L"すべて選択(&A)\tCtrl+A", L"Select All(&A)\tCtrl+A"));
@@ -430,6 +431,10 @@ int AppWindow::Run() {
                 }
                 if (isCtrl && msg.wParam == 'D') {
                     DuplicateSelection();
+                    continue;
+                }
+                if (!isCtrl && (msg.wParam == 'B' || msg.wParam == 'b') && msg.hwnd != m_hwndEdit) {
+                    SplitSelectedChord();
                     continue;
                 }
                 if (isCtrl && msg.wParam == 'C' && msg.hwnd != m_hwndEdit) {
@@ -728,6 +733,7 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
                 case IDM_EDIT_UNDO: Undo(); break;
                 case IDM_EDIT_REDO: Redo(); break;
+                case IDM_EDIT_SPLIT: SplitSelectedChord(); break;
                 case IDM_EDIT_DUPLICATE: DuplicateSelection(); break;
                 case IDM_EDIT_DELETE: DeleteSelection(); break;
                 case IDM_EDIT_SELECTALL: SelectAll(); break;

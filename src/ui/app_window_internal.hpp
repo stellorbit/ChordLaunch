@@ -31,6 +31,7 @@ namespace clp {
 #define IDM_EDIT_DELETE      1014
 #define IDM_EDIT_SELECTALL   1015
 #define IDM_EDIT_CLEARALL    1016
+#define IDM_EDIT_SPLIT       1017
 
 #define IDM_VIEW_PIANOROLL   1021
 #define IDM_VIEW_RIGHTPANE   1022

@@ -258,6 +258,15 @@ void TestNewAuditFixes() {
     TEST_ASSERT(diaSus4.size() == 7 && diaSus4[0].qualitySuffix == "sus4" && diaSus4[4].rootName == "G" && diaSus4[4].qualitySuffix == "sus4", "Sus4 diatonic tab generates Gsus4");
 
     auto diaAdd9 = MusicEngine::GetDiatonicChordsByTab("C", MusicalMode::Major, 3);
+
+    // 同一コード連続配置テスト (勝手にマージされず独立カードとして保持されること)
+    auto repeatChords = ProgressionParser::Parse("| Asus4 Asus4 _ _ |");
+    TEST_ASSERT(repeatChords.size() == 1, "Must parse 1 bar");
+    TEST_ASSERT(repeatChords[0].chords.size() == 4, "Must have 4 items (Asus4, Asus4, _, _)");
+    TEST_ASSERT(repeatChords[0].chords[0].rootName == "A" && repeatChords[0].chords[0].qualitySuffix == "sus4" && repeatChords[0].chords[0].durationBeats == 1, "First Asus4 must be 1 beat");
+    TEST_ASSERT(repeatChords[0].chords[1].rootName == "A" && repeatChords[0].chords[1].qualitySuffix == "sus4" && repeatChords[0].chords[1].durationBeats == 1, "Second Asus4 must be 1 beat");
+    TEST_ASSERT(repeatChords[0].chords[2].isRest && repeatChords[0].chords[2].durationBeats == 1, "First trailing rest must be 1 beat");
+    TEST_ASSERT(repeatChords[0].chords[3].isRest && repeatChords[0].chords[3].durationBeats == 1, "Second trailing rest must be 1 beat");
     TEST_ASSERT(diaAdd9.size() == 7 && diaAdd9[0].qualitySuffix == "add9", "Add9 diatonic tab generates Cadd9");
 
     // C-10: CM7 vs Cm7 distinction

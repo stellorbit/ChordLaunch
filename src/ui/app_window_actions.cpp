@@ -104,54 +104,118 @@ void AppWindow::InsertChordAtTimelinePosition(const ChordToken& chord, int targe
 
     int chordBeats = std::clamp(chord.durationBeats > 0 ? chord.durationBeats : 1, 1, barBeats);
 
-    // 小節内の拍スロット配列（1拍単位）を展開
-    std::vector<ChordToken> beatSlots(barBeats);
-    for (int b = 0; b < barBeats; ++b) {
-        beatSlots[b].isRest = true;
-        beatSlots[b].quality = ChordQuality::Rest;
-        beatSlots[b].rootName = "R";
-        beatSlots[b].degreeRoman = "R";
-        beatSlots[b].rawText = "_";
-        beatSlots[b].durationBeats = 1;
-        beatSlots[b].durationTicks = TICKS_PER_BEAT;
-    }
-
-    // 既存コードをスロットへ配置
+    // 既存コードを区間 (startBeat, durationBeats) として収集 (休符以外)
+    struct PlacedItem {
+        int startBeat = 0;
+        int durationBeats = 1;
+        ChordToken chord;
+    };
+    std::vector<PlacedItem> placed;
     int curBeat = 0;
     for (const auto& existing : targetBar.chords) {
         int eBeats = existing.durationBeats > 0 ? existing.durationBeats : std::max(1, existing.durationTicks / TICKS_PER_BEAT);
-        for (int b = 0; b < eBeats && curBeat < barBeats; ++b) {
-            beatSlots[curBeat] = existing;
-            beatSlots[curBeat].durationBeats = 1;
-            beatSlots[curBeat].durationTicks = TICKS_PER_BEAT;
-            curBeat++;
+        if (!existing.isRest) {
+            placed.push_back(PlacedItem{curBeat, eBeats, existing});
+        }
+        curBeat += eBeats;
+    }
+
+    // 重なり判定・既存コードのクリッピング
+    std::vector<PlacedItem> resolved;
+    int newStart = targetBeat;
+    int newEnd = std::min(barBeats, targetBeat + chordBeats);
+
+    for (const auto& pt : placed) {
+        int ptStart = pt.startBeat;
+        int ptEnd = pt.startBeat + pt.durationBeats;
+        if (ptEnd <= newStart || ptStart >= newEnd) {
+            resolved.push_back(pt);
+        } else if (newStart <= ptStart && newEnd >= ptEnd) {
+            // 新規コードに完全に覆われるため削除
+            continue;
+        } else if (newStart > ptStart && newEnd < ptEnd) {
+            // 新規コードが既存コードの中央に割り込み -> 前後に2分割
+            PlacedItem left = pt;
+            left.durationBeats = newStart - ptStart;
+            left.chord.durationBeats = left.durationBeats;
+            left.chord.durationTicks = left.durationBeats * TICKS_PER_BEAT;
+            resolved.push_back(left);
+
+            PlacedItem right = pt;
+            right.startBeat = newEnd;
+            right.durationBeats = ptEnd - newEnd;
+            right.chord.durationBeats = right.durationBeats;
+            right.chord.durationTicks = right.durationBeats * TICKS_PER_BEAT;
+            resolved.push_back(right);
+        } else if (newStart > ptStart) {
+            // 右側が削られる
+            PlacedItem left = pt;
+            left.durationBeats = newStart - ptStart;
+            left.chord.durationBeats = left.durationBeats;
+            left.chord.durationTicks = left.durationBeats * TICKS_PER_BEAT;
+            resolved.push_back(left);
+        } else if (newEnd < ptEnd) {
+            // 左側が削られる
+            PlacedItem right = pt;
+            right.startBeat = newEnd;
+            right.durationBeats = ptEnd - newEnd;
+            right.chord.durationBeats = right.durationBeats;
+            right.chord.durationTicks = right.durationBeats * TICKS_PER_BEAT;
+            resolved.push_back(right);
         }
     }
 
-    // 指定位置へコードを上書き配置
-    for (int b = 0; b < chordBeats && (targetBeat + b) < barBeats; ++b) {
-        beatSlots[targetBeat + b] = chord;
-        beatSlots[targetBeat + b].durationBeats = 1;
-        beatSlots[targetBeat + b].durationTicks = TICKS_PER_BEAT;
+    // 新規コードを追加 (休符でなければ)
+    if (!chord.isRest) {
+        PlacedItem newPt;
+        newPt.startBeat = newStart;
+        newPt.durationBeats = newEnd - newStart;
+        newPt.chord = chord;
+        newPt.chord.durationBeats = newPt.durationBeats;
+        newPt.chord.durationTicks = newPt.durationBeats * TICKS_PER_BEAT;
+        resolved.push_back(newPt);
     }
 
-    // 連続する同一コード／休符を結合して小節コード列を再構成
-    std::vector<ChordToken> newChords;
-    for (int b = 0; b < barBeats; ++b) {
-        if (!newChords.empty() &&
-            newChords.back().isRest == beatSlots[b].isRest &&
-            newChords.back().rootPitch == beatSlots[b].rootPitch &&
-            newChords.back().quality == beatSlots[b].quality &&
-            newChords.back().bassPitch == beatSlots[b].bassPitch &&
-            newChords.back().inversion == beatSlots[b].inversion) {
-            newChords.back().durationBeats++;
-            newChords.back().durationTicks = newChords.back().durationBeats * TICKS_PER_BEAT;
-        } else {
-            newChords.push_back(beatSlots[b]);
+    // 開始拍順にソート (同一コードでも決してマージせず独立カードとして保持)
+    std::sort(resolved.begin(), resolved.end(), [](const PlacedItem& a, const PlacedItem& b) {
+        return a.startBeat < b.startBeat;
+    });
+
+    // 小節内の隙間（空き拍）を休符トークン (_) で埋めて finalChords を構築
+    std::vector<ChordToken> finalChords;
+    int walkerBeat = 0;
+    for (const auto& pt : resolved) {
+        if (pt.startBeat > walkerBeat) {
+            int gap = pt.startBeat - walkerBeat;
+            ChordToken restTok;
+            restTok.isRest = true;
+            restTok.quality = ChordQuality::Rest;
+            restTok.rootName = "R";
+            restTok.degreeRoman = "R";
+            restTok.rawText = "_";
+            restTok.durationBeats = gap;
+            restTok.durationTicks = gap * TICKS_PER_BEAT;
+            finalChords.push_back(restTok);
+            walkerBeat = pt.startBeat;
         }
+        finalChords.push_back(pt.chord);
+        walkerBeat += pt.durationBeats;
     }
 
-    targetBar.chords = std::move(newChords);
+    if (walkerBeat < barBeats) {
+        int gap = barBeats - walkerBeat;
+        ChordToken restTok;
+        restTok.isRest = true;
+        restTok.quality = ChordQuality::Rest;
+        restTok.rootName = "R";
+        restTok.degreeRoman = "R";
+        restTok.rawText = "_";
+        restTok.durationBeats = gap;
+        restTok.durationTicks = gap * TICKS_PER_BEAT;
+        finalChords.push_back(restTok);
+    }
+
+    targetBar.chords = std::move(finalChords);
     m_selectedBarIndex = targetBarIdx;
 
     m_selectedChordIndex = 0;
@@ -167,6 +231,46 @@ void AppWindow::InsertChordAtTimelinePosition(const ChordToken& chord, int targe
     EnsureVisible(m_selectedBarIndex);
     SyncTimelineToText();
     InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::SplitSelectedChord() {
+    Part* pActive = m_partManager.GetActivePart();
+    if (!pActive || m_selectedBarIndex < 0 || m_selectedBarIndex >= static_cast<int>(pActive->bars.size())) return;
+    auto& bar = pActive->bars[m_selectedBarIndex];
+    if (m_selectedChordIndex < 0 || m_selectedChordIndex >= static_cast<int>(bar.chords.size())) return;
+
+    auto& chord = bar.chords[m_selectedChordIndex];
+    int totalTicks = chord.durationTicks > 0 ? chord.durationTicks : (chord.durationBeats * TICKS_PER_BEAT);
+
+    if (totalTicks < 240) {
+        SetStatusMessage(TR(L"これ以上分割できません", L"Cannot split further"));
+        return;
+    }
+
+    PushUndo();
+    m_isMergedView = false;
+
+    int halfTicks = totalTicks / 2;
+    int snap = std::max(60, m_selectedGridTicks);
+    if (totalTicks >= snap * 2) {
+        halfTicks = (halfTicks / snap) * snap;
+    }
+    int secondTicks = totalTicks - halfTicks;
+
+    chord.SetTicks(halfTicks);
+
+    ChordToken secondChord = chord;
+    secondChord.SetTicks(secondTicks);
+
+    bar.chords.insert(bar.chords.begin() + m_selectedChordIndex + 1, secondChord);
+
+    SyncTimelineToText();
+    SetStatusMessage(TR(L"コードを分割しました (B)", L"Split chord (B)"));
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::DuplicateSelectedChord() {
+    DuplicateSelection();
 }
 
 void AppWindow::InsertChordAtTimelineX(const ChordToken& chord, float x) {

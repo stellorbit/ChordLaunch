@@ -144,6 +144,8 @@ private:
     bool HitTestPaletteCard(float x, float y, ChordToken& outChord);
     void InsertChordAtTimelineX(const ChordToken& chord, float x);
     void InsertChordAtTimelinePosition(const ChordToken& chord, int targetBarIdx, int targetBeat);
+    void SplitSelectedChord();
+    void DuplicateSelectedChord();
 
     // プルダウンメニュー表示・メニューバー言語更新
     void RebuildMainMenu();

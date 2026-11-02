@@ -1177,6 +1177,7 @@ void AppWindow::OnRButtonUp(float x, float y) {
                 if (PtInRectF(cardRc, x, y)) {
                     SelectChord(static_cast<int>(b), static_cast<int>(ci));
                     HMENU hMenu = CreatePopupMenu();
+                    AppendMenuW(hMenu, MF_STRING, IDM_EDIT_SPLIT, TR(L"コードを分割 (B)", L"Split Chord (B)"));
                     AppendMenuW(hMenu, MF_STRING, IDM_EDIT_DUPLICATE, TR(L"コードを複製 (Ctrl+D)", L"Duplicate Chord (Ctrl+D)"));
                     AppendMenuW(hMenu, MF_STRING, IDM_EDIT_DELETE, TR(L"コードを削除 (Del)", L"Delete Chord (Del)"));
                     AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
@@ -1240,6 +1241,9 @@ void AppWindow::OnMouseWheel(short delta, float /*x*/, float /*y*/) {
 void AppWindow::OnKeyDown(WPARAM key) {
     if (key == VK_SPACE) TogglePlayback();
     else if (key == VK_ESCAPE) StopPlayback();
+    else if (key == 'B' || key == 'b') SplitSelectedChord();
+    else if ((GetKeyState(VK_CONTROL) & 0x8000) && (key == 'D' || key == 'd')) DuplicateSelectedChord();
+    else if (key == VK_DELETE) DeleteSelection();
 }
 
 void AppWindow::OnChar(WCHAR ch) {
