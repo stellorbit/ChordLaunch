@@ -1,0 +1,701 @@
+#include "app_window_internal.hpp"
+namespace clp {
+// ---------------------------------------------------------------------------
+// タイムライン・コード操作実装
+// ---------------------------------------------------------------------------
+void AppWindow::SelectChord(int barIndex, int chordIndex) {
+    m_selectedBarIndex = barIndex;
+    m_selectedChordIndex = chordIndex;
+    EnsureVisible(barIndex);
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::EnsureVisible(int barIndex) {
+    if (barIndex < 0) return;
+    float barWidth = m_pixelsPerBeat * 4.0f;
+    float barStart = barIndex * barWidth;
+    float barEnd = barStart + barWidth;
+
+    float rightW = m_showRightPane ? m_rightPaneWidth : 0.0f;
+    float viewWidth = m_width - m_leftPaneWidth - rightW;
+
+    Part* pActive = m_partManager.GetActivePart();
+    size_t numBars = m_isMergedView ? m_partManager.GenerateMergedProgression().size() : (pActive ? pActive->bars.size() : 8);
+    float totalContentWidth = std::max<size_t>(numBars, 8) * barWidth;
+    float maxScroll = std::max(0.0f, totalContentWidth - viewWidth);
+
+    if (barStart < m_timelineScrollX) {
+        m_timelineScrollX = barStart;
+    } else if (barEnd > m_timelineScrollX + viewWidth) {
+        m_timelineScrollX = barEnd - viewWidth;
+    }
+
+    m_timelineScrollX = std::clamp(m_timelineScrollX, 0.0f, maxScroll);
+}
+
+void AppWindow::AuditionChord(const ChordToken& chord) {
+    if (chord.isRest || chord.rootPitch == PitchClass::Unknown) {
+        m_synth.AllNotesOff();
+        return;
+    }
+    auto notes = MusicEngine::GetChordMidiNotes(chord, m_baseOctave, m_selectedVoicing, chord.inversion, m_bassOctaveMode);
+    if (!notes.empty()) {
+        m_synth.PlayChord(notes);
+    }
+}
+
+void AppWindow::AppendChordToTimeline(const ChordToken& chord) {
+    Part* pActive = m_partManager.GetActivePart();
+    if (!pActive) return;
+
+    PushUndo();
+    m_isMergedView = false;
+    int addTicks = (chord.durationTicks > 0) ? chord.durationTicks : (chord.durationBeats * TICKS_PER_BEAT);
+
+    if (pActive->bars.empty()) {
+        Bar b;
+        b.barNumber = 1;
+        b.timeNumerator = pActive->timeNumerator;
+        b.timeDenominator = pActive->timeDenominator;
+        pActive->bars.push_back(b);
+    } else {
+        auto& lastBar = pActive->bars.back();
+        int usedTicks = 0;
+        for (const auto& existing : lastBar.chords) {
+            usedTicks += (existing.durationTicks > 0) ? existing.durationTicks : (existing.durationBeats * TICKS_PER_BEAT);
+        }
+        int maxBarTicks = lastBar.GetTotalTicks();
+        if (maxBarTicks <= 0) maxBarTicks = TICKS_PER_BAR_4_4;
+        if (!lastBar.chords.empty() && usedTicks + addTicks > maxBarTicks) {
+            Bar newBar;
+            newBar.barNumber = static_cast<int>(pActive->bars.size()) + 1;
+            newBar.timeNumerator = pActive->timeNumerator;
+            newBar.timeDenominator = pActive->timeDenominator;
+            pActive->bars.push_back(newBar);
+        }
+    }
+
+    pActive->bars.back().chords.push_back(chord);
+    m_selectedBarIndex = static_cast<int>(pActive->bars.size()) - 1;
+    m_selectedChordIndex = static_cast<int>(pActive->bars.back().chords.size()) - 1;
+    EnsureVisible(m_selectedBarIndex);
+    SyncTimelineToText();
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::InsertChordAtTimelineX(const ChordToken& chord, float x) {
+    Part* pActive = m_partManager.GetActivePart();
+    if (!pActive) return;
+
+    float centerX = m_leftPaneWidth;
+    float barWidth = m_pixelsPerBeat * 4.0f;
+    float relX = (x - centerX) + m_timelineScrollX;
+    int targetBarIdx = (relX >= 0.0f && barWidth > 0.0f) ? static_cast<int>(relX / barWidth) : -1;
+
+    if (targetBarIdx < 0 || targetBarIdx >= static_cast<int>(pActive->bars.size())) {
+        AppendChordToTimeline(chord);
+        return;
+    }
+
+    int addTicks = (chord.durationTicks > 0) ? chord.durationTicks : (chord.durationBeats * TICKS_PER_BEAT);
+    auto& targetBar = pActive->bars[targetBarIdx];
+    int usedTicks = 0;
+    for (const auto& existing : targetBar.chords) {
+        usedTicks += (existing.durationTicks > 0) ? existing.durationTicks : (existing.durationBeats * TICKS_PER_BEAT);
+    }
+    int maxBarTicks = targetBar.GetTotalTicks();
+    if (maxBarTicks <= 0) maxBarTicks = TICKS_PER_BAR_4_4;
+
+    if (usedTicks + addTicks <= maxBarTicks) {
+        PushUndo();
+        m_isMergedView = false;
+        targetBar.chords.push_back(chord);
+        m_selectedBarIndex = targetBarIdx;
+        m_selectedChordIndex = static_cast<int>(targetBar.chords.size()) - 1;
+        EnsureVisible(m_selectedBarIndex);
+        SyncTimelineToText();
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+    } else {
+        AppendChordToTimeline(chord);
+    }
+}
+
+void AppWindow::SyncTextToTimeline() {
+    if (!m_hwndEdit) return;
+
+    int len = GetWindowTextLengthW(m_hwndEdit);
+    std::wstring text(len, 0);
+    GetWindowTextW(m_hwndEdit, text.data(), len + 1);
+
+    Part* pActive = m_partManager.GetActivePart();
+    if (!pActive) return;
+
+    PushUndo();
+    std::string utf8 = ToUtf8String(text);
+    pActive->bars = ProgressionParser::Parse(utf8, pActive->keyRoot, pActive->mode);
+    pActive->rawProgressionText = utf8;
+
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::SyncTimelineToText() {
+    if (!m_hwndEdit) return;
+
+    Part* pActive = m_partManager.GetActivePart();
+    if (!pActive) return;
+
+    std::string text = ProgressionParser::Format(pActive->bars);
+    pActive->rawProgressionText = text;
+    std::wstring wtext = ToWString(text);
+
+    SetWindowTextW(m_hwndEdit, wtext.c_str());
+}
+
+void AppWindow::PushUndo() {
+    UndoSnapshot snap;
+    snap.parts = m_partManager.GetParts();
+    snap.activePartIndex = m_partManager.GetActiveIndex();
+    m_undoStack.push_back(std::move(snap));
+    if (m_undoStack.size() > 30) m_undoStack.erase(m_undoStack.begin());
+    m_redoStack.clear();
+    m_isDirty = true;
+    UpdateWindowTitle();
+}
+
+void AppWindow::Undo() {
+    if (m_undoStack.empty()) return;
+    UndoSnapshot current;
+    current.parts = m_partManager.GetParts();
+    current.activePartIndex = m_partManager.GetActiveIndex();
+    m_redoStack.push_back(std::move(current));
+
+    auto prev = std::move(m_undoStack.back());
+    m_undoStack.pop_back();
+
+    m_partManager.GetParts() = std::move(prev.parts);
+    m_partManager.SetActiveIndex(prev.activePartIndex);
+    m_isDirty = true;
+    UpdateWindowTitle();
+    SyncTimelineToText();
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::Redo() {
+    if (m_redoStack.empty()) return;
+    UndoSnapshot next = std::move(m_redoStack.back());
+    m_redoStack.pop_back();
+
+    UndoSnapshot current;
+    current.parts = m_partManager.GetParts();
+    current.activePartIndex = m_partManager.GetActiveIndex();
+    m_undoStack.push_back(std::move(current));
+
+    m_partManager.GetParts() = std::move(next.parts);
+    m_partManager.SetActiveIndex(next.activePartIndex);
+    m_isDirty = true;
+    UpdateWindowTitle();
+    SyncTimelineToText();
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::DuplicateSelection() {
+    Part* pActive = m_partManager.GetActivePart();
+    if (!pActive || m_selectedBarIndex < 0 || m_selectedBarIndex >= static_cast<int>(pActive->bars.size())) return;
+
+    auto& bar = pActive->bars[m_selectedBarIndex];
+    if (m_selectedChordIndex < 0 || m_selectedChordIndex >= static_cast<int>(bar.chords.size())) return;
+
+    PushUndo();
+    bar.chords.insert(bar.chords.begin() + m_selectedChordIndex + 1, bar.chords[m_selectedChordIndex]);
+    SyncTimelineToText();
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::DeleteSelection() {
+    Part* pActive = m_partManager.GetActivePart();
+    if (!pActive || m_selectedBarIndex < 0 || m_selectedBarIndex >= static_cast<int>(pActive->bars.size())) return;
+
+    auto& bar = pActive->bars[m_selectedBarIndex];
+    if (m_selectedChordIndex < 0 || m_selectedChordIndex >= static_cast<int>(bar.chords.size())) return;
+
+    PushUndo();
+    bar.chords.erase(bar.chords.begin() + m_selectedChordIndex);
+    if (bar.chords.empty() && pActive->bars.size() > 1) {
+        pActive->bars.erase(pActive->bars.begin() + m_selectedBarIndex);
+    }
+    m_selectedBarIndex = -1;
+    m_selectedChordIndex = -1;
+    SyncTimelineToText();
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::SelectAll() {
+    Part* pActive = m_partManager.GetActivePart();
+    if (pActive && !pActive->bars.empty() && !pActive->bars[0].chords.empty()) {
+        SelectChord(0, 0);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 再生エンジン (tick単位精密制御)
+// ---------------------------------------------------------------------------
+void AppWindow::TogglePlayback() {
+    if (m_isPlaying) {
+        m_isPlaying = false;
+        m_synth.AllNotesOff();
+    } else {
+        m_isPlaying = true;
+        m_lastPlaybackTime = std::chrono::steady_clock::now();
+        m_lastSoundedChordUid = -1;
+
+        // 再生開始時に現在位置のコードを即座に発音
+        std::vector<Bar> currentBars = m_isMergedView ?
+            m_partManager.GenerateMergedProgression() :
+            (m_partManager.GetActivePart() ? m_partManager.GetActivePart()->bars : std::vector<Bar>{});
+
+        int accTicks = 0;
+        int chordUidCounter = 0;
+        bool chordSounded = false;
+        for (size_t bi = 0; bi < currentBars.size(); ++bi) {
+            const auto& b = currentBars[bi];
+            int barTicks = b.GetTotalTicks();
+            if (barTicks <= 0) barTicks = TICKS_PER_BAR_4_4;
+
+            int chordOffset = 0;
+            for (size_t ci = 0; ci < b.chords.size(); ++ci) {
+                const auto& c = b.chords[ci];
+                int cTicks = c.durationTicks > 0 ? c.durationTicks : (c.durationBeats * TICKS_PER_BEAT);
+                int startTick = accTicks + chordOffset;
+                int endTick = startTick + cTicks;
+
+                if (m_playbackTick >= startTick && m_playbackTick < endTick) {
+                    m_lastSoundedChordUid = chordUidCounter;
+                    m_selectedBarIndex = static_cast<int>(bi);
+                    m_selectedChordIndex = static_cast<int>(ci);
+                    EnsureVisible(m_selectedBarIndex);
+                    AuditionChord(c);
+                    chordSounded = true;
+                    break;
+                }
+
+                chordOffset += cTicks;
+                chordUidCounter++;
+            }
+            if (chordSounded) break;
+            accTicks += barTicks;
+        }
+    }
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::StopPlayback() {
+    m_isPlaying = false;
+    m_playbackTick = 0.0;
+    m_lastSoundedChordUid = -1;
+    m_synth.AllNotesOff();
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::AdvancePlayback(float deltaSeconds) {
+    Part* pActive = m_partManager.GetActivePart();
+    int bpm = pActive ? pActive->bpm : 120;
+
+    double deltaTicks = deltaSeconds * (bpm / 60.0) * TICKS_PER_BEAT;
+    m_playbackTick += deltaTicks;
+
+    std::vector<Bar> currentBars = m_isMergedView ?
+        m_partManager.GenerateMergedProgression() :
+        (pActive ? pActive->bars : std::vector<Bar>{});
+
+    int totalSongTicks = 0;
+    for (const auto& b : currentBars) {
+        int barTicks = b.GetTotalTicks();
+        totalSongTicks += (barTicks > 0 ? barTicks : TICKS_PER_BAR_4_4);
+    }
+
+    if (totalSongTicks > 0 && m_playbackTick >= totalSongTicks) {
+        if (m_isLooping) {
+            m_playbackTick = std::fmod(m_playbackTick, static_cast<double>(totalSongTicks));
+            m_lastSoundedChordUid = -1;
+        } else {
+            StopPlayback();
+            return;
+        }
+    }
+
+    int accTicks = 0;
+    int chordUidCounter = 0;
+
+    for (size_t bi = 0; bi < currentBars.size(); ++bi) {
+        const auto& b = currentBars[bi];
+        int barTicks = b.GetTotalTicks();
+        if (barTicks <= 0) barTicks = TICKS_PER_BAR_4_4;
+
+        int chordOffset = 0;
+        for (size_t ci = 0; ci < b.chords.size(); ++ci) {
+            const auto& c = b.chords[ci];
+            int cTicks = c.durationTicks > 0 ? c.durationTicks : (c.durationBeats * TICKS_PER_BEAT);
+            int startTick = accTicks + chordOffset;
+            int endTick = startTick + cTicks;
+
+            if (m_playbackTick >= startTick && m_playbackTick < endTick) {
+                if (m_lastSoundedChordUid != chordUidCounter) {
+                    m_lastSoundedChordUid = chordUidCounter;
+                    m_selectedBarIndex = static_cast<int>(bi);
+                    m_selectedChordIndex = static_cast<int>(ci);
+                    EnsureVisible(m_selectedBarIndex);
+                    AuditionChord(c);
+                }
+                return;
+            }
+
+            chordOffset += cTicks;
+            chordUidCounter++;
+        }
+        accTicks += barTicks;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ウィンドウタイトル更新・ステータス・自動バックアップ
+// ---------------------------------------------------------------------------
+void AppWindow::UpdateWindowTitle() {
+    std::wstring title = L"Chord Launch";
+    if (!m_currentProjectPath.empty()) {
+        std::filesystem::path p(m_currentProjectPath);
+        title += L" - [" + p.filename().wstring() + L"]";
+    } else {
+        title += L" - [" + ToWString(m_projectTitle) + L"]";
+    }
+    if (m_isDirty) {
+        title += L" *";
+    }
+    SetWindowTextW(m_hwnd, title.c_str());
+}
+
+void AppWindow::SetStatusMessage(const std::wstring& msg) {
+    m_statusMessage = msg;
+    m_statusMessageTime = std::chrono::steady_clock::now();
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::TriggerAutoBackup() {
+    if (!m_isDirty) return;
+    std::string data = m_partManager.SerializeProject(
+        m_projectTitle, m_selectedVoicing, m_bassOctaveMode, m_selectedGridTicks
+    );
+    if (PartManager::PerformAutoBackup(m_currentProjectPath, m_projectTitle, data)) {
+        auto now = std::chrono::system_clock::now();
+        std::time_t tt = std::chrono::system_clock::to_time_t(now);
+        std::tm tmNow;
+        localtime_s(&tmNow, &tt);
+        wchar_t timeBuf[32];
+        wcsftime(timeBuf, 32, L"%H:%M:%S", &tmNow);
+        SetStatusMessage(std::wstring(TR(L"自動バックアップ完了 (", L"Auto-backup complete (")) + timeBuf + L")");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// テンプレート管理・試聴
+// ---------------------------------------------------------------------------
+void AppWindow::OpenTemplateEditor(bool isEdit) {
+    m_tmplEditorOpen = true;
+    m_tmplIsEditingExisting = isEdit;
+    m_tmplEditFocusField = 0;
+
+    auto categories = MusicEngine::GetTemplateMajorCategories();
+    std::string curCat = (m_selectedTmplCategoryIndex < static_cast<int>(categories.size())) ? categories[m_selectedTmplCategoryIndex] : "👤 ユーザー定義";
+    auto tmpls = MusicEngine::GetTemplatesByCategory(curCat);
+
+    if (isEdit && m_selectedTmplIndex >= 0 && m_selectedTmplIndex < static_cast<int>(tmpls.size())) {
+        const auto& t = tmpls[m_selectedTmplIndex];
+        m_tmplEditId = t.id;
+        m_tmplEditName = ToWString(t.name);
+        m_tmplEditProg = ToWString(t.progression);
+        m_tmplEditDesc = ToWString(t.description);
+    } else {
+        m_tmplEditId = "user_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+        Part* pActive = m_partManager.GetActivePart();
+        std::string curProg = pActive ? pActive->rawProgressionText : "C G Am F";
+        m_tmplEditName = TR(L"新規テンプレート", L"New Template");
+        m_tmplEditProg = ToWString(curProg);
+        m_tmplEditDesc = TR(L"ユーザー作成コード進行", L"User custom progression");
+    }
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::CloseTemplateEditor() {
+    m_tmplEditorOpen = false;
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::SaveTemplateFromEditor() {
+    if (m_tmplEditName.empty()) m_tmplEditName = TR(L"無題テンプレート", L"Untitled Template");
+    if (m_tmplEditProg.empty()) m_tmplEditProg = L"C G Am F";
+
+    ProgressionTemplate pt;
+    pt.id = m_tmplEditId.empty() ? ("user_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count())) : m_tmplEditId;
+    pt.majorCategory = "👤 ユーザー定義";
+    pt.subCategory = "カスタム";
+    pt.name = ToUtf8String(m_tmplEditName);
+    pt.progression = ToUtf8String(m_tmplEditProg);
+    pt.description = ToUtf8String(m_tmplEditDesc);
+    pt.isUserCustom = true;
+
+    MusicEngine::SaveUserTemplate(pt);
+    m_tmplEditorOpen = false;
+
+    // カテゴリを「ユーザー定義」に切り替えて最新登録を表示
+    auto categories = MusicEngine::GetTemplateMajorCategories();
+    for (size_t i = 0; i < categories.size(); ++i) {
+        if (categories[i] == "👤 ユーザー定義") {
+            m_selectedTmplCategoryIndex = static_cast<int>(i);
+            m_selectedTmplIndex = 0;
+            break;
+        }
+    }
+    SetStatusMessage(std::wstring(TR(L"テンプレートを保存しました: ", L"Saved template: ")) + m_tmplEditName);
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::DeleteSelectedUserTemplate() {
+    auto categories = MusicEngine::GetTemplateMajorCategories();
+    if (m_selectedTmplCategoryIndex < 0 || m_selectedTmplCategoryIndex >= static_cast<int>(categories.size())) return;
+    std::string curCat = categories[m_selectedTmplCategoryIndex];
+    auto tmpls = MusicEngine::GetTemplatesByCategory(curCat);
+
+    if (m_selectedTmplIndex < 0 || m_selectedTmplIndex >= static_cast<int>(tmpls.size())) return;
+    const auto& t = tmpls[m_selectedTmplIndex];
+    if (!t.isUserCustom) {
+        MessageBoxW(m_hwnd, TR(L"組み込みの定番テンプレートは削除できません。", L"Built-in templates cannot be deleted."), TR(L"情報", L"Information"), MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+
+    std::wstring confirmMsg = (m_settingLanguage == 1)
+        ? (L"Delete template \"" + ToWString(t.name) + L"\"?")
+        : (L"テンプレート「" + ToWString(t.name) + L"」を削除しますか？");
+    int ret = MessageBoxW(m_hwnd, confirmMsg.c_str(), TR(L"削除確認", L"Confirm Delete"), MB_YESNO | MB_ICONQUESTION);
+    if (ret == IDYES) {
+        MusicEngine::DeleteUserTemplate(t.id);
+        m_selectedTmplIndex = std::max(0, m_selectedTmplIndex - 1);
+        SetStatusMessage(TR(L"テンプレートを削除しました", L"Deleted template"));
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+    }
+}
+
+void AppWindow::AuditionTemplate(const ProgressionTemplate& tmpl) {
+    Part* pActive = m_partManager.GetActivePart();
+    std::string key = pActive ? pActive->keyRoot : "C";
+    MusicalMode mode = pActive ? pActive->mode : MusicalMode::Major;
+
+    auto bars = ProgressionParser::Parse(tmpl.progression, key, mode);
+    if (!bars.empty()) {
+        for (const auto& b : bars) {
+            for (const auto& c : b.chords) {
+                if (!c.isRest) {
+                    AuditionChord(c);
+                    return;
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ヘルプ・オンラインドキュメント
+// ---------------------------------------------------------------------------
+void AppWindow::OpenOnlineDocumentation() {
+    ShellExecuteW(nullptr, L"open", L"https://github.com/stellorbit/ChordLaunch#readme", nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+// ---------------------------------------------------------------------------
+// ファイル操作・MIDIドラッグ
+// ---------------------------------------------------------------------------
+void AppWindow::DoFileNew() {
+    PushUndo();
+    m_partManager.ResetToDefaultSong();
+    m_currentProjectPath.clear();
+    m_projectTitle = "MyProgression";
+    m_isDirty = false;
+    SyncTimelineToText();
+    UpdateWindowTitle();
+    SetStatusMessage(TR(L"新規プロジェクトを開始しました", L"Started new project"));
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::DoFileSave() {
+    if (m_currentProjectPath.empty()) {
+        DoFileSaveAs();
+        return;
+    }
+
+    if (m_partManager.SaveToFile(
+        m_currentProjectPath, m_projectTitle,
+        m_selectedVoicing, m_bassOctaveMode, m_selectedGridTicks
+    )) {
+        m_isDirty = false;
+        UpdateWindowTitle();
+        SetStatusMessage(TR(L"プロジェクトを保存しました", L"Project saved"));
+    } else {
+        MessageBoxW(m_hwnd, TR(L"プロジェクトの保存に失敗しました。", L"Failed to save project."), TR(L"エラー", L"Error"), MB_OK | MB_ICONERROR);
+    }
+}
+
+void AppWindow::DoFileSaveAs() {
+    wchar_t szFile[MAX_PATH] = L"";
+    std::wstring initName = ToWString(m_projectTitle);
+    if (initName.empty()) initName = L"MyProgression";
+    initName += L".chord";
+    wcscpy_s(szFile, initName.c_str());
+
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = m_hwnd;
+    ofn.lpstrFilter = L"ChordLaunch Project (*.chord)\0*.chord\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFile = szFile;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+    ofn.lpstrDefExt = L"chord";
+
+    if (GetSaveFileNameW(&ofn)) {
+        m_currentProjectPath = szFile;
+        std::filesystem::path p(szFile);
+        m_projectTitle = ToUtf8String(p.stem().wstring());
+
+        if (m_partManager.SaveToFile(
+            m_currentProjectPath, m_projectTitle,
+            m_selectedVoicing, m_bassOctaveMode, m_selectedGridTicks
+        )) {
+            m_isDirty = false;
+            UpdateWindowTitle();
+            SetStatusMessage(TR(L"プロジェクトを別名で保存しました", L"Project saved as new file"));
+        } else {
+            MessageBoxW(m_hwnd, TR(L"プロジェクトの保存に失敗しました。", L"Failed to save project."), TR(L"エラー", L"Error"), MB_OK | MB_ICONERROR);
+        }
+    }
+}
+
+void AppWindow::DoFileOpen() {
+    wchar_t szFile[MAX_PATH] = L"";
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = m_hwnd;
+    ofn.lpstrFilter = L"ChordLaunch Project (*.chord)\0*.chord\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFile = szFile;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    ofn.lpstrDefExt = L"chord";
+
+    if (GetOpenFileNameW(&ofn)) {
+        std::string loadedTitle;
+        VoicingStyle loadedVoicing;
+        int loadedBassMode = 0;
+        int loadedGrid = TICKS_PER_BEAT;
+
+        if (m_partManager.LoadFromFile(szFile, loadedTitle, loadedVoicing, loadedBassMode, loadedGrid)) {
+            m_currentProjectPath = szFile;
+            m_projectTitle = loadedTitle;
+            m_selectedVoicing = loadedVoicing;
+            m_bassOctaveMode = loadedBassMode;
+            m_selectedGridTicks = loadedGrid;
+            m_isDirty = false;
+
+            SyncTimelineToText();
+            UpdateWindowTitle();
+            SetStatusMessage(std::wstring(TR(L"プロジェクトを開きました: ", L"Opened project: ")) + ToWString(m_projectTitle));
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+        } else {
+            MessageBoxW(m_hwnd, TR(L"プロジェクトファイルの読み込みに失敗しました。", L"Failed to load project file."), TR(L"エラー", L"Error"), MB_OK | MB_ICONERROR);
+        }
+    }
+}
+
+void AppWindow::DoMidiSaveAs() {
+    Part* pActive = m_partManager.GetActivePart();
+    std::vector<Bar> bars = m_isMergedView ? m_partManager.GenerateMergedProgression() : (pActive ? pActive->bars : std::vector<Bar>{});
+    if (bars.empty()) return;
+
+    wchar_t szFile[MAX_PATH] = L"progression.mid";
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = m_hwnd;
+    ofn.lpstrFilter = L"Standard MIDI File (*.mid)\0*.mid\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFile = szFile;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+    ofn.lpstrDefExt = L"mid";
+
+    if (GetSaveFileNameW(&ofn)) {
+        int bpm = pActive ? pActive->bpm : 120;
+        auto bytes = MidiBuilder::BuildMidi(bars, bpm, m_selectedVoicing, m_baseOctave, 90, m_bassOctaveMode);
+        if (!bytes.empty()) {
+            HANDLE hFile = CreateFileW(szFile, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (hFile != INVALID_HANDLE_VALUE) {
+                DWORD written = 0;
+                WriteFile(hFile, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr);
+                CloseHandle(hFile);
+                SetStatusMessage(TR(L"MIDIファイルを保存しました", L"MIDI file saved"));
+            }
+        }
+    }
+}
+
+void AppWindow::StartDawDrag() {
+    Part* pActive = m_partManager.GetActivePart();
+    std::vector<Bar> bars = m_isMergedView ? m_partManager.GenerateMergedProgression() : (pActive ? pActive->bars : std::vector<Bar>{});
+    if (bars.empty()) return;
+
+    int bpm = pActive ? pActive->bpm : 120;
+    std::wstring tempMidiPath = MidiBuilder::ExportToTempFile(bars, bpm, m_selectedVoicing, L"ChordLaunch_Progression", m_bassOctaveMode);
+    if (!tempMidiPath.empty()) {
+        OleFileDataObject::StartFileDrag(m_hwnd, tempMidiPath);
+    }
+}
+
+void AppWindow::CopyProgressionToClipboard() {
+    Part* pActive = m_partManager.GetActivePart();
+    if (!pActive) return;
+    std::wstring wtext = ToWString(pActive->rawProgressionText);
+    if (wtext.empty()) return;
+
+    if (OpenClipboard(m_hwnd)) {
+        EmptyClipboard();
+        size_t bytes = (wtext.size() + 1) * sizeof(wchar_t);
+        HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, bytes);
+        if (hMem) {
+            void* pMem = GlobalLock(hMem);
+            if (pMem) {
+                memcpy(pMem, wtext.c_str(), bytes);
+                GlobalUnlock(hMem);
+                SetClipboardData(CF_UNICODETEXT, hMem);
+            }
+        }
+        CloseClipboard();
+        SetStatusMessage(TR(L"コード進行をクリップボードにコピーしました", L"Copied progression to clipboard"));
+    }
+}
+
+void AppWindow::PasteProgressionFromClipboard() {
+    if (!OpenClipboard(m_hwnd)) return;
+    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+    if (hData) {
+        const wchar_t* pszText = static_cast<const wchar_t*>(GlobalLock(hData));
+        if (pszText) {
+            std::wstring wtext(pszText);
+            GlobalUnlock(hData);
+            Part* pActive = m_partManager.GetActivePart();
+            if (pActive && !wtext.empty()) {
+                PushUndo();
+                std::string utf8 = ToUtf8String(wtext);
+                pActive->bars = ProgressionParser::Parse(utf8, pActive->keyRoot, pActive->mode);
+                pActive->rawProgressionText = utf8;
+                SyncTimelineToText();
+                SetStatusMessage(TR(L"クリップボードからコード進行を貼り付けました", L"Pasted progression from clipboard"));
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+            }
+        }
+    }
+    CloseClipboard();
+}
+
+} // namespace clp

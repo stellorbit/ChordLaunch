@@ -14,7 +14,8 @@ public:
         int bpm = 120,
         VoicingStyle voicing = VoicingStyle::RootPosition,
         int baseOctave = 4,
-        int velocity = 90
+        int velocity = 90,
+        int bassOctaveMode = 0
     );
 
     // 一時ファイルとして .mid ファイルを書き出し、ファイルパスを返却（DAWドラッグ用）
@@ -22,7 +23,8 @@ public:
         const std::vector<Bar>& bars,
         int bpm = 120,
         VoicingStyle voicing = VoicingStyle::RootPosition,
-        const std::wstring& filenamePrefix = L"ChordLaunchpad_Progression"
+        const std::wstring& filenamePrefix = L"ChordLaunch_Progression",
+        int bassOctaveMode = 0
     );
 
 private:

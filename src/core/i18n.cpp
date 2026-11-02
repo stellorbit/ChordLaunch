@@ -16,7 +16,7 @@ struct LocPair {
 
 static const LocPair kStrings[] = {
     // AppTitle
-    LOC("Chord Launchpad", "Chord Launchpad"),
+    LOC("Chord Launch", "Chord Launch"),
     // Play
     LOC("再生 (Space)", "Play (Space)"),
     // Stop
@@ -124,6 +124,27 @@ static const LocPair kStrings[] = {
     LOC("丸サ進行 (IVmaj7 - III7 - VIm7 - I7)", "Just the Two of Us (IVmaj7 - III7 - VIm7 - I7)"),
     LOC("ポップ定番 (IV - V - IIIm - VIm)", "Standard Pop (IV - V - IIIm - VIm)"),
 
+    // Additional UI Strings
+    LOC("新規", "New"),
+    LOC("開く", "Open"),
+    LOC("保存", "Save"),
+    LOC("設定", "Settings"),
+    LOC("反映 (Ctrl+Enter)", "Apply (Ctrl+Enter)"),
+    LOC("スケール外・カスタムコード", "Custom / Non-Diatonic Builder"),
+    LOC("SUGGESTIONS (次候補)", "SUGGESTIONS"),
+    LOC("このコードを追加", "Add Chord"),
+    LOC("全クリア", "Clear All"),
+    LOC("ズーム:", "Zoom:"),
+    LOC("コード: ", "Chord: "),
+    LOC("長さ: ", "Length: "),
+    LOC("構成音: ", "Notes: "),
+    LOC("INSPECTOR:", "INSPECTOR:"),
+    LOC("★ 全体マージ (Full)", "★ Merged (Full)"),
+    LOC("+ パート", "+ Part"),
+    LOC("グリッド: ", "Grid: "),
+    LOC("拍", " beats"),
+    LOC("小節", " bars"),
+
     // Status
     LOC("準備完了", "Ready"),
     LOC("再生中", "Playing"),
@@ -140,26 +161,20 @@ Language I18n::GetLanguage() {
     return s_currentLang;
 }
 
-const std::wstring& I18n::Get(StrId id) {
-    static const std::wstring kEmpty = L"";
+std::wstring I18n::Get(StrId id) {
     size_t idx = static_cast<size_t>(id);
-    if (idx >= sizeof(kStrings) / sizeof(kStrings[0])) return kEmpty;
+    if (idx >= sizeof(kStrings) / sizeof(kStrings[0])) return L"";
 
-    static std::wstring s_cached;
     const auto& p = kStrings[idx];
-    s_cached = (s_currentLang == Language::Japanese) ? p.ja : p.en;
-    return s_cached;
+    return (s_currentLang == Language::Japanese) ? p.ja : p.en;
 }
 
-const std::string& I18n::GetUtf8(StrId id) {
-    static const std::string kEmpty = "";
+std::string I18n::GetUtf8(StrId id) {
     size_t idx = static_cast<size_t>(id);
-    if (idx >= sizeof(kStrings) / sizeof(kStrings[0])) return kEmpty;
+    if (idx >= sizeof(kStrings) / sizeof(kStrings[0])) return "";
 
-    static std::string s_cachedUtf8;
     const auto& p = kStrings[idx];
-    s_cachedUtf8 = (s_currentLang == Language::Japanese) ? p.ja_u8 : p.en_u8;
-    return s_cachedUtf8;
+    return (s_currentLang == Language::Japanese) ? p.ja_u8 : p.en_u8;
 }
 
 } // namespace clp

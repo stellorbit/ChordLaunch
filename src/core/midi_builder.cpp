@@ -40,7 +40,8 @@ std::vector<uint8_t> MidiBuilder::BuildMidi(
     int bpm,
     VoicingStyle voicing,
     int baseOctave,
-    int velocity
+    int velocity,
+    int bassOctaveMode
 ) {
     std::vector<uint8_t> midiData;
 
@@ -49,7 +50,7 @@ std::vector<uint8_t> MidiBuilder::BuildMidi(
     WriteBe32(midiData, 6);
     WriteBe16(midiData, 0);   // Format 0
     WriteBe16(midiData, 1);   // 1 track
-    WriteBe16(midiData, 480); // 480 TPQN
+    WriteBe16(midiData, static_cast<uint16_t>(TICKS_PER_BEAT)); // 480 TPQN
 
     // Track Chunk Data
     std::vector<uint8_t> trackBytes;
@@ -74,29 +75,30 @@ std::vector<uint8_t> MidiBuilder::BuildMidi(
     trackBytes.push_back(static_cast<uint8_t>((usPerQuarter >> 8) & 0xFF));
     trackBytes.push_back(static_cast<uint8_t>(usPerQuarter & 0xFF));
 
-    // 3. Track Name Meta Event ("ChordLaunchpad")
+    // 3. Track Name Meta Event ("ChordLaunch")
     WriteVariableLength(trackBytes, 0);
     trackBytes.push_back(0xFF);
     trackBytes.push_back(0x03);
-    std::string trackName = "ChordLaunchpad";
+    std::string trackName = "ChordLaunch";
     trackBytes.push_back(static_cast<uint8_t>(trackName.size()));
     trackBytes.insert(trackBytes.end(), trackName.begin(), trackName.end());
 
-    // 各小節のコードをノートイベントに変換
-    // 1拍 = 480 ticks
-    const uint32_t kTicksPerBeat = 480;
+    // 各小節のコードをノートイベントに変換 (480 ticks = 1 beat)
+    uint32_t pendingDeltaTicks = 0;
 
     for (const auto& bar : bars) {
         // セクションマーカー / 転調マーカー
         if (!bar.sectionMarker.empty()) {
-            WriteVariableLength(trackBytes, 0);
+            WriteVariableLength(trackBytes, pendingDeltaTicks);
+            pendingDeltaTicks = 0;
             trackBytes.push_back(0xFF);
             trackBytes.push_back(0x06); // Marker
             trackBytes.push_back(static_cast<uint8_t>(bar.sectionMarker.size()));
             trackBytes.insert(trackBytes.end(), bar.sectionMarker.begin(), bar.sectionMarker.end());
         }
         if (!bar.keyChange.empty()) {
-            WriteVariableLength(trackBytes, 0);
+            WriteVariableLength(trackBytes, pendingDeltaTicks);
+            pendingDeltaTicks = 0;
             trackBytes.push_back(0xFF);
             trackBytes.push_back(0x01); // Text Meta Event
             std::string text = "Key: " + bar.keyChange;
@@ -105,39 +107,35 @@ std::vector<uint8_t> MidiBuilder::BuildMidi(
         }
 
         for (const auto& chord : bar.chords) {
-            uint32_t durationTicks = chord.durationBeats * kTicksPerBeat;
-            // 休符の場合はノートを出さずにデルタタイムのみ進める
+            uint32_t durationTicks = chord.durationTicks > 0
+                ? static_cast<uint32_t>(chord.durationTicks)
+                : static_cast<uint32_t>(chord.durationBeats * TICKS_PER_BEAT);
+
+            // 休符の場合はデルタタイムを加算蓄積
             if (chord.isRest || chord.rootPitch == PitchClass::Unknown) {
-                // 無音インターバル（次イベントのデルタ時間に累積するか、ダミーイベント）
-                // 休符区間は無音
-                // 次のノートオンのデルタ時間を増やすために、ノートオフの代わりに待機
-                // Note: MIDIではノートオフと次のノートオンの間隔で表現
-                // 休符区間だけ待機するため、休符終了時に空のシーケンス
-                // ここでは次のコードの直前まで休符長さをスキップ
-                // 実装: 休符中はノートを発音せず、ノートオフ後のデルタを蓄積
-                // 簡単のため、休符時はノートイベントを出さず durationTicks を保持
-                // 次のノートオンでまとめてデルタを加算するか、ダミーコントロールチェンジ
-                WriteVariableLength(trackBytes, durationTicks);
-                trackBytes.push_back(0xB0); // CC 123 (All Notes Off dummy)
-                trackBytes.push_back(123);
-                trackBytes.push_back(0);
+                pendingDeltaTicks += durationTicks;
                 continue;
             }
 
-            auto notes = MusicEngine::GetChordMidiNotes(chord, baseOctave, voicing);
-            if (notes.empty()) continue;
+            auto notes = MusicEngine::GetChordMidiNotes(chord, baseOctave, voicing, chord.inversion, bassOctaveMode);
+            if (notes.empty()) {
+                pendingDeltaTicks += durationTicks;
+                continue;
+            }
 
-            // Note On (全ノートを同時に Note On: 最初のみデルタ 0、以降も 0)
+            // Note On (最初のノートに pendingDeltaTicks を適用)
             for (size_t ni = 0; ni < notes.size(); ++ni) {
-                WriteVariableLength(trackBytes, 0);
+                WriteVariableLength(trackBytes, (ni == 0) ? pendingDeltaTicks : 0);
                 trackBytes.push_back(0x90); // Note On Ch 1
                 trackBytes.push_back(static_cast<uint8_t>(std::clamp(notes[ni], 0, 127)));
                 trackBytes.push_back(static_cast<uint8_t>(velocity));
             }
+            pendingDeltaTicks = 0;
 
             // Note Off (ゲートタイムは 95% = durationTicks * 95 / 100)
             uint32_t gateTicks = (durationTicks * 95) / 100;
-            uint32_t restTicks = durationTicks - gateTicks;
+            if (gateTicks == 0) gateTicks = 1;
+            uint32_t restTicks = durationTicks > gateTicks ? (durationTicks - gateTicks) : 0;
 
             for (size_t ni = 0; ni < notes.size(); ++ni) {
                 WriteVariableLength(trackBytes, (ni == 0) ? gateTicks : 0);
@@ -146,18 +144,13 @@ std::vector<uint8_t> MidiBuilder::BuildMidi(
                 trackBytes.push_back(0);
             }
 
-            // 残りの余白時間
-            if (restTicks > 0) {
-                WriteVariableLength(trackBytes, restTicks);
-                trackBytes.push_back(0xB0);
-                trackBytes.push_back(123);
-                trackBytes.push_back(0);
-            }
+            // 残りの余白時間 (CC#123 を出さずに次のイベントへ繰り越し)
+            pendingDeltaTicks += restTicks;
         }
     }
 
     // End of Track Meta Event: FF 2F 00
-    WriteVariableLength(trackBytes, 0);
+    WriteVariableLength(trackBytes, pendingDeltaTicks);
     trackBytes.push_back(0xFF);
     trackBytes.push_back(0x2F);
     trackBytes.push_back(0x00);
@@ -174,9 +167,10 @@ std::wstring MidiBuilder::ExportToTempFile(
     const std::vector<Bar>& bars,
     int bpm,
     VoicingStyle voicing,
-    const std::wstring& filenamePrefix
+    const std::wstring& filenamePrefix,
+    int bassOctaveMode
 ) {
-    auto midiBytes = BuildMidi(bars, bpm, voicing);
+    auto midiBytes = BuildMidi(bars, bpm, voicing, 4, 90, bassOctaveMode);
     if (midiBytes.empty()) return L"";
 
     wchar_t tempPath[MAX_PATH];

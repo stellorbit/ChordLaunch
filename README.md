@@ -1,4 +1,4 @@
-# ChordLaunchpad
+# ChordLaunch
 
 Windows 向け超軽量・高速コード進行演奏・音楽理論支援デスクトップアプリケーション。
 

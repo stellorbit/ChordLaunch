@@ -1,0 +1,1167 @@
+#include "app_window_internal.hpp"
+namespace clp {
+void AppWindow::OnLButtonDown(float x, float y) {
+    SetFocus(m_hwnd);
+
+    if (OnModalClick(x, y)) return;
+
+    // ---------------- 1. 上部ツールバー (2段構成) ----------------
+    if (y >= 0 && y <= m_toolbarHeight) {
+        // --- 上段 (y = 0 〜 38px) ---
+        if (y <= 38.0f) {
+            float r1Y = 4.0f;
+            float r1H = 28.0f;
+            float curX = 12.0f;
+
+            if (PtInRectF(D2D1::RectF(curX, r1Y, curX + 74.0f, r1Y + r1H), x, y)) {
+                TogglePlayback();
+                return;
+            }
+            curX += 78.0f;
+
+            if (PtInRectF(D2D1::RectF(curX, r1Y, curX + 58.0f, r1Y + r1H), x, y)) {
+                StopPlayback();
+                return;
+            }
+            curX += 62.0f;
+
+            if (PtInRectF(D2D1::RectF(curX, r1Y, curX + 66.0f, r1Y + r1H), x, y)) {
+                m_isLooping = !m_isLooping;
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return;
+            }
+
+            // 右側ボタン群
+            float rightCurX = m_width - 12.0f;
+
+            rightCurX -= 34.0f;
+            if (PtInRectF(D2D1::RectF(rightCurX, r1Y, rightCurX + 32.0f, r1Y + r1H), x, y)) {
+                OpenModal(ModalType::Settings);
+                return;
+            }
+
+            rightCurX -= 34.0f;
+            if (PtInRectF(D2D1::RectF(rightCurX, r1Y, rightCurX + 32.0f, r1Y + r1H), x, y)) {
+                OpenModal(ModalType::Help);
+                return;
+            }
+
+            rightCurX -= 110.0f;
+            if (PtInRectF(D2D1::RectF(rightCurX, r1Y, rightCurX + 104.0f, r1Y + r1H), x, y)) {
+                OpenModal(ModalType::Templates);
+                return;
+            }
+
+            rightCurX -= 130.0f;
+            if (PtInRectF(D2D1::RectF(rightCurX, r1Y, rightCurX + 124.0f, r1Y + r1H), x, y)) {
+                StartDawDrag();
+                return;
+            }
+
+            rightCurX -= 95.0f;
+            if (PtInRectF(D2D1::RectF(rightCurX, r1Y, rightCurX + 88.0f, r1Y + r1H), x, y)) {
+                DoMidiSaveAs();
+                return;
+            }
+            return;
+        }
+
+        // --- 下段 (y = 38 〜 74px): キー, スケール, BPM, TAP, ボイシング, ベース, グリッド ---
+        float r2Y = 38.0f;
+        float r2H = 28.0f;
+        float curX = 12.0f;
+
+        POINT pt = { static_cast<LONG>(x), static_cast<LONG>(r2Y + r2H) };
+        ClientToScreen(m_hwnd, &pt);
+
+        // キー (プルダウン)
+        if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 78.0f, r2Y + r2H), x, y)) {
+            POINT btnPt = { static_cast<LONG>(curX), static_cast<LONG>(r2Y + r2H) };
+            ClientToScreen(m_hwnd, &btnPt);
+            ShowKeyMenu(static_cast<float>(btnPt.x), static_cast<float>(btnPt.y));
+            return;
+        }
+        curX += 82.0f;
+
+        // スケール (プルダウン)
+        if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 115.0f, r2Y + r2H), x, y)) {
+            POINT btnPt = { static_cast<LONG>(curX), static_cast<LONG>(r2Y + r2H) };
+            ClientToScreen(m_hwnd, &btnPt);
+            ShowScaleMenu(static_cast<float>(btnPt.x), static_cast<float>(btnPt.y));
+            return;
+        }
+        curX += 120.0f + 10.0f + 34.0f + 42.0f; // BPMラベル+値の分
+
+        // BPM 上下スピンボタン
+        bool isShift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        int step = isShift ? 5 : 1;
+
+        if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 18.0f, r2Y + r2H * 0.5f - 1.0f), x, y)) {
+            Part* pActive = m_partManager.GetActivePart();
+            if (pActive) {
+                pActive->bpm = std::min(280, pActive->bpm + step);
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+            }
+            return;
+        }
+        if (PtInRectF(D2D1::RectF(curX, r2Y + r2H * 0.5f + 1.0f, curX + 18.0f, r2Y + r2H), x, y)) {
+            Part* pActive = m_partManager.GetActivePart();
+            if (pActive) {
+                pActive->bpm = std::max(40, pActive->bpm - step);
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+            }
+            return;
+        }
+        curX += 24.0f;
+
+        // TAP テンポ (モーダル起動)
+        if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 54.0f, r2Y + r2H), x, y)) {
+            OpenModal(ModalType::TapTempo);
+            HandleTapTempo();
+            return;
+        }
+        curX += 62.0f + 10.0f;
+
+        // 音色 (プルダウン)
+        if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 126.0f, r2Y + r2H), x, y)) {
+            POINT btnPt = { static_cast<LONG>(curX), static_cast<LONG>(r2Y + r2H) };
+            ClientToScreen(m_hwnd, &btnPt);
+            ShowPresetMenu(static_cast<float>(btnPt.x), static_cast<float>(btnPt.y));
+            return;
+        }
+        curX += 130.0f;
+
+        // ボイシング (プルダウン)
+        if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 125.0f, r2Y + r2H), x, y)) {
+            POINT btnPt = { static_cast<LONG>(curX), static_cast<LONG>(r2Y + r2H) };
+            ClientToScreen(m_hwnd, &btnPt);
+            ShowVoicingMenu(static_cast<float>(btnPt.x), static_cast<float>(btnPt.y));
+            return;
+        }
+        curX += 129.0f;
+
+        // ベース (プルダウン)
+        if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 115.0f, r2Y + r2H), x, y)) {
+            POINT btnPt = { static_cast<LONG>(curX), static_cast<LONG>(r2Y + r2H) };
+            ClientToScreen(m_hwnd, &btnPt);
+            ShowBassMenu(static_cast<float>(btnPt.x), static_cast<float>(btnPt.y));
+            return;
+        }
+        curX += 119.0f;
+
+        // グリッド (プルダウン)
+        if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 110.0f, r2Y + r2H), x, y)) {
+            POINT btnPt = { static_cast<LONG>(curX), static_cast<LONG>(r2Y + r2H) };
+            ClientToScreen(m_hwnd, &btnPt);
+            ShowGridMenu(static_cast<float>(btnPt.x), static_cast<float>(btnPt.y));
+            return;
+        }
+        return;
+    }
+
+    // ---------------- 2. 左ペイン ----------------
+    float mainY = m_toolbarHeight;
+    if (x >= 0 && x <= m_leftPaneWidth && y > mainY && y < m_height - 22.0f) {
+        float curY = mainY + 5.0f + 18.0f + 54.0f;
+        float pad = 16.0f;
+        float innerW = m_leftPaneWidth - pad * 2.0f;
+
+        // 反映ボタン
+        if (PtInRectF(D2D1::RectF(pad, curY, pad + innerW, curY + 24.0f), x, y)) {
+            SyncTextToTimeline();
+            return;
+        }
+        curY += 28.0f + 4.0f + 17.0f;
+
+        // ダイアトニック 5タブ (3和音 / 7th / sus4 / add9 / 分数)
+        float tabBtnW = (innerW - 4.0f * 3.0f) / 5.0f;
+        for (int t = 0; t < 5; ++t) {
+            float tx = pad + t * (tabBtnW + 3.0f);
+            if (PtInRectF(D2D1::RectF(tx, curY, tx + tabBtnW, curY + 21.0f), x, y)) {
+                m_diatonicChordTypeTab = t;
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return;
+            }
+        }
+        curY += 24.0f;
+
+        // ダイアトニックカード
+        Part* pActive = m_partManager.GetActivePart();
+        std::string keyRoot = pActive ? pActive->keyRoot : "C";
+        MusicalMode mode = pActive ? pActive->mode : MusicalMode::Major;
+        auto diatonicChords = MusicEngine::GetDiatonicChordsByTab(keyRoot, mode, m_diatonicChordTypeTab % 5);
+        float cardW = (innerW - 3.0f * 6.0f) / 4.0f;
+        float cardH = 38.0f;
+
+        for (size_t i = 0; i < 8; ++i) {
+            float cx = pad + (i % 4) * (cardW + 6.0f);
+            float cy = curY + (i / 4) * (cardH + 4.0f);
+            if (PtInRectF(D2D1::RectF(cx, cy, cx + cardW, cy + cardH), x, y)) {
+                ChordToken newChord;
+                if (i < 7 && i < diatonicChords.size()) {
+                    newChord = diatonicChords[i];
+                } else {
+                    newChord.isRest = true;
+                    newChord.rootName = "R";
+                    newChord.degreeRoman = "R";
+                }
+                newChord.durationTicks = m_selectedGridTicks;
+                newChord.durationBeats = std::max(1, (m_selectedGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
+
+                AuditionChord(newChord);
+                m_dragMode = DragMode::PaletteCardDrag;
+                m_dragPaletteChord = newChord;
+                m_dragStartX = x;
+                m_dragStartY = y;
+                m_dragCurrentX = x;
+                m_dragCurrentY = y;
+                m_isPaletteDragging = false;
+                SetCapture(m_hwnd);
+                return;
+            }
+        }
+        curY += (cardH * 2.0f + 4.0f) + 6.0f + 4.0f;
+
+        // カスタムコードビルダー格納・展開ヘッダー
+        if (PtInRectF(D2D1::RectF(pad, curY, pad + innerW, curY + 19.0f), x, y)) {
+            m_accCustomBuilderOpen = !m_accCustomBuilderOpen;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        }
+        curY += 22.0f;
+
+        if (!m_accCustomBuilderOpen) return;
+
+        // ルート音選択
+        const char* roots[] = { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
+        float rBtnW = (innerW - 5.0f * 4.0f) / 6.0f;
+        float rBtnH = 20.0f;
+        for (int i = 0; i < 12; ++i) {
+            float rx = pad + (i % 6) * (rBtnW + 4.0f);
+            float ry = curY + (i / 6) * (rBtnH + 3.0f);
+            if (PtInRectF(D2D1::RectF(rx, ry, rx + rBtnW, ry + rBtnH), x, y)) {
+                m_customRoot = MusicEngine::NoteToPitch(roots[i]);
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return;
+            }
+        }
+        curY += (rBtnH * 2.0f + 3.0f) + 4.0f;
+
+        // サフィックス選択 (選択中コードカードのクイック変換にも対応)
+        const char* suffixes[] = { "", "m", "7", "Maj7", "m7", "m7b5", "dim7", "sus4" };
+        float sBtnW = (innerW - 3.0f * 4.0f) / 4.0f;
+        float sBtnH = 20.0f;
+        for (int i = 0; i < 8; ++i) {
+            float sx = pad + (i % 4) * (sBtnW + 4.0f);
+            float sy = curY + (i / 4) * (sBtnH + 3.0f);
+            if (PtInRectF(D2D1::RectF(sx, sy, sx + sBtnW, sy + sBtnH), x, y)) {
+                m_customSuffix = suffixes[i];
+                if (!m_isMergedView && pActive && m_selectedBarIndex >= 0 && m_selectedBarIndex < static_cast<int>(pActive->bars.size())) {
+                    auto& bar = pActive->bars[m_selectedBarIndex];
+                    if (m_selectedChordIndex >= 0 && m_selectedChordIndex < static_cast<int>(bar.chords.size())) {
+                        auto& selC = bar.chords[m_selectedChordIndex];
+                        if (!selC.isRest && !selC.rootName.empty()) {
+                            PushUndo();
+                            std::string newSym = selC.rootName + m_customSuffix;
+                            if (!selC.bassName.empty()) newSym += "/" + selC.bassName;
+                            ChordToken updated = MusicEngine::ParseChordSymbol(newSym, keyRoot, mode);
+                            updated.durationTicks = selC.durationTicks;
+                            updated.durationBeats = selC.durationBeats;
+                            updated.inversion = selC.inversion;
+                            selC = updated;
+                            SyncTimelineToText();
+                            AuditionChord(selC);
+                        }
+                    }
+                }
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return;
+            }
+        }
+        curY += (sBtnH * 2.0f + 3.0f) + 4.0f;
+
+        // テンション選択
+        const int8_t tensVals[] = { 0, 9, -9, 99, 11, 13 };
+        float tBtnW = (innerW - 5.0f * 4.0f) / 6.0f;
+        float tBtnH = 20.0f;
+        for (int i = 0; i < 6; ++i) {
+            float tx = pad + i * (tBtnW + 4.0f);
+            if (PtInRectF(D2D1::RectF(tx, curY, tx + tBtnW, curY + tBtnH), x, y)) {
+                m_customTension = tensVals[i];
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return;
+            }
+        }
+        curY += tBtnH + 4.0f;
+
+        // ベース音選択 (選択中コードカードのクイック分数コード変換にも対応)
+        const char* bassNotes[] = { "", "C", "D", "E", "F", "G", "A", "B" };
+        float bBtnW = (innerW - 3.0f * 4.0f) / 4.0f;
+        float bBtnH = 19.0f;
+        for (int i = 0; i < 8; ++i) {
+            float bx = pad + (i % 4) * (bBtnW + 4.0f);
+            float by = curY + (i / 4) * (bBtnH + 3.0f);
+            if (PtInRectF(D2D1::RectF(bx, by, bx + bBtnW, by + bBtnH), x, y)) {
+                m_customBass = (i == 0) ? PitchClass::Unknown : MusicEngine::NoteToPitch(bassNotes[i]);
+                if (!m_isMergedView && pActive && m_selectedBarIndex >= 0 && m_selectedBarIndex < static_cast<int>(pActive->bars.size())) {
+                    auto& bar = pActive->bars[m_selectedBarIndex];
+                    if (m_selectedChordIndex >= 0 && m_selectedChordIndex < static_cast<int>(bar.chords.size())) {
+                        auto& selC = bar.chords[m_selectedChordIndex];
+                        if (!selC.isRest && !selC.rootName.empty()) {
+                            PushUndo();
+                            std::string newSym = selC.rootName + selC.qualitySuffix;
+                            if (m_customBass != PitchClass::Unknown && m_customBass != selC.rootPitch) {
+                                newSym += "/" + std::string(bassNotes[i]);
+                            }
+                            ChordToken updated = MusicEngine::ParseChordSymbol(newSym, keyRoot, mode);
+                            updated.durationTicks = selC.durationTicks;
+                            updated.durationBeats = selC.durationBeats;
+                            updated.inversion = selC.inversion;
+                            selC = updated;
+                            SyncTimelineToText();
+                            AuditionChord(selC);
+                        }
+                    }
+                }
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return;
+            }
+        }
+        curY += (bBtnH * 2.0f + 3.0f) + 5.0f;
+
+        // プレビューカードクリックで試聴
+        if (PtInRectF(D2D1::RectF(pad, curY, pad + 70.0f, curY + 26.0f), x, y)) {
+            std::string sym = MusicEngine::PitchToNote(m_customRoot) + m_customSuffix;
+            if (m_customBass != PitchClass::Unknown) sym += "/" + MusicEngine::PitchToNote(m_customBass);
+            ChordToken c = MusicEngine::ParseChordSymbol(sym, keyRoot, mode);
+            if (m_customTension != 0) c.tensions.push_back(m_customTension);
+            AuditionChord(c);
+            return;
+        }
+
+        // 追加ボタン
+        if (PtInRectF(D2D1::RectF(pad + 76.0f, curY, pad + innerW, curY + 26.0f), x, y)) {
+            std::string sym = MusicEngine::PitchToNote(m_customRoot) + m_customSuffix;
+            if (m_customTension != 0) {
+                if (m_customTension == 9) sym += "(9)";
+                else if (m_customTension == -9) sym += "(b9)";
+                else if (m_customTension == 99) sym += "(#9)";
+                else if (m_customTension == 11) sym += "(11)";
+                else if (m_customTension == 13) sym += "(13)";
+            }
+            if (m_customBass != PitchClass::Unknown) sym += "/" + MusicEngine::PitchToNote(m_customBass);
+            ChordToken c = MusicEngine::ParseChordSymbol(sym, keyRoot, mode);
+            c.durationTicks = m_selectedGridTicks;
+            c.durationBeats = std::max(1, (m_selectedGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
+
+            AuditionChord(c);
+            AppendChordToTimeline(c);
+            return;
+        }
+        return;
+    }
+
+    // ---------------- 3. 中央ペイン ----------------
+    float rightW = m_showRightPane ? m_rightPaneWidth : 0.0f;
+    float centerX = m_leftPaneWidth;
+    float centerW = m_width - rightW - centerX;
+
+    if (x >= centerX && x <= centerX + centerW) {
+        // パートタブバー
+        if (y >= mainY && y <= mainY + m_partTabHeight) {
+            if (!m_showRightPane && PtInRectF(D2D1::RectF(centerX + centerW - 108.0f, mainY + 3.0f, centerX + centerW - 8.0f, mainY + m_partTabHeight - 3.0f), x, y)) {
+                m_showRightPane = true;
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return;
+            }
+
+            const auto& parts = m_partManager.GetParts();
+            float rightReserve = m_showRightPane ? 8.0f : 114.0f;
+            float availTotalW = std::max(200.0f, centerW - 8.0f - rightReserve);
+            size_t totalTabs = 1 + parts.size();
+            bool compactAdd = (availTotalW < totalTabs * 86.0f + 68.0f);
+            float addBtnW = compactAdd ? 32.0f : 66.0f;
+            float availTabsW = std::max(120.0f, availTotalW - addBtnW - 6.0f);
+            float pTabW = std::clamp((availTabsW - static_cast<float>(totalTabs) * 3.0f) / static_cast<float>(totalTabs), 24.0f, 96.0f);
+            float fullTabW = pTabW;
+
+            float curX = centerX + 8.0f;
+            float tabH = m_partTabHeight - 3.0f;
+            float ty = mainY + 3.0f;
+
+            if (PtInRectF(D2D1::RectF(curX, ty, curX + fullTabW, ty + tabH), x, y)) {
+                m_isMergedView = true;
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return;
+            }
+            curX += fullTabW + 3.0f;
+
+            for (size_t i = 0; i < parts.size(); ++i) {
+                if (PtInRectF(D2D1::RectF(curX, ty, curX + pTabW, ty + tabH), x, y)) {
+                    m_isMergedView = false;
+                    m_partManager.SetActiveIndex(static_cast<int>(i));
+                    SyncTimelineToText();
+                    InvalidateRect(m_hwnd, nullptr, FALSE);
+                    return;
+                }
+                curX += pTabW + 3.0f;
+            }
+
+            curX += 2.0f;
+            if (PtInRectF(D2D1::RectF(curX, ty, curX + addBtnW, mainY + m_partTabHeight - 3.0f), x, y)) {
+                PushUndo();
+                m_isMergedView = false;
+                m_partManager.AddPart("New Part");
+                SyncTimelineToText();
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return;
+            }
+            return;
+        }
+
+        // 下部ドック (鍵盤試聴 ＆ 鍵盤切替 ＆ ズームボタン)
+        float curDockH = m_showKeyboard ? m_bottomDockHeight : 28.0f;
+        float dockY = m_height - curDockH;
+        if (y >= dockY && y <= m_height) {
+            if (m_showKeyboard) {
+                float kbWidth = std::min(360.0f, centerW * 0.45f);
+                float kbX = centerX + 12.0f;
+                float kbY = dockY + 6.0f;
+                float kbH = curDockH - 12.0f;
+                if (PtInRectF(D2D1::RectF(kbX, kbY, kbX + kbWidth - 24.0f, kbY + kbH), x, y)) {
+                    int startNote = 48;
+                    int numWhiteKeys = 21;
+                    float whiteKeyW = (kbWidth - 24.0f) / numWhiteKeys;
+                    float blackKeyW = whiteKeyW * 0.65f;
+                    float blackKeyH = kbH * 0.60f;
+                    int curWhite = 0;
+                    int clickedNote = -1;
+                    for (int n = startNote; curWhite < numWhiteKeys; ++n) {
+                        int ni = n % 12;
+                        bool isBlack = (ni == 1 || ni == 3 || ni == 6 || ni == 8 || ni == 10);
+                        if (isBlack) {
+                            float bx = kbX + curWhite * whiteKeyW - blackKeyW * 0.5f;
+                            if (PtInRectF(D2D1::RectF(bx, kbY, bx + blackKeyW, kbY + blackKeyH), x, y)) {
+                                clickedNote = n;
+                                break;
+                            }
+                        } else {
+                            curWhite++;
+                        }
+                    }
+                    if (clickedNote < 0) {
+                        curWhite = 0;
+                        for (int n = startNote; curWhite < numWhiteKeys; ++n) {
+                            int ni = n % 12;
+                            bool isBlack = (ni == 1 || ni == 3 || ni == 6 || ni == 8 || ni == 10);
+                            if (!isBlack) {
+                                float wx = kbX + curWhite * whiteKeyW;
+                                if (PtInRectF(D2D1::RectF(wx, kbY, wx + whiteKeyW, kbY + kbH), x, y)) {
+                                    clickedNote = n;
+                                    break;
+                                }
+                                curWhite++;
+                            }
+                        }
+                    }
+                    if (clickedNote >= 0) {
+                        m_synth.PlayChord({ clickedNote });
+                    }
+                    return;
+                }
+            }
+
+            float ctrlY = dockY + (curDockH - 22.0f) * 0.5f;
+            float kbToggleX = centerX + centerW - 124.0f;
+            if (PtInRectF(D2D1::RectF(kbToggleX, ctrlY, kbToggleX + 32.0f, ctrlY + 22.0f), x, y)) {
+                m_showKeyboard = !m_showKeyboard;
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return;
+            }
+
+            float zoomX = centerX + centerW - 84.0f;
+            if (PtInRectF(D2D1::RectF(zoomX + 22.0f, ctrlY, zoomX + 46.0f, ctrlY + 22.0f), x, y)) {
+                m_pixelsPerBeat = std::max(24.0f, m_pixelsPerBeat - 8.0f);
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return;
+            }
+            if (PtInRectF(D2D1::RectF(zoomX + 50.0f, ctrlY, zoomX + 74.0f, ctrlY + 22.0f), x, y)) {
+                m_pixelsPerBeat = std::min(140.0f, m_pixelsPerBeat + 8.0f);
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return;
+            }
+            return;
+        }
+
+        // スクロールバー操作
+        float scrollY = dockY - m_scrollBarHeight;
+        if (y >= scrollY && y < dockY) {
+            m_dragMode = DragMode::ScrollBarThumb;
+            m_dragStartX = x;
+            SetCapture(m_hwnd);
+            OnMouseMove(x, y);
+            return;
+        }
+
+        // コードカードトラック
+        float cardY = mainY + m_partTabHeight + m_rulerHeight + 5.0f;
+        float cardH = m_cardTrackHeight - 10.0f;
+
+        if (y >= cardY && y <= cardY + cardH) {
+            Part* pActive = m_partManager.GetActivePart();
+            std::vector<Bar> mergedBars;
+            if (m_isMergedView) mergedBars = m_partManager.GenerateMergedProgression();
+            std::vector<Bar>& bars = m_isMergedView ? mergedBars : (pActive ? pActive->bars : mergedBars);
+            float barWidth = m_pixelsPerBeat * 4.0f;
+
+            for (size_t b = 0; b < bars.size(); ++b) {
+                float bx = centerX + b * barWidth - m_timelineScrollX;
+                int barTicks = bars[b].GetTotalTicks();
+                if (barTicks <= 0) barTicks = TICKS_PER_BAR_4_4;
+
+                float offsetTicks = 0.0f;
+
+                for (size_t ci = 0; ci < bars[b].chords.size(); ++ci) {
+                    const auto& chord = bars[b].chords[ci];
+                    int cTicks = chord.durationTicks > 0 ? chord.durationTicks : (chord.durationBeats * TICKS_PER_BEAT);
+                    float cx = bx + (offsetTicks / barTicks) * barWidth;
+                    float cw = (static_cast<float>(cTicks) / barTicks) * barWidth;
+                    offsetTicks += cTicks;
+
+                    D2D1_RECT_F cardRc = D2D1::RectF(cx + 2.0f, cardY, cx + cw - 2.0f, cardY + cardH);
+
+                    if (PtInRectF(cardRc, x, y)) {
+                        D2D1_RECT_F closeRc = D2D1::RectF(cardRc.right - 16.0f, cardRc.top + 2.0f, cardRc.right - 2.0f, cardRc.top + 16.0f);
+                        if (!m_isMergedView && PtInRectF(closeRc, x, y)) {
+                            PushUndo();
+                            bars[b].chords.erase(bars[b].chords.begin() + ci);
+                            if (bars[b].chords.empty() && bars.size() > 1) {
+                                bars.erase(bars.begin() + b);
+                            }
+                            m_selectedBarIndex = -1;
+                            m_selectedChordIndex = -1;
+                            SyncTimelineToText();
+                            InvalidateRect(m_hwnd, nullptr, FALSE);
+                            return;
+                        }
+
+                        SelectChord(static_cast<int>(b), static_cast<int>(ci));
+                        AuditionChord(chord);
+
+                        if (!m_isMergedView) {
+                            PushUndo();
+                            if (x >= cardRc.right - 6.0f) {
+                                m_dragMode = DragMode::CardResizeRight;
+                                m_dragBarIndex = static_cast<int>(b);
+                                m_dragChordIndex = static_cast<int>(ci);
+                                m_dragStartX = x;
+                                m_dragInitialTicks = cTicks;
+                                SetCapture(m_hwnd);
+                                return;
+                            }
+
+                            if (x <= cardRc.left + 6.0f) {
+                                m_dragMode = DragMode::CardResizeLeft;
+                                m_dragBarIndex = static_cast<int>(b);
+                                m_dragChordIndex = static_cast<int>(ci);
+                                m_dragStartX = x;
+                                m_dragInitialTicks = cTicks;
+                                SetCapture(m_hwnd);
+                                return;
+                            }
+
+                            m_dragMode = DragMode::CardMove;
+                            m_dragBarIndex = static_cast<int>(b);
+                            m_dragChordIndex = static_cast<int>(ci);
+                            m_dragStartX = x;
+                            SetCapture(m_hwnd);
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    // ---------------- 4. 右ペイン ----------------
+    if (x >= m_width - rightW && m_showRightPane) {
+        float pad = 12.0f;
+        float innerW = rightW - pad * 2.0f;
+        bool use7th = ((m_diatonicChordTypeTab % 5) == 1) || (m_diatonicChordTypeTab >= 5);
+
+        // 右ペイン 3和音 / 7th 切り替え ＆ 格納ボタン
+        if (PtInRectF(D2D1::RectF(m_width - pad - 122.0f, mainY + 5.0f, m_width - pad - 90.0f, mainY + 25.0f), x, y)) {
+            int baseTab = m_diatonicChordTypeTab % 5;
+            m_diatonicChordTypeTab = (baseTab == 1) ? 0 : baseTab;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        }
+        if (PtInRectF(D2D1::RectF(m_width - pad - 88.0f, mainY + 5.0f, m_width - pad - 58.0f, mainY + 25.0f), x, y)) {
+            int baseTab = m_diatonicChordTypeTab % 5;
+            m_diatonicChordTypeTab = (baseTab == 0) ? 1 : (baseTab + 5);
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        }
+        if (PtInRectF(D2D1::RectF(m_width - pad - 52.0f, mainY + 5.0f, m_width - pad, mainY + 25.0f), x, y)) {
+            m_showRightPane = false;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        }
+
+        float curY = mainY + 6.0f + 22.0f;
+
+        if (PtInRectF(D2D1::RectF(m_width - rightW + pad, curY, m_width - pad, curY + 21.0f), x, y)) {
+            m_accSuggestionsOpen = !m_accSuggestionsOpen;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        }
+        curY += 24.0f;
+
+        if (m_accSuggestionsOpen) {
+            Part* pActive = m_partManager.GetActivePart();
+            ChordToken lastChord;
+            if (m_selectedBarIndex >= 0 && pActive && m_selectedBarIndex < static_cast<int>(pActive->bars.size())) {
+                const auto& bar = pActive->bars[m_selectedBarIndex];
+                if (m_selectedChordIndex >= 0 && m_selectedChordIndex < static_cast<int>(bar.chords.size())) {
+                    lastChord = bar.chords[m_selectedChordIndex];
+                }
+            }
+            std::string keyRoot = pActive ? pActive->keyRoot : "C";
+            MusicalMode mode = pActive ? pActive->mode : MusicalMode::Major;
+            std::vector<ChordToken> lastChords;
+            if (!lastChord.rawText.empty()) lastChords.push_back(lastChord);
+            auto suggestions = MusicEngine::GetSuggestions(lastChords, keyRoot, mode, use7th);
+            float sCardW = (innerW - 3.0f * 4.0f) / 4.0f;
+            float sCardH = 38.0f;
+
+            for (size_t i = 0; i < std::min<size_t>(suggestions.size(), 4); ++i) {
+                float cx = m_width - rightW + pad + i * (sCardW + 4.0f);
+                if (PtInRectF(D2D1::RectF(cx, curY, cx + sCardW, curY + sCardH), x, y)) {
+                    ChordToken c = suggestions[i];
+                    c.durationTicks = m_selectedGridTicks;
+                    c.durationBeats = std::max(1, (m_selectedGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
+                    AuditionChord(c);
+                    m_dragMode = DragMode::PaletteCardDrag;
+                    m_dragPaletteChord = c;
+                    m_dragStartX = x;
+                    m_dragStartY = y;
+                    m_dragCurrentX = x;
+                    m_dragCurrentY = y;
+                    m_isPaletteDragging = false;
+                    SetCapture(m_hwnd);
+                    return;
+                }
+            }
+            curY += sCardH + 7.0f;
+        }
+
+        if (PtInRectF(D2D1::RectF(m_width - rightW + pad, curY, m_width - pad, curY + 21.0f), x, y)) {
+            m_accBorrowOpen = !m_accBorrowOpen;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        }
+        curY += 24.0f;
+
+        if (m_accBorrowOpen) {
+            Part* pActive = m_partManager.GetActivePart();
+            std::string keyRoot = pActive ? pActive->keyRoot : "C";
+            MusicalMode mode = pActive ? pActive->mode : MusicalMode::Major;
+            auto borrowChords = MusicEngine::GetModalInterchangeChords(keyRoot, mode, use7th);
+            float bCardW = (innerW - 2.0f * 4.0f) / 3.0f;
+            float bCardH = 38.0f;
+
+            for (size_t i = 0; i < std::min<size_t>(borrowChords.size(), 6); ++i) {
+                float cx = m_width - rightW + pad + (i % 3) * (bCardW + 4.0f);
+                float cy = curY + (i / 3) * (bCardH + 4.0f);
+                if (PtInRectF(D2D1::RectF(cx, cy, cx + bCardW, cy + bCardH), x, y)) {
+                    ChordToken c = borrowChords[i];
+                    c.durationTicks = m_selectedGridTicks;
+                    c.durationBeats = std::max(1, (m_selectedGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
+                    AuditionChord(c);
+                    m_dragMode = DragMode::PaletteCardDrag;
+                    m_dragPaletteChord = c;
+                    m_dragStartX = x;
+                    m_dragStartY = y;
+                    m_dragCurrentX = x;
+                    m_dragCurrentY = y;
+                    m_isPaletteDragging = false;
+                    SetCapture(m_hwnd);
+                    return;
+                }
+            }
+            curY += (bCardH * 2.0f + 4.0f) + 7.0f;
+        }
+
+        if (PtInRectF(D2D1::RectF(m_width - rightW + pad, curY, m_width - pad, curY + 21.0f), x, y)) {
+            m_accSecondaryOpen = !m_accSecondaryOpen;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        }
+        curY += 24.0f;
+
+        if (m_accSecondaryOpen) {
+            Part* pActive = m_partManager.GetActivePart();
+            std::string keyRoot = pActive ? pActive->keyRoot : "C";
+            MusicalMode mode = pActive ? pActive->mode : MusicalMode::Major;
+            auto secChords = MusicEngine::GetSecondaryDominants(keyRoot, mode);
+            float scCardW = (innerW - 2.0f * 4.0f) / 3.0f;
+            float scCardH = 38.0f;
+
+            for (size_t i = 0; i < std::min<size_t>(secChords.size(), 5); ++i) {
+                float cx = m_width - rightW + pad + (i % 3) * (scCardW + 4.0f);
+                float cy = curY + (i / 3) * (scCardH + 4.0f);
+                if (PtInRectF(D2D1::RectF(cx, cy, cx + scCardW, cy + scCardH), x, y)) {
+                    ChordToken c = secChords[i];
+                    c.durationTicks = m_selectedGridTicks;
+                    c.durationBeats = std::max(1, (m_selectedGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
+                    AuditionChord(c);
+                    m_dragMode = DragMode::PaletteCardDrag;
+                    m_dragPaletteChord = c;
+                    m_dragStartX = x;
+                    m_dragStartY = y;
+                    m_dragCurrentX = x;
+                    m_dragCurrentY = y;
+                    m_isPaletteDragging = false;
+                    SetCapture(m_hwnd);
+                    return;
+                }
+            }
+            curY += (scCardH * 2.0f + 4.0f) + 7.0f;
+        }
+
+        if (PtInRectF(D2D1::RectF(m_width - rightW + pad, curY, m_width - pad, curY + 21.0f), x, y)) {
+            m_accTemplatesOpen = !m_accTemplatesOpen;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        }
+        curY += 24.0f;
+
+        if (m_accTemplatesOpen) {
+            const auto& templates = MusicEngine::GetAllGenreTemplates();
+            float tplH = 22.0f;
+
+            for (size_t i = 0; i < std::min<size_t>(templates.size(), 6); ++i) {
+                if (PtInRectF(D2D1::RectF(m_width - rightW + pad, curY, m_width - pad, curY + tplH), x, y)) {
+                    Part* pActive = m_partManager.GetActivePart();
+                    if (pActive) {
+                        PushUndo();
+                        m_isMergedView = false;
+                        pActive->bars = ProgressionParser::Parse(templates[i].progression, pActive->keyRoot, pActive->mode);
+                        SyncTimelineToText();
+                        InvalidateRect(m_hwnd, nullptr, FALSE);
+                    }
+                    return;
+                }
+                curY += tplH + 3.0f;
+            }
+        }
+    }
+}
+
+bool AppWindow::HitTestPaletteCard(float x, float y, ChordToken& outChord) {
+    float mainY = m_toolbarHeight;
+    Part* pActive = m_partManager.GetActivePart();
+    std::string keyRoot = pActive ? pActive->keyRoot : "C";
+    MusicalMode mode = pActive ? pActive->mode : MusicalMode::Major;
+
+    // 左ペイン: ダイアトニックコード
+    if (x >= 0.0f && x <= m_leftPaneWidth && y > mainY && y < m_height - 22.0f) {
+        float curY = mainY + 5.0f + 18.0f + 54.0f + 28.0f + 4.0f + 17.0f + 24.0f;
+        float pad = 16.0f;
+        float innerW = m_leftPaneWidth - pad * 2.0f;
+        auto diatonicChords = MusicEngine::GetDiatonicChordsByTab(keyRoot, mode, m_diatonicChordTypeTab % 5);
+        float cardW = (innerW - 3.0f * 6.0f) / 4.0f;
+        float cardH = 38.0f;
+
+        for (size_t i = 0; i < 8; ++i) {
+            float cx = pad + (i % 4) * (cardW + 6.0f);
+            float cy = curY + (i / 4) * (cardH + 4.0f);
+            if (PtInRectF(D2D1::RectF(cx, cy, cx + cardW, cy + cardH), x, y)) {
+                if (i < 7 && i < diatonicChords.size()) {
+                    outChord = diatonicChords[i];
+                } else {
+                    outChord = ChordToken{};
+                    outChord.isRest = true;
+                    outChord.rootName = "R";
+                    outChord.degreeRoman = "R";
+                }
+                outChord.durationTicks = m_selectedGridTicks;
+                outChord.durationBeats = std::max(1, (m_selectedGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // 右ペイン: SUGGESTIONS / 借用和音 / セカンダリードミナント
+    float rightW = m_showRightPane ? m_rightPaneWidth : 0.0f;
+    if (m_showRightPane && x >= m_width - rightW) {
+        float curY = mainY + 6.0f + 22.0f + 24.0f;
+        float pad = 12.0f;
+        float innerW = rightW - pad * 2.0f;
+        bool use7th = ((m_diatonicChordTypeTab % 5) == 1) || (m_diatonicChordTypeTab >= 5);
+
+        if (m_accSuggestionsOpen) {
+            ChordToken lastChord;
+            if (m_selectedBarIndex >= 0 && pActive && m_selectedBarIndex < static_cast<int>(pActive->bars.size())) {
+                const auto& bar = pActive->bars[m_selectedBarIndex];
+                if (m_selectedChordIndex >= 0 && m_selectedChordIndex < static_cast<int>(bar.chords.size())) {
+                    lastChord = bar.chords[m_selectedChordIndex];
+                }
+            }
+            std::vector<ChordToken> lastChords;
+            if (!lastChord.rawText.empty()) lastChords.push_back(lastChord);
+            auto suggestions = MusicEngine::GetSuggestions(lastChords, keyRoot, mode, use7th);
+            float sCardW = (innerW - 3.0f * 4.0f) / 4.0f;
+            float sCardH = 38.0f;
+
+            for (size_t i = 0; i < std::min<size_t>(suggestions.size(), 4); ++i) {
+                float cx = m_width - rightW + pad + i * (sCardW + 4.0f);
+                if (PtInRectF(D2D1::RectF(cx, curY, cx + sCardW, curY + sCardH), x, y)) {
+                    outChord = suggestions[i];
+                    outChord.durationTicks = m_selectedGridTicks;
+                    outChord.durationBeats = std::max(1, (m_selectedGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
+                    return true;
+                }
+            }
+            curY += sCardH + 7.0f;
+        }
+
+        curY += 24.0f;
+        if (m_accBorrowOpen) {
+            auto borrowChords = MusicEngine::GetModalInterchangeChords(keyRoot, mode, use7th);
+            float bCardW = (innerW - 2.0f * 4.0f) / 3.0f;
+            float bCardH = 38.0f;
+
+            for (size_t i = 0; i < std::min<size_t>(borrowChords.size(), 6); ++i) {
+                float cx = m_width - rightW + pad + (i % 3) * (bCardW + 4.0f);
+                float cy = curY + (i / 3) * (bCardH + 4.0f);
+                if (PtInRectF(D2D1::RectF(cx, cy, cx + bCardW, cy + bCardH), x, y)) {
+                    outChord = borrowChords[i];
+                    outChord.durationTicks = m_selectedGridTicks;
+                    outChord.durationBeats = std::max(1, (m_selectedGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
+                    return true;
+                }
+            }
+            curY += (bCardH * 2.0f + 4.0f) + 7.0f;
+        }
+
+        curY += 24.0f;
+        if (m_accSecondaryOpen) {
+            auto secChords = MusicEngine::GetSecondaryDominants(keyRoot, mode);
+            float scCardW = (innerW - 2.0f * 4.0f) / 3.0f;
+            float scCardH = 38.0f;
+
+            for (size_t i = 0; i < std::min<size_t>(secChords.size(), 5); ++i) {
+                float cx = m_width - rightW + pad + (i % 3) * (scCardW + 4.0f);
+                float cy = curY + (i / 3) * (scCardH + 4.0f);
+                if (PtInRectF(D2D1::RectF(cx, cy, cx + scCardW, cy + scCardH), x, y)) {
+                    outChord = secChords[i];
+                    outChord.durationTicks = m_selectedGridTicks;
+                    outChord.durationBeats = std::max(1, (m_selectedGridTicks + TICKS_PER_BEAT / 2) / TICKS_PER_BEAT);
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+void AppWindow::OnLButtonDblClk(float x, float y) {
+    if (m_activeModal != ModalType::None) return;
+    ChordToken chord;
+    if (HitTestPaletteCard(x, y, chord)) {
+        if (m_dragMode == DragMode::PaletteCardDrag) {
+            m_dragMode = DragMode::None;
+            m_isPaletteDragging = false;
+            ReleaseCapture();
+        }
+        AppendChordToTimeline(chord);
+        return;
+    }
+    OnLButtonDown(x, y);
+}
+
+void AppWindow::OnMouseMove(float x, float y) {
+    if (m_dragMode == DragMode::PaletteCardDrag) {
+        float dx = x - m_dragStartX;
+        float dy = y - m_dragStartY;
+        if (!m_isPaletteDragging && (dx * dx + dy * dy) >= 25.0f) {
+            m_isPaletteDragging = true;
+        }
+        if (m_isPaletteDragging) {
+            m_dragCurrentX = x;
+            m_dragCurrentY = y;
+            SetCursor(LoadCursor(nullptr, IDC_HAND));
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+        }
+        return;
+    }
+
+    if (m_dragMode == DragMode::CardResizeRight || m_dragMode == DragMode::CardResizeLeft) {
+        Part* pActive = m_partManager.GetActivePart();
+        if (pActive && m_dragBarIndex >= 0 && m_dragBarIndex < static_cast<int>(pActive->bars.size())) {
+            auto& bar = pActive->bars[m_dragBarIndex];
+            if (m_dragChordIndex >= 0 && m_dragChordIndex < static_cast<int>(bar.chords.size())) {
+                float dx = (m_dragMode == DragMode::CardResizeRight) ? (x - m_dragStartX) : (m_dragStartX - x);
+                float pxPerTick = (m_pixelsPerBeat * 4.0f) / std::max(1, bar.GetTotalTicks());
+                int deltaTicks = static_cast<int>(dx / pxPerTick);
+
+                int snapTicks = std::max(1, m_selectedGridTicks);
+                deltaTicks = (deltaTicks / snapTicks) * snapTicks;
+
+                int newTicks = std::max(snapTicks, m_dragInitialTicks + deltaTicks);
+                bar.chords[m_dragChordIndex].SetTicks(newTicks);
+
+                SyncTimelineToText();
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+            }
+        }
+        return;
+    }
+
+    if (m_dragMode == DragMode::CardMove) {
+        Part* pActive = m_partManager.GetActivePart();
+        if (pActive && m_dragBarIndex >= 0 && m_dragBarIndex < static_cast<int>(pActive->bars.size())) {
+            auto& bar = pActive->bars[m_dragBarIndex];
+            if (m_dragChordIndex >= 0 && m_dragChordIndex < static_cast<int>(bar.chords.size())) {
+                float dx = x - m_dragStartX;
+                if (dx > m_pixelsPerBeat && m_dragChordIndex + 1 < static_cast<int>(bar.chords.size())) {
+                    std::swap(bar.chords[m_dragChordIndex], bar.chords[m_dragChordIndex + 1]);
+                    m_dragChordIndex++;
+                    m_selectedChordIndex = m_dragChordIndex;
+                    m_dragStartX = x;
+                    SyncTimelineToText();
+                    InvalidateRect(m_hwnd, nullptr, FALSE);
+                } else if (dx < -m_pixelsPerBeat && m_dragChordIndex > 0) {
+                    std::swap(bar.chords[m_dragChordIndex], bar.chords[m_dragChordIndex - 1]);
+                    m_dragChordIndex--;
+                    m_selectedChordIndex = m_dragChordIndex;
+                    m_dragStartX = x;
+                    SyncTimelineToText();
+                    InvalidateRect(m_hwnd, nullptr, FALSE);
+                }
+            }
+        }
+        return;
+    }
+
+    if (m_dragMode == DragMode::ScrollBarThumb) {
+        float rightW = m_showRightPane ? m_rightPaneWidth : 0.0f;
+        float centerX = m_leftPaneWidth;
+        float viewWidth = m_width - centerX - rightW;
+        if (viewWidth > 0.0f) {
+            Part* pActive = m_partManager.GetActivePart();
+            size_t numBars = m_isMergedView ? m_partManager.GenerateMergedProgression().size() : (pActive ? pActive->bars.size() : 8);
+            float totalContentWidth = std::max<size_t>(numBars, 8) * (m_pixelsPerBeat * 4.0f);
+            float maxScroll = std::max(0.0f, totalContentWidth - viewWidth);
+            float ratio = std::clamp((x - centerX) / viewWidth, 0.0f, 1.0f);
+            m_timelineScrollX = ratio * maxScroll;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+        }
+        return;
+    }
+
+    // カード端ホバー時のリサイズカーソル表示
+    if (m_activeModal == ModalType::None && !m_isMergedView) {
+        float mainY = m_toolbarHeight;
+        float cardY = mainY + m_partTabHeight + m_rulerHeight + 5.0f;
+        float cardH = m_cardTrackHeight - 10.0f;
+        float rightW = m_showRightPane ? m_rightPaneWidth : 0.0f;
+        float centerX = m_leftPaneWidth;
+        float centerW = m_width - rightW - centerX;
+        if (x >= centerX && x <= centerX + centerW && y >= cardY && y <= cardY + cardH) {
+            Part* pActive = m_partManager.GetActivePart();
+            if (pActive) {
+                float barWidth = m_pixelsPerBeat * 4.0f;
+                for (size_t b = 0; b < pActive->bars.size(); ++b) {
+                    float bx = centerX + b * barWidth - m_timelineScrollX;
+                    int barTicks = std::max(1, pActive->bars[b].GetTotalTicks());
+                    float offsetTicks = 0.0f;
+                    for (size_t ci = 0; ci < pActive->bars[b].chords.size(); ++ci) {
+                        const auto& chord = pActive->bars[b].chords[ci];
+                        int cTicks = chord.durationTicks > 0 ? chord.durationTicks : (chord.durationBeats * TICKS_PER_BEAT);
+                        float cx = bx + (offsetTicks / barTicks) * barWidth;
+                        float cw = (static_cast<float>(cTicks) / barTicks) * barWidth;
+                        offsetTicks += cTicks;
+                        D2D1_RECT_F cardRc = D2D1::RectF(cx + 2.0f, cardY, cx + cw - 2.0f, cardY + cardH);
+                        if (PtInRectF(cardRc, x, y) && (x <= cardRc.left + 6.0f || x >= cardRc.right - 6.0f)) {
+                            SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+void AppWindow::OnLButtonUp(float x, float y) {
+    if (m_dragMode == DragMode::PaletteCardDrag) {
+        bool wasDragging = m_isPaletteDragging;
+        ChordToken droppedChord = m_dragPaletteChord;
+        m_dragMode = DragMode::None;
+        m_isPaletteDragging = false;
+        ReleaseCapture();
+
+        if (wasDragging) {
+            float rightW = m_showRightPane ? m_rightPaneWidth : 0.0f;
+            float centerX = m_leftPaneWidth;
+            float centerW = m_width - rightW - centerX;
+            float curDockH = m_showKeyboard ? m_bottomDockHeight : 28.0f;
+            if (x >= centerX && x <= centerX + centerW && y >= m_toolbarHeight && y <= m_height - curDockH) {
+                InsertChordAtTimelineX(droppedChord, x);
+            }
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+        }
+        return;
+    }
+
+    if (m_dragMode != DragMode::None) {
+        m_dragMode = DragMode::None;
+        ReleaseCapture();
+    }
+}
+
+void AppWindow::OnRButtonUp(float x, float y) {
+    if (m_activeModal != ModalType::None) return;
+
+    float mainY = m_toolbarHeight;
+    float rightW = m_showRightPane ? m_rightPaneWidth : 0.0f;
+    float centerX = m_leftPaneWidth;
+    float centerW = m_width - rightW - centerX;
+
+    // パートタブ右クリックメニュー
+    if (x >= centerX && x <= centerX + centerW && y >= mainY && y <= mainY + m_partTabHeight) {
+        const auto& parts = m_partManager.GetParts();
+        float rightReserve = m_showRightPane ? 8.0f : 114.0f;
+        float availTotalW = std::max(200.0f, centerW - 8.0f - rightReserve);
+        size_t totalTabs = 1 + parts.size();
+        bool compactAdd = (availTotalW < totalTabs * 86.0f + 68.0f);
+        float addBtnW = compactAdd ? 32.0f : 66.0f;
+        float availTabsW = std::max(120.0f, availTotalW - addBtnW - 6.0f);
+        float pTabW = std::clamp((availTabsW - static_cast<float>(totalTabs) * 3.0f) / static_cast<float>(totalTabs), 24.0f, 96.0f);
+        float fullTabW = pTabW;
+
+        float curX = centerX + 8.0f + fullTabW + 3.0f;
+        float tabH = m_partTabHeight - 3.0f;
+        float ty = mainY + 3.0f;
+        for (size_t i = 0; i < parts.size(); ++i) {
+            if (PtInRectF(D2D1::RectF(curX, ty, curX + pTabW, ty + tabH), x, y)) {
+                m_contextPartIndex = static_cast<int>(i);
+                HMENU hMenu = CreatePopupMenu();
+                AppendMenuW(hMenu, MF_STRING, IDM_CTX_PART_DUP, TR(L"このパートを複製", L"Duplicate Part"));
+                AppendMenuW(hMenu, (parts.size() > 1) ? MF_STRING : (MF_STRING | MF_GRAYED), IDM_CTX_PART_DEL, TR(L"このパートを削除", L"Delete Part"));
+                AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+                AppendMenuW(hMenu, (i > 0) ? MF_STRING : (MF_STRING | MF_GRAYED), IDM_CTX_PART_LEFT, TR(L"左へ移動", L"Move Left"));
+                AppendMenuW(hMenu, (i + 1 < parts.size()) ? MF_STRING : (MF_STRING | MF_GRAYED), IDM_CTX_PART_RIGHT, TR(L"右へ移動", L"Move Right"));
+                POINT pt = { static_cast<LONG>(x), static_cast<LONG>(y) };
+                ClientToScreen(m_hwnd, &pt);
+                TrackPopupMenu(hMenu, TPM_LEFTALIGN | TPM_TOPALIGN, pt.x, pt.y, 0, m_hwnd, nullptr);
+                DestroyMenu(hMenu);
+                return;
+            }
+            curX += pTabW + 3.0f;
+        }
+        return;
+    }
+
+    // コードカード右クリックメニュー
+    float cardY = mainY + m_partTabHeight + m_rulerHeight + 5.0f;
+    float cardH = m_cardTrackHeight - 10.0f;
+    if (!m_isMergedView && x >= centerX && x <= centerX + centerW && y >= cardY && y <= cardY + cardH) {
+        Part* pActive = m_partManager.GetActivePart();
+        if (!pActive) return;
+        float barWidth = m_pixelsPerBeat * 4.0f;
+        for (size_t b = 0; b < pActive->bars.size(); ++b) {
+            float bx = centerX + b * barWidth - m_timelineScrollX;
+            int barTicks = std::max(1, pActive->bars[b].GetTotalTicks());
+            float offsetTicks = 0.0f;
+            for (size_t ci = 0; ci < pActive->bars[b].chords.size(); ++ci) {
+                const auto& chord = pActive->bars[b].chords[ci];
+                int cTicks = chord.durationTicks > 0 ? chord.durationTicks : (chord.durationBeats * TICKS_PER_BEAT);
+                float cx = bx + (offsetTicks / barTicks) * barWidth;
+                float cw = (static_cast<float>(cTicks) / barTicks) * barWidth;
+                offsetTicks += cTicks;
+                D2D1_RECT_F cardRc = D2D1::RectF(cx + 2.0f, cardY, cx + cw - 2.0f, cardY + cardH);
+                if (PtInRectF(cardRc, x, y)) {
+                    SelectChord(static_cast<int>(b), static_cast<int>(ci));
+                    HMENU hMenu = CreatePopupMenu();
+                    AppendMenuW(hMenu, MF_STRING, IDM_EDIT_DUPLICATE, TR(L"コードを複製 (Ctrl+D)", L"Duplicate Chord (Ctrl+D)"));
+                    AppendMenuW(hMenu, MF_STRING, IDM_EDIT_DELETE, TR(L"コードを削除 (Del)", L"Delete Chord (Del)"));
+                    AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+                    AppendMenuW(hMenu, (chord.inversion == 0) ? (MF_STRING | MF_CHECKED) : MF_STRING, IDM_CTX_CARD_INV0, TR(L"基本形 (Root)", L"Root Position"));
+                    AppendMenuW(hMenu, (chord.inversion == 1) ? (MF_STRING | MF_CHECKED) : MF_STRING, IDM_CTX_CARD_INV1, TR(L"第1転回形 (1st Inv)", L"1st Inversion"));
+                    AppendMenuW(hMenu, (chord.inversion == 2) ? (MF_STRING | MF_CHECKED) : MF_STRING, IDM_CTX_CARD_INV2, TR(L"第2転回形 (2nd Inv)", L"2nd Inversion"));
+                    AppendMenuW(hMenu, (chord.inversion == 3) ? (MF_STRING | MF_CHECKED) : MF_STRING, IDM_CTX_CARD_INV3, TR(L"第3転回形 (3rd Inv)", L"3rd Inversion"));
+                    if (!chord.isRest && chord.rootPitch != PitchClass::Unknown) {
+                        AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+                        HMENU hBassSub = CreatePopupMenu();
+                        AppendMenuW(hBassSub, chord.bassName.empty() ? (MF_STRING | MF_CHECKED) : MF_STRING, IDM_CTX_CARD_BASS_NONE, TR(L"オンベース解除 (通常コード)", L"Clear Slash Bass (Normal)"));
+                        AppendMenuW(hBassSub, MF_STRING, IDM_CTX_CARD_BASS_3RD, TR(L"第3音ベース (1st Inv / On 3rd)", L"Bass on 3rd (1st Inv)"));
+                        AppendMenuW(hBassSub, MF_STRING, IDM_CTX_CARD_BASS_5TH, TR(L"第5音ベース (2nd Inv / On 5th)", L"Bass on 5th (2nd Inv)"));
+                        AppendMenuW(hBassSub, MF_STRING, IDM_CTX_CARD_BASS_7TH, TR(L"第7音ベース (3rd Inv / On 7th)", L"Bass on 7th (3rd Inv)"));
+                        AppendMenuW(hBassSub, MF_SEPARATOR, 0, nullptr);
+                        const char* noteNames[12] = { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
+                        for (int ni = 0; ni < 12; ++ni) {
+                            std::wstring lbl = L"/" + ToWString(noteNames[ni]);
+                            bool isCur = (!chord.bassName.empty() && static_cast<int>(chord.bassPitch) == ni);
+                            AppendMenuW(hBassSub, isCur ? (MF_STRING | MF_CHECKED) : MF_STRING, IDM_CTX_CARD_BASS_BASE + ni, lbl.c_str());
+                        }
+                        AppendMenuW(hMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hBassSub), TR(L"分数コード (オンベース指定)", L"Slash Chord (Bass Note)"));
+                    }
+                    POINT pt = { static_cast<LONG>(x), static_cast<LONG>(y) };
+                    ClientToScreen(m_hwnd, &pt);
+                    TrackPopupMenu(hMenu, TPM_LEFTALIGN | TPM_TOPALIGN, pt.x, pt.y, 0, m_hwnd, nullptr);
+                    DestroyMenu(hMenu);
+                    return;
+                }
+            }
+        }
+    }
+}
+
+void AppWindow::OnMouseWheel(short delta, float /*x*/, float /*y*/) {
+    if (m_activeModal == ModalType::Templates && !m_tmplEditorOpen) {
+        auto categories = MusicEngine::GetTemplateMajorCategories();
+        std::string curCat = (m_selectedTmplCategoryIndex < static_cast<int>(categories.size())) ? categories[m_selectedTmplCategoryIndex] : "👤 ユーザー定義";
+        auto tmpls = MusicEngine::GetTemplatesByCategory(curCat);
+        int maxScroll = std::max(0, static_cast<int>(tmpls.size()) - 5);
+        m_tmplListScroll = std::clamp(m_tmplListScroll - (delta / 120), 0, maxScroll);
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+        return;
+    }
+    if (m_activeModal != ModalType::None) return;
+
+    m_timelineScrollX -= (delta / 120.0f) * (m_pixelsPerBeat * 2.0f);
+
+    Part* pActive = m_partManager.GetActivePart();
+    size_t numBars = m_isMergedView ? m_partManager.GenerateMergedProgression().size() : (pActive ? pActive->bars.size() : 8);
+    float totalContentWidth = std::max<size_t>(numBars, 8) * (m_pixelsPerBeat * 4.0f);
+    float rightW = m_showRightPane ? m_rightPaneWidth : 0.0f;
+    float viewWidth = m_width - m_leftPaneWidth - rightW;
+
+    float maxScroll = std::max(0.0f, totalContentWidth - viewWidth);
+    m_timelineScrollX = std::clamp(m_timelineScrollX, 0.0f, maxScroll);
+
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::OnKeyDown(WPARAM key) {
+    if (key == VK_SPACE) TogglePlayback();
+    else if (key == VK_ESCAPE) StopPlayback();
+}
+
+void AppWindow::OnChar(WCHAR ch) {
+    if (m_activeModal == ModalType::Templates && m_tmplEditorOpen) {
+        if (ch >= 0x20 && ch != 0x7F) {
+            std::wstring* pField = (m_tmplEditFocusField == 0) ? &m_tmplEditName : ((m_tmplEditFocusField == 1) ? &m_tmplEditProg : &m_tmplEditDesc);
+            if (pField->size() < 120) {
+                *pField += ch;
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+            }
+        }
+    }
+}
+} // namespace clp

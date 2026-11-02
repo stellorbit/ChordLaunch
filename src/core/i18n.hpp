@@ -104,6 +104,27 @@ enum class StrId {
     TmplJPopOwari,     // 丸サ進行 (IVmaj7 - III7 - VIm7 - I7)
     TmplStandardPop,   // 4536 (IV - V - IIIm - VIm)
 
+    // Additional UI Strings
+    FileNew,
+    FileOpen,
+    FileSave,
+    Settings,
+    ApplyCtrlEnter,
+    CustomBuilder,
+    SuggestionsTitle,
+    AddThisChord,
+    ClearAll,
+    ZoomLabel,
+    InspectorChord,
+    InspectorLength,
+    InspectorNotes,
+    InspectorTitle,
+    PartFullSong,
+    PartAddBtn,
+    GridBeats,
+    BeatUnit,
+    BarUnit,
+
     // Status
     StatusReady,
     StatusPlaying,
@@ -116,8 +137,8 @@ class I18n {
 public:
     static void SetLanguage(Language lang);
     static Language GetLanguage();
-    static const std::wstring& Get(StrId id);
-    static const std::string& GetUtf8(StrId id);
+    static std::wstring Get(StrId id);
+    static std::string GetUtf8(StrId id);
 
 private:
     static Language s_currentLang;

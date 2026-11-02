@@ -138,7 +138,13 @@ HRESULT STDMETHODCALLTYPE OleFileDataObject::SetData([[maybe_unused]] FORMATETC*
     return E_NOTIMPL;
 }
 
-HRESULT STDMETHODCALLTYPE OleFileDataObject::EnumFormatEtc([[maybe_unused]] DWORD dwDirection, [[maybe_unused]] IEnumFORMATETC** ppenumFormatEtc) {
+HRESULT STDMETHODCALLTYPE OleFileDataObject::EnumFormatEtc(DWORD dwDirection, IEnumFORMATETC** ppenumFormatEtc) {
+    if (!ppenumFormatEtc) return E_POINTER;
+    *ppenumFormatEtc = nullptr;
+
+    if (dwDirection == DATADIR_GET) {
+        return SHCreateStdEnumFmtEtc(1, &m_formatEtc, ppenumFormatEtc);
+    }
     return E_NOTIMPL;
 }
 

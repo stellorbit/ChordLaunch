@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(ChordLaunchpad LANGUAGES CXX)
+project(ChordLaunch LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -7,6 +7,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # 完全静的リンク (/MT)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+# 共通C++高速化モジュール (Ninja + ccache + lld-link + PCH/Unity + /O2 /GL /LTCG /arch:AVX2 /fp:fast /Gw + PGO)
+include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/CppOptimization.cmake")
+enable_cpp_build_optimizations()
 
 if (MSVC)
     add_compile_options(
@@ -37,7 +41,13 @@ add_library(clp_core STATIC
     src/audio/wasapi_synth.cpp
     src/ui/ole_dnd.cpp
     src/ui/app_window.cpp
+    src/ui/app_window_render.cpp
+    src/ui/app_window_modals.cpp
+    src/ui/app_window_input.cpp
+    src/ui/app_window_actions.cpp
 )
+
+enable_target_pch(clp_core)
 
 target_include_directories(clp_core PUBLIC
     src/core
@@ -56,10 +66,10 @@ target_link_libraries(clp_core PUBLIC
 )
 
 # メイン実行ファイル (GUI / WinMain)
-add_executable(ChordLaunchpad WIN32
+add_executable(ChordLaunch WIN32
     src/main.cpp
 )
-target_link_libraries(ChordLaunchpad PRIVATE clp_core)
+target_link_libraries(ChordLaunch PRIVATE clp_core)
 
 # 自動単体テスト実行ファイル
 add_executable(clp_tests

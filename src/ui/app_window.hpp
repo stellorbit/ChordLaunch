@@ -4,37 +4,43 @@
 #include <dwrite.h>
 #include <vector>
 #include <string>
-#include <memory>
+#include <string_view>
 #include <chrono>
-
+#include <memory>
+#include <optional>
 #include "music_theory.hpp"
 #include "music_engine.hpp"
-#include "progression_parser.hpp"
 #include "part_manager.hpp"
-#include "midi_builder.hpp"
 #include "wasapi_synth.hpp"
-#include "theme.hpp"
-#include "i18n.hpp"
 
 namespace clp {
 
-struct TimelineSelection {
-    int startBar = -1;
-    int startBeat = -1;
-    int endBar = -1;
-    int endBeat = -1;
-    std::vector<ChordToken> clipboard;
+enum class IconType {
+    None = 0,
+    Play,
+    Pause,
+    Stop,
+    Loop,
+    Settings,
+    Music,
+    Close,
+    Plus,
+    ChevronUp,
+    ChevronDown,
+    Template,
+    Help,
+    SaveDisk,
+    DawDrag,
+    Keyboard,
+    Zoom
+};
 
-    bool HasSelection() const {
-        return startBar >= 0 && endBar >= 0;
-    }
-
-    void Clear() {
-        startBar = -1;
-        startBeat = -1;
-        endBar = -1;
-        endBeat = -1;
-    }
+enum class ModalType {
+    None = 0,
+    Settings,
+    Templates,
+    Help,
+    TapTempo
 };
 
 class AppWindow {
@@ -43,187 +49,317 @@ public:
     ~AppWindow();
 
     bool Create(HINSTANCE hInstance, int nCmdShow);
-    void RunMessageLoop();
+    int Run();
+    int RunMessageLoop() { return Run(); }
 
 private:
-    static LRESULT CALLBACK WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
-    LRESULT HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+    static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+    LRESULT HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-    // Direct2D / DirectWrite 初期化・リソース作成
-    bool CreateDeviceIndependentResources();
-    bool CreateDeviceResources();
+    // Direct2D / DirectWrite リソース管理
+    HRESULT CreateDeviceIndependentResources();
+    HRESULT CreateDeviceResources();
     void DiscardDeviceResources();
 
     // 描画ルーチン
     void OnRender();
-    void RenderTopToolbarRow1(float width, float height);
-    void RenderTopToolbarRow2(float width, float y, float height);
+    void RenderToolbar(float x, float y, float width, float height);
     void RenderLeftPane(float x, float y, float width, float height);
     void RenderCenterPane(float x, float y, float width, float height);
+    void RenderPartTabs(float x, float y, float width, float height);
+    void RenderTimelineCards(float x, float y, float width, float height);
+    void RenderPianoRoll(float x, float y, float width, float height);
+    void RenderBottomDock(float x, float y, float width, float height);
     void RenderRightPane(float x, float y, float width, float height);
-    void RenderPianoRoll(float x, float y, float width, float height, float barWidth);
-    void RenderPianoKeyboard(float x, float y, float width, float height);
-    void RenderInspectorBar(float x, float y, float width, float height);
-    void RenderStatusBar(float x, float y, float width, float height);
+    void RenderTimelineScrollBar(float x, float y, float width, float height);
 
-    // 再生・エンジン制御
-    void StartPlayback();
-    void StopPlayback();
-    void TogglePlayback();
-    void SeekToBeat(int totalBeats);
-    void AdvancePlayback(float deltaSeconds);
-    void ProcessTapTempo();
+    // モーダルダイアログ描画ルーチン
+    void RenderModal(float width, float height);
+    void RenderSettingsModal(const D2D1_RECT_F& rc);
+    void RenderTemplatesModal(const D2D1_RECT_F& rc);
+    void RenderHelpModal(const D2D1_RECT_F& rc);
+    void RenderTapTempoModal(const D2D1_RECT_F& rc);
 
-    // UI操作・イベント
-    void OnLButtonDown(int x, int y, WPARAM wParam);
-    void OnMouseMove(int x, int y, WPARAM wParam);
-    void OnLButtonUp(int x, int y, WPARAM wParam);
-    void OnLButtonDblClk(int x, int y, WPARAM wParam);
-    void OnMouseWheel(int x, int y, short delta);
-    void OnKeyDown(WPARAM wParam, LPARAM lParam);
+    // UIヘルパー描画
+    void DrawButton(
+        const D2D1_RECT_F& rect,
+        const std::wstring& text,
+        IconType icon = IconType::None,
+        bool isHovered = false,
+        bool isPressed = false,
+        bool isPrimary = false,
+        D2D1_COLOR_F primaryColor = {0,0,0,0}
+    );
+    void DrawCard(
+        const D2D1_RECT_F& rect,
+        const std::wstring& chordName,
+        const std::wstring& degree,
+        bool isHovered,
+        bool isSelected,
+        bool isRest = false,
+        bool showCloseButton = false,
+        bool isCloseHovered = false
+    );
+    void DrawSectionHeader(
+        const D2D1_RECT_F& rect,
+        const std::wstring& title,
+        bool isOpen,
+        bool isHovered = false
+    );
+    void DrawTextSafe(
+        const std::wstring& text,
+        IDWriteTextFormat* pFormat,
+        const D2D1_RECT_F& rect,
+        ID2D1Brush* pBrush
+    );
 
-    // ドロップダウンメニュー
-    void ShowKeyMenu(int x, int y);
-    void ShowModeMenu(int x, int y);
-    void ShowToneMenu(int x, int y);
-    void ShowBassMenu(int x, int y);
-    void ShowVoicingMenu(int x, int y);
-    void ShowGridMenu(int x, int y);
-    void ShowSettingsMenu(int x, int y);
+    // ベクター図形アイコン描画ルーチン (絵文字不使用)
+    void DrawIcon(IconType type, const D2D1_RECT_F& rect, ID2D1Brush* pBrush);
+    void DrawIconPlay(const D2D1_RECT_F& rect, ID2D1Brush* pBrush);
+    void DrawIconPause(const D2D1_RECT_F& rect, ID2D1Brush* pBrush);
+    void DrawIconStop(const D2D1_RECT_F& rect, ID2D1Brush* pBrush);
+    void DrawIconLoop(const D2D1_RECT_F& rect, ID2D1Brush* pBrush, bool active);
+    void DrawIconSettings(const D2D1_RECT_F& rect, ID2D1Brush* pBrush);
+    void DrawIconMusic(const D2D1_RECT_F& rect, ID2D1Brush* pBrush);
+    void DrawIconClose(const D2D1_RECT_F& rect, ID2D1Brush* pBrush);
+    void DrawIconPlus(const D2D1_RECT_F& rect, ID2D1Brush* pBrush);
+    void DrawIconChevron(const D2D1_RECT_F& rect, ID2D1Brush* pBrush, bool open);
+    void DrawIconTemplate(const D2D1_RECT_F& rect, ID2D1Brush* pBrush);
+    void DrawIconHelp(const D2D1_RECT_F& rect, ID2D1Brush* pBrush);
+    void DrawIconSaveDisk(const D2D1_RECT_F& rect, ID2D1Brush* pBrush);
+    void DrawIconDawDrag(const D2D1_RECT_F& rect, ID2D1Brush* pBrush);
+    void DrawIconKeyboard(const D2D1_RECT_F& rect, ID2D1Brush* pBrush);
+    void DrawIconZoom(const D2D1_RECT_F& rect, ID2D1Brush* pBrush);
 
-    // コピペ・編集
-    void CopySelection();
-    void CutSelection();
-    void PasteAtCursor();
+    // イベント・入力ハンドラ
+    void OnLButtonDown(float x, float y);
+    void OnLButtonDblClk(float x, float y);
+    void OnLButtonUp(float x, float y);
+    void OnRButtonUp(float x, float y);
+    void OnMouseMove(float x, float y);
+    void OnMouseWheel(short delta, float x, float y);
+    void OnKeyDown(WPARAM key);
+    void OnChar(WCHAR ch);
+    void OnSize(UINT width, UINT height);
+    bool HitTestPaletteCard(float x, float y, ChordToken& outChord);
+    void InsertChordAtTimelineX(const ChordToken& chord, float x);
+
+    // プルダウンメニュー表示・メニューバー言語更新
+    void RebuildMainMenu();
+    void ShowKeyMenu(float screenX, float screenY);
+    void ShowScaleMenu(float screenX, float screenY);
+    void ShowPresetMenu(float screenX, float screenY);
+    void ShowVoicingMenu(float screenX, float screenY);
+    void ShowBassMenu(float screenX, float screenY);
+    void ShowGridMenu(float screenX, float screenY);
+
+    const wchar_t* TR(const wchar_t* ja, const wchar_t* en) const {
+        return (m_settingLanguage == 1) ? en : ja;
+    }
+
+    // タップテンポ処理
+    void HandleTapTempo();
+    void ConfirmTapTempo();
+
+    // モーダルイベントハンドラ
+    bool OnModalClick(float x, float y);
+
+    // タイムライン・コード操作
+    void SelectChord(int barIndex, int chordIndex);
+    void AuditionChord(const ChordToken& chord);
+    void AppendChordToTimeline(const ChordToken& chord);
+    void SyncTextToTimeline();
+    void SyncTimelineToText();
+    void PushUndo();
+    void Undo();
+    void Redo();
     void DuplicateSelection();
     void DeleteSelection();
     void SelectAll();
-    void ApplyTextToTimeline();
-    void SyncTimelineToText();
-    void AddChordToTimeline(const ChordToken& chord);
-    void ApplyTemplate(const MusicEngine::TemplateInfo& tmpl);
-
-    // カード追加時のスクロール追従
     void EnsureVisible(int barIndex);
 
-    // ヘルパー描画
-    void DrawCard(
-        const D2D1_RECT_F& rect,
-        const std::wstring& title,
-        const std::wstring& subtitle,
-        bool isHovered,
-        bool isSelected,
-        bool isRest = false
-    );
+    // 再生エンジン (tick単位精密制御)
+    void TogglePlayback();
+    void StopPlayback();
+    void AdvancePlayback(float deltaSeconds);
 
-    void DrawRoundBadge(
-        const D2D1_RECT_F& rect,
-        const std::wstring& title,
-        const std::wstring& subtitle,
-        bool isHovered,
-        bool isSelected
-    );
+    // クリップボード・ファイル・MIDIドラッグ
+    void CopyProgressionToClipboard();
+    void PasteProgressionFromClipboard();
+    void DoFileNew();
+    void DoFileOpen();
+    void DoFileSave();
+    void DoFileSaveAs();
+    void DoMidiSaveAs();
+    void StartDawDrag();
+    void UpdateWindowTitle();
+    void SetStatusMessage(const std::wstring& msg);
+    void TriggerAutoBackup();
 
-    void DrawButton(
-        const D2D1_RECT_F& rect,
-        const std::wstring& label,
-        bool isHovered,
-        bool isPressed,
-        bool isAccent = false,
-        D2D1_COLOR_F customBg = {0,0,0,0}
-    );
+    // テンプレート管理・試聴
+    void OpenTemplateEditor(bool isEdit);
+    void CloseTemplateEditor();
+    void SaveTemplateFromEditor();
+    void DeleteSelectedUserTemplate();
+    void AuditionTemplate(const ProgressionTemplate& tmpl);
 
+    // ヘルプ・ドキュメント
+    void OpenOnlineDocumentation();
+
+    // モーダル開閉
+    void OpenModal(ModalType modal);
+    void CloseModal();
+
+private:
     HWND m_hwnd = nullptr;
-    HINSTANCE m_hInstance = nullptr;
+    HWND m_hwndEdit = nullptr;
+    HFONT m_hFontEdit = nullptr;
+    WNDPROC m_origEditWndProc = nullptr;
+    static LRESULT CALLBACK EditSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-    // 左ペインの子ウィンドウ (テキスト入力ボックス)
-    HWND m_hwndInputEdit = nullptr;
-    HFONT m_hEditFont = nullptr;
+    HMENU m_hMainMenu = nullptr;
 
-    // Direct2D / DirectWrite
-    ID2D1Factory* m_pD2DFactory = nullptr;
-    IDWriteFactory* m_pDWriteFactory = nullptr;
+    // Direct2D / DirectWrite インターフェース
+    ID2D1Factory*          m_pD2DFactory = nullptr;
     ID2D1HwndRenderTarget* m_pRenderTarget = nullptr;
+    IDWriteFactory*        m_pDWriteFactory = nullptr;
 
     // DirectWrite テキストフォーマット
-    IDWriteTextFormat* m_pFontTitle = nullptr;
-    IDWriteTextFormat* m_pFontHeader = nullptr;
-    IDWriteTextFormat* m_pFontNormal = nullptr;
-    IDWriteTextFormat* m_pFontSmall = nullptr;
-    IDWriteTextFormat* m_pFontTiny = nullptr;
-    IDWriteTextFormat* m_pFontCardTitle = nullptr;
-    IDWriteTextFormat* m_pFontCardSub = nullptr;
+    IDWriteTextFormat*     m_pFontMain = nullptr;
+    IDWriteTextFormat*     m_pFontButton = nullptr;
+    IDWriteTextFormat*     m_pFontCardTitle = nullptr;
+    IDWriteTextFormat*     m_pFontCardDegree = nullptr;
+    IDWriteTextFormat*     m_pFontRuler = nullptr;
+    IDWriteTextFormat*     m_pFontInspector = nullptr;
+    IDWriteTextFormat*     m_pFontTab = nullptr;
+    IDWriteTextFormat*     m_pFontModalTitle = nullptr;
+    IDWriteTextFormat*     m_pFontModalBody = nullptr;
+    IDWriteTextFormat*     m_pFontBigNumber = nullptr;
 
-    // ブラシ
-    ID2D1SolidColorBrush* m_pBrushBackground = nullptr;
-    ID2D1SolidColorBrush* m_pBrushPaneBg = nullptr;
-    ID2D1SolidColorBrush* m_pBrushCardBg = nullptr;
-    ID2D1SolidColorBrush* m_pBrushCardHover = nullptr;
-    ID2D1SolidColorBrush* m_pBrushCardSelected = nullptr;
-    ID2D1SolidColorBrush* m_pBrushBorder = nullptr;
-    ID2D1SolidColorBrush* m_pBrushTextPrimary = nullptr;
-    ID2D1SolidColorBrush* m_pBrushTextSecondary = nullptr;
-    ID2D1SolidColorBrush* m_pBrushAccent = nullptr;
-    ID2D1SolidColorBrush* m_pBrushPlay = nullptr;
-    ID2D1SolidColorBrush* m_pBrushStop = nullptr;
-    ID2D1SolidColorBrush* m_pBrushPlayhead = nullptr;
-    ID2D1SolidColorBrush* m_pBrushLoopRange = nullptr;
-    ID2D1SolidColorBrush* m_pBrushRest = nullptr;
-    ID2D1SolidColorBrush* m_pBrushNoteBar = nullptr;
-    ID2D1SolidColorBrush* m_pBrushNoteActive = nullptr;
-    ID2D1SolidColorBrush* m_pBrushBlackKey = nullptr;
+    // ソリッドブラシ
+    ID2D1SolidColorBrush*  m_pBrushBg = nullptr;
+    ID2D1SolidColorBrush*  m_pBrushText = nullptr;
+    ID2D1SolidColorBrush*  m_pBrushTextMuted = nullptr;
+    ID2D1SolidColorBrush*  m_pBrushBorder = nullptr;
+    ID2D1SolidColorBrush*  m_pBrushBorderLight = nullptr;
+    ID2D1SolidColorBrush*  m_pBrushCardBg = nullptr;
+    ID2D1SolidColorBrush*  m_pBrushCardActive = nullptr;
+    ID2D1SolidColorBrush*  m_pBrushCardSelected = nullptr;
+    ID2D1SolidColorBrush*  m_pBrushAccent = nullptr;
+    ID2D1SolidColorBrush*  m_pBrushPlay = nullptr;
+    ID2D1SolidColorBrush*  m_pBrushStop = nullptr;
+    ID2D1SolidColorBrush*  m_pBrushPlayhead = nullptr;
+    ID2D1SolidColorBrush*  m_pBrushPianoRollNote = nullptr;
+    ID2D1SolidColorBrush*  m_pBrushPianoRollRest = nullptr;
+    ID2D1SolidColorBrush*  m_pBrushModalBackdrop = nullptr;
 
-    // 音楽エンジン & パートマネージャー
+    // アプリケーション状態
     PartManager m_partManager;
     WasapiSynth m_synth;
 
-    // 再生状態
-    bool m_isPlaying = false;
-    bool m_isLooping = true;
-    float m_playbackBeat = 0.0f; // 現在の再生ビート位置 (0.0 から)
-    int m_lastSoundedBeat = -1;
-    std::chrono::high_resolution_clock::time_point m_lastPlaybackTime;
-    std::vector<int> m_currentlySoundingNotes;
+    // UIレイアウト寸法 (ツールバー2段化・コンパクト縦幅)
+    float m_width = 1280.0f;
+    float m_height = 670.0f;
+    float m_toolbarHeight = 74.0f; // 2段ツールバー (上段38px + 下段36px)
+    float m_leftPaneWidth = 280.0f;
+    float m_rightPaneWidth = 270.0f;
+    float m_partTabHeight = 28.0f;
+    float m_rulerHeight = 22.0f;
+    float m_cardTrackHeight = 76.0f;
+    float m_bottomDockHeight = 68.0f;
+    float m_scrollBarHeight = 12.0f;
 
-    // タップテンポ
-    std::vector<std::chrono::high_resolution_clock::time_point> m_tapTimes;
-
-    // ループ / 再生範囲選択
-    int m_loopStartBeat = 0;
-    int m_loopEndBeat = -1; // -1 の場合は全曲
-    bool m_isSelectingLoopRange = false;
-
-    // タイムライン複数選択
-    TimelineSelection m_selection;
-    int m_selectedCardIndex = -1;
-
-    // ズーム & スクロール
-    float m_pixelsPerBeat = 35.0f; // ズーム倍率 (1拍あたりのpx)
+    // タイムライン表示パラメータ (tickベース)
     float m_timelineScrollX = 0.0f;
-    float m_rightPaneScrollY = 0.0f;
+    float m_pixelsPerBeat = 64.0f;
+    int   m_selectedBarIndex = -1;
+    int   m_selectedChordIndex = -1;
 
-    // ドラッグ＆ドロップ状態
-    bool m_isDraggingCard = false;
-    ChordToken m_draggedChord;
-    POINT m_dragStartPos{0, 0};
-    POINT m_dragCurrentPos{0, 0};
+    // リサイズ・ドラッグ＆ドロップ状態
+    enum class DragMode { None, CardMove, CardResizeLeft, CardResizeRight, ScrollBarThumb, PaletteCardDrag };
+    DragMode m_dragMode = DragMode::None;
+    int   m_dragBarIndex = -1;
+    int   m_dragChordIndex = -1;
+    float m_dragStartX = 0.0f;
+    float m_dragStartY = 0.0f;
+    float m_dragCurrentX = 0.0f;
+    float m_dragCurrentY = 0.0f;
+    bool  m_isPaletteDragging = false;
+    ChordToken m_dragPaletteChord;
+    int   m_dragInitialTicks = 0;
 
-    // UI状態
-    bool m_isMergedView = false;
-    bool m_show7thDiatonic = true;
-    int m_selectedBassIndex = 0;   // 0: なし, 1: 1, 2: 2, 3: 両方
-    int m_selectedVoicingIndex = 0;
-    int m_selectedSoundIndex = 0;
-    float m_selectedGridBeats = 1.0f;
+    // 再生状態 (tick時間管理)
+    bool   m_isPlaying = false;
+    bool   m_isLooping = false;
+    bool   m_isMergedView = false;
+    double m_playbackTick = 0.0;
+    int    m_lastSoundedChordUid = -1;
+    std::chrono::steady_clock::time_point m_lastPlaybackTime;
 
-    // クイックビルダー状態
-    int m_builderRoot = 0;     // 0: C, 1: C#, ...
-    int m_builderQuality = 0;  // 0: Maj, 1: min, 2: 7, 3: maj7, ...
-    int m_builderTension = 0;  // 0: None, 1: 9, 2: b9, ...
-    int m_builderBass = -1;    // -1: None, 0: /C, 1: /C#, ...
+    // 音声・ボイシング設定
+    VoicingStyle m_selectedVoicing = VoicingStyle::RootPosition;
+    int m_baseOctave = 4;
+    int m_bassOctaveMode = 0;
+    int m_selectedGridTicks = TICKS_PER_BEAT;
 
-    // ステータス文言
-    std::wstring m_statusMessage = L"準備完了";
+    // 右ペインのアコーディオン開閉状態
+    bool m_accSuggestionsOpen = true;
+    bool m_accBorrowOpen = true;
+    bool m_accSecondaryOpen = true;
+    bool m_accTemplatesOpen = true;
+
+    // 左ペイン・カスタムコードビルダー状態
+    PitchClass m_customRoot = PitchClass::C;
+    std::string m_customSuffix = "";
+    int8_t m_customTension = 0;
+    PitchClass m_customBass = PitchClass::Unknown;
+    int m_diatonicChordTypeTab = 1;
+    bool m_accCustomBuilderOpen = true;
+
+    // 表示切り替え
+    bool m_showPianoRoll = true;
+    bool m_showKeyboard = true;
+    bool m_showRightPane = true;
+
+    // モーダルダイアログ状態
+    ModalType m_activeModal = ModalType::None;
+    int m_settingLanguage = 0;
+    int m_settingZoomStyle = 0;
+    int m_selectedTmplCategoryIndex = 0;
+    int m_selectedTmplIndex = 0;
+    int m_tmplListScroll = 0;
+    int m_helpActiveTab = 0;
+    int m_contextPartIndex = -1;
+
+    // テンプレート追加・編集サブダイアログ状態
+    bool m_tmplEditorOpen = false;
+    bool m_tmplIsEditingExisting = false;
+    std::string m_tmplEditId;
+    std::wstring m_tmplEditName;
+    std::wstring m_tmplEditProg;
+    std::wstring m_tmplEditDesc;
+    int m_tmplEditFocusField = 0;
+
+    // プロジェクト保存・自動バックアップ状態
+    std::wstring m_currentProjectPath;
+    std::string m_projectTitle = "MyProgression";
+    bool m_isDirty = false;
+    std::wstring m_statusMessage;
+    std::chrono::steady_clock::time_point m_statusMessageTime;
+
+    // タップテンポ測定状態
+    std::vector<std::chrono::steady_clock::time_point> m_tapTimes;
+    int m_measuredBpm = 120;
+    bool m_tapBlinked = false;
+    std::chrono::steady_clock::time_point m_lastTapBlinkTime;
+
+    // Undo / Redo スタック
+    struct UndoSnapshot {
+        std::vector<Part> parts;
+        int activePartIndex;
+    };
+    std::vector<UndoSnapshot> m_undoStack;
+    std::vector<UndoSnapshot> m_redoStack;
 };
 
 } // namespace clp

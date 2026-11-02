@@ -9,3 +9,6 @@ out/
 *.ilk
 *.mid
 *.old
+
+build-*/
+CMakePresets.json

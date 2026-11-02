@@ -33,9 +33,50 @@ public:
     // デフォルト構成で初期化（Intro, Aメロ, Bメロ, サビ）
     void ResetToDefaultSong();
 
+    // プロジェクト全体のシリアライズ / デシリアライズ
+    std::string SerializeProject(
+        std::string_view projectTitle = "Untitled",
+        VoicingStyle voicing = VoicingStyle::RootPosition,
+        int bassMode = 0,
+        int gridTicks = TICKS_PER_BEAT
+    ) const;
+
+    bool DeserializeProject(
+        const std::string& data,
+        std::string& outTitle,
+        VoicingStyle& outVoicing,
+        int& outBassMode,
+        int& outGridTicks
+    );
+
+    // ファイル保存・読み込み
+    bool SaveToFile(
+        const std::wstring& filePath,
+        std::string_view projectTitle = "Untitled",
+        VoicingStyle voicing = VoicingStyle::RootPosition,
+        int bassMode = 0,
+        int gridTicks = TICKS_PER_BEAT
+    ) const;
+
+    bool LoadFromFile(
+        const std::wstring& filePath,
+        std::string& outTitle,
+        VoicingStyle& outVoicing,
+        int& outBassMode,
+        int& outGridTicks
+    );
+
+    // 自動バックアップ保存 (最新5件保持ローテーション)
+    static bool PerformAutoBackup(
+        const std::wstring& currentProjectFilePath,
+        const std::string& projectTitle,
+        const std::string& projectData
+    );
+
 private:
     std::vector<Part> m_parts;
     int m_activePartIndex = 0;
+    int m_nextPartId = 1;
 };
 
 } // namespace clp

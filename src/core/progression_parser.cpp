@@ -3,6 +3,7 @@
 #include <sstream>
 #include <regex>
 #include <numeric>
+#include <algorithm>
 
 namespace clp {
 
@@ -94,6 +95,7 @@ std::vector<Bar> ProgressionParser::Parse(
     lastValidChord.rootPitch = PitchClass::C;
     lastValidChord.quality = ChordQuality::Major;
     lastValidChord.durationBeats = defaultNumerator;
+    lastValidChord.durationTicks = defaultNumerator * TICKS_PER_BEAT;
 
     // 行ごとに分割
     std::istringstream stream((std::string(text)));
@@ -119,8 +121,7 @@ std::vector<Bar> ProgressionParser::Parse(
                 size_t ks = kStr.find_first_not_of(" \t");
                 if (ks != std::string::npos) {
                     kStr = kStr.substr(ks);
-                    // モード判定
-                    if (kStr.find("minor") != std::string::npos || kStr.find("m") != std::string::npos) {
+                    if (kStr.find("minor") != std::string::npos || kStr.find("Minor") != std::string::npos) {
                         currentMode = MusicalMode::NaturalMinor;
                     } else {
                         currentMode = MusicalMode::Major;
@@ -155,8 +156,27 @@ std::vector<Bar> ProgressionParser::Parse(
                 barSegments.push_back(seg.substr(s, seg.find_last_not_of(" \t") - s + 1));
             }
         } else {
-            // 小節線がない場合は1行を1小節として扱う
-            barSegments.push_back(line);
+            // 小節線がない場合: トークン数が defaultNumerator (4) を超える場合は4拍ごとに小節を自動分割する
+            auto lineTokens = TokenizeBar(line);
+            if (static_cast<int>(lineTokens.size()) > defaultNumerator) {
+                std::string chunk;
+                int countInChunk = 0;
+                for (const auto& t : lineTokens) {
+                    if (!chunk.empty()) chunk += " ";
+                    chunk += t;
+                    countInChunk++;
+                    if (countInChunk >= defaultNumerator) {
+                        barSegments.push_back(chunk);
+                        chunk.clear();
+                        countInChunk = 0;
+                    }
+                }
+                if (!chunk.empty()) {
+                    barSegments.push_back(chunk);
+                }
+            } else {
+                barSegments.push_back(line);
+            }
         }
 
         for (const auto& seg : barSegments) {
@@ -183,7 +203,6 @@ std::vector<Bar> ProgressionParser::Parse(
                 if (!lastValidBar.chords.empty()) {
                     bar.chords = lastValidBar.chords;
                 } else {
-                    // 直前の小節がない場合はデフォルトコード
                     bar.chords.push_back(lastValidChord);
                 }
                 bars.push_back(bar);
@@ -204,7 +223,6 @@ std::vector<Bar> ProgressionParser::Parse(
                     pt.isHyphen = true;
                     parsedList.push_back(pt);
                 } else if (IsRepeatToken(tok)) {
-                    // 拍単位の反復
                     ParsedToken pt;
                     pt.chord = lastValidChord;
                     pt.chord.rawText = tok;
@@ -229,25 +247,26 @@ std::vector<Bar> ProgressionParser::Parse(
             }
 
             // 音価の計算
-            // ハイフンが含まれる場合は、直前のコードの durationBeats を加算
             std::vector<ChordToken> finalChords;
             for (const auto& pt : parsedList) {
                 if (pt.isHyphen) {
                     if (!finalChords.empty()) {
                         finalChords.back().durationBeats++;
+                        finalChords.back().durationTicks = finalChords.back().durationBeats * TICKS_PER_BEAT;
                     }
                 } else {
                     finalChords.push_back(pt.chord);
                     finalChords.back().durationBeats = 1;
+                    finalChords.back().durationTicks = TICKS_PER_BEAT;
                 }
             }
 
-            // ハイフン指定がない場合、小節の拍数を均等に分配
             int totalBeatsSpecified = 0;
             for (const auto& c : finalChords) {
                 totalBeatsSpecified += c.durationBeats;
             }
 
+            const int barTotalTicks = bar.GetTotalTicks();
             if (totalBeatsSpecified < defaultNumerator && !finalChords.empty()) {
                 size_t numChords = finalChords.size();
                 int baseBeats = defaultNumerator / static_cast<int>(numChords);
@@ -255,6 +274,26 @@ std::vector<Bar> ProgressionParser::Parse(
 
                 for (size_t i = 0; i < numChords; ++i) {
                     finalChords[i].durationBeats = baseBeats + (i < static_cast<size_t>(remainder) ? 1 : 0);
+                    finalChords[i].durationTicks = finalChords[i].durationBeats * TICKS_PER_BEAT;
+                }
+            } else if (totalBeatsSpecified > defaultNumerator && !finalChords.empty()) {
+                // 1小節に5個以上のコードが明示された場合も 0 tick にならないよう barTotalTicks を配分
+                int tickPerUnit = std::max(60, barTotalTicks / totalBeatsSpecified);
+                int assignedTicks = 0;
+                for (size_t i = 0; i < finalChords.size(); ++i) {
+                    if (i + 1 == finalChords.size()) {
+                        finalChords[i].SetTicks(std::max(60, barTotalTicks - assignedTicks));
+                    } else {
+                        int t = tickPerUnit * finalChords[i].durationBeats;
+                        finalChords[i].SetTicks(t);
+                        assignedTicks += t;
+                    }
+                }
+            } else {
+                for (auto& c : finalChords) {
+                    if (c.durationTicks <= 0) {
+                        c.durationTicks = std::max(60, c.durationBeats * TICKS_PER_BEAT);
+                    }
                 }
             }
 
@@ -305,7 +344,6 @@ std::string ProgressionParser::Format(const std::vector<Bar>& bars, int barsPerL
                         oss << "/" << chord.bassName;
                     }
                 }
-                // 拍数が複数ある場合はハイフンで表現
                 if (bar.chords.size() == 1 && chord.durationBeats > 1) {
                     // 1コード1小節の場合は余計なハイフン不要
                 } else {
