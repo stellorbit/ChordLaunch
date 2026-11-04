@@ -22,7 +22,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 # 共通C++高速化モジュール (Ninja + ccache + lld-link + PCH/Unity + /O2 /GL /LTCG /arch:AVX2 /fp:fast /Gw + PGO)
-include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/CppOptimization.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CppOptimization.cmake")
 enable_cpp_build_optimizations()
 
 if (MSVC)
