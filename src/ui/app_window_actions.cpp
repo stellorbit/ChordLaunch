@@ -1,4 +1,5 @@
 #include "app_window_internal.hpp"
+#include "../version.h"
 namespace clp {
 // ---------------------------------------------------------------------------
 // タイムライン・コード操作実装
@@ -584,7 +585,7 @@ void AppWindow::SeekToTick(double tick) {
 // ウィンドウタイトル更新・ステータス・自動バックアップ
 // ---------------------------------------------------------------------------
 void AppWindow::UpdateWindowTitle() {
-    std::wstring title = L"Chord Launch";
+    std::wstring title = L"Chord Launch " CHORDLAUNCH_VERSION_WSTR;
     if (!m_currentProjectPath.empty()) {
         std::filesystem::path p(m_currentProjectPath);
         title += L" - [" + p.filename().wstring() + L"]";

@@ -11,12 +11,23 @@
     表示用バージョン (例: v26.11-Pre)。ファイル名と Inno Setup に使用する。
 #>
 param(
-    [string]$Version = "v26.11-Pre",
-    [string]$FileVersion = "26.11.0.0"
+    [string]$Version = "",
+    [string]$FileVersion = ""
 )
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
+
+# 既定値は src\version.h (単一の定義元) から取得する
+$versionHeader = Get-Content (Join-Path $Root "src\version.h") -Raw
+if (-not $Version) {
+    if ($versionHeader -match '#define CHORDLAUNCH_VERSION_STR "([^"]+)"') { $Version = $Matches[1] }
+    else { throw "src\version.h から CHORDLAUNCH_VERSION_STR を取得できません。" }
+}
+if (-not $FileVersion) {
+    if ($versionHeader -match '#define CHORDLAUNCH_FILEVERSION_STR "([^"]+)"') { $FileVersion = $Matches[1] }
+    else { throw "src\version.h から CHORDLAUNCH_FILEVERSION_STR を取得できません。" }
+}
 $Dist = Join-Path $Root "dist"
 
 function Import-MsvcEnvironment {

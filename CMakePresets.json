@@ -1,0 +1,88 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base-ninja",
+      "hidden": true,
+      "generator": "Ninja",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "ENABLE_CCACHE": "ON",
+        "ENABLE_UNITY_BUILD": "ON",
+        "ENABLE_PCH": "ON",
+        "ENABLE_MAX_OPTIMIZATION": "ON",
+        "CPU_ARCH_FLAG": "/arch:AVX2"
+      }
+    },
+    {
+      "name": "release-max",
+      "displayName": "Release Max Optimization (Ninja + ccache + PCH/Unity + /O2 /GL /LTCG /arch:AVX2 /fp:fast /Gw)",
+      "inherits": "base-ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "USE_LLD_LINK": "OFF",
+        "PGO_MODE": "NONE"
+      }
+    },
+    {
+      "name": "dev-fast",
+      "displayName": "Dev Fast Build (Ninja + ccache + lld-link + PCH/Unity)",
+      "inherits": "base-ninja",
+      "binaryDir": "${sourceDir}/build-dev",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "USE_LLD_LINK": "ON",
+        "PGO_MODE": "NONE"
+      }
+    },
+    {
+      "name": "pgo-instrument",
+      "displayName": "PGO Step 1: Instrument (/GENPROFILE)",
+      "inherits": "base-ninja",
+      "binaryDir": "${sourceDir}/build-pgo",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "USE_LLD_LINK": "OFF",
+        "PGO_MODE": "INSTRUMENT"
+      }
+    },
+    {
+      "name": "pgo-optimize",
+      "displayName": "PGO Step 2: Optimize (/USEPROFILE)",
+      "inherits": "base-ninja",
+      "binaryDir": "${sourceDir}/build-pgo",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "USE_LLD_LINK": "OFF",
+        "PGO_MODE": "OPTIMIZE"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release-max",
+      "configurePreset": "release-max"
+    },
+    {
+      "name": "dev-fast",
+      "configurePreset": "dev-fast"
+    },
+    {
+      "name": "pgo-instrument",
+      "configurePreset": "pgo-instrument"
+    },
+    {
+      "name": "pgo-optimize",
+      "configurePreset": "pgo-optimize"
+    }
+  ]
+}

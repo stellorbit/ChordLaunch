@@ -1,4 +1,5 @@
 #include "app_window_internal.hpp"
+#include "../version.h"
 namespace clp {
 // ---------------------------------------------------------------------------
 // 6. モーダルダイアログ描画 (Settings / Templates / Help / TapTempo)
@@ -456,16 +457,51 @@ void AppWindow::RenderTemplatesModal(const D2D1_RECT_F& rc) {
     }
 }
 
+// ヘルプ「バージョン情報」タブ本体 (製品名・バージョン・後継の旨・生成AI使用表明・リポジトリ)
+void AppWindow::RenderAboutTab(const D2D1_RECT_F& rc) {
+    float y = rc.top;
+    DrawTextSafe(L"ChordLaunch", m_pFontModalTitle, D2D1::RectF(rc.left, y, rc.right, y + 30.0f), m_pBrushText);
+    y += 34.0f;
+
+    std::wstring ver = std::wstring(TR(L"バージョン: ", L"Version: ")) + CHORDLAUNCH_VERSION_WSTR +
+                       TR(L"（プレリリース）", L" (Pre-release)");
+    DrawTextSafe(ver, m_pFontModalTitle, D2D1::RectF(rc.left, y, rc.right, y + 24.0f), m_pBrushAccent);
+    y += 24.0f;
+
+    std::wstring build = std::wstring(TR(L"ビルド日付: ", L"Build date: ")) + L"" __DATE__;
+    DrawTextSafe(build, m_pFontInspector, D2D1::RectF(rc.left, y, rc.right, y + 20.0f), m_pBrushTextMuted);
+    y += 30.0f;
+
+    DrawTextSafe(
+        TR(L"ChordLaunch は、旧アプリ「ChordLaunchpad」の後継アプリです。",
+           L"ChordLaunch is the successor to the former app \"ChordLaunchpad\"."),
+        m_pFontInspector, D2D1::RectF(rc.left, y, rc.right, y + 20.0f), m_pBrushText);
+    y += 32.0f;
+
+    DrawTextSafe(TR(L"生成AI使用表明", L"AI Usage Disclosure"), m_pFontModalTitle,
+                 D2D1::RectF(rc.left, y, rc.right, y + 24.0f), m_pBrushAccent);
+    y += 24.0f;
+    DrawTextSafe(
+        TR(L"本ソフトのコード・ドキュメントは、生成AI（Gemini 4 Argon / Gemini 3.8 Flash / Claude Sonnet 5.5）を使用して作成・改修しています。",
+           L"The code and documentation of this software were created and modified with generative AI (Gemini 4 Argon / Gemini 3.8 Flash / Claude Sonnet 5.5)."),
+        m_pFontInspector, D2D1::RectF(rc.left, y, rc.right, y + 44.0f), m_pBrushText);
+    y += 54.0f;
+
+    DrawTextSafe(std::wstring(TR(L"リポジトリ: ", L"Repository: ")) + CHORDLAUNCH_REPO_URL_WSTR,
+                 m_pFontInspector, D2D1::RectF(rc.left, y, rc.right, y + 20.0f), m_pBrushTextMuted);
+}
+
 void AppWindow::RenderHelpModal(const D2D1_RECT_F& rc) {
     float tabW = 140.0f;
     float tabH = 32.0f;
     const wchar_t* helpTabs[] = {
         TR(L"入力形式", L"Input Formats"),
         TR(L"数字接尾辞", L"Numeric Suffixes"),
-        TR(L"ショートカット", L"Shortcuts")
+        TR(L"ショートカット", L"Shortcuts"),
+        TR(L"バージョン情報", L"About")
     };
 
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 4; ++i) {
         float tx = rc.left + i * (tabW + 8.0f);
         D2D1_RECT_F tRc = D2D1::RectF(tx, rc.top, tx + tabW, rc.top + tabH);
         DrawButton(tRc, helpTabs[i], IconType::None, false, false, m_helpActiveTab == i);
@@ -561,6 +597,9 @@ void AppWindow::RenderHelpModal(const D2D1_RECT_F& rc) {
             DrawTextSafe(suffixes[si].example, m_pFontInspector, D2D1::RectF(trRc.left + col1W + col2W + 8.0f, textY + 2.0f, trRc.right - 8.0f, textY + 20.0f), m_pBrushAccent);
             textY += 23.0f;
         }
+    } else if (m_helpActiveTab == 3) {
+        // --- タブ3: バージョン情報 ---
+        RenderAboutTab(D2D1::RectF(boxRc.left + pad, textY, boxRc.right - pad, boxRc.bottom - 8.0f));
     } else {
         // --- タブ2: ショートカットキー一覧 ---
         struct ShortcutRow {
@@ -1241,7 +1280,7 @@ bool AppWindow::OnModalClick(float x, float y) {
         case ModalType::Help: {
             float tabW = 140.0f;
             float tabH = 32.0f;
-            for (int i = 0; i < 3; ++i) {
+            for (int i = 0; i < 4; ++i) {
                 float tx = bodyRc.left + i * (tabW + 8.0f);
                 if (PtInRectF(D2D1::RectF(tx, bodyRc.top, tx + tabW, bodyRc.top + tabH), x, y)) {
                     m_helpActiveTab = i;

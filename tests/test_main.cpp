@@ -6,6 +6,7 @@
 #include "i18n.hpp"
 #include "wasapi_synth.hpp"
 #include "app_window_internal.hpp"
+#include "../src/version.h"
 #include <windows.h>
 #include <iostream>
 #include <cassert>
@@ -1815,6 +1816,17 @@ void TestExistingProjectDeserializationRestoresPitch() {
     TEST_ASSERT(reSaved.find("\"rawText\": \"C\"") != std::string::npos, "Re-serialized project preserves rawText 'C'");
 }
 
+void TestVersionDefinition() {
+    std::cout << "[TEST] 30. Version definition consistency (src/version.h)\n";
+    std::string ver = CHORDLAUNCH_VERSION_STR;
+    std::string fileVer = CHORDLAUNCH_FILEVERSION_STR;
+    TEST_ASSERT(ver.size() > 1 && ver[0] == 'v', "Version string starts with 'v'");
+    std::string expectedPrefix = "v" + std::to_string(CHORDLAUNCH_VER_MAJOR) + "." + std::to_string(CHORDLAUNCH_VER_MINOR);
+    TEST_ASSERT(ver.rfind(expectedPrefix, 0) == 0, "Version string matches MAJOR.MINOR");
+    TEST_ASSERT(fileVer == std::to_string(CHORDLAUNCH_VER_MAJOR) + "." + std::to_string(CHORDLAUNCH_VER_MINOR) + ".0.0", "File version string matches MAJOR.MINOR.0.0");
+    TEST_ASSERT(std::wstring(CHORDLAUNCH_VERSION_WSTR).size() == ver.size(), "Wide version string has the same length");
+}
+
 void TestAuditFixesRegression() {
     std::cout << "[TEST] 29. Audit fixes: aug chord '+', template store, part removal, MIDI meta length, JSON escapes\n";
 
@@ -1949,6 +1961,7 @@ int main() {
     TestOneBarChordCrossBarInsertion();
     TestExistingProjectDeserializationRestoresPitch();
     TestAuditFixesRegression();
+    TestVersionDefinition();
 
     std::cout << "========================================\n";
     std::cout << "Tests Passed: " << g_passCount << ", Failed: " << g_failCount << "\n";
