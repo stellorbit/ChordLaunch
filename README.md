@@ -1,5 +1,14 @@
 # ChordLaunch
 
+> [!IMPORTANT]
+> ## 生成AI使用表明 / AI Usage Disclosure
+>
+> 本プロジェクトのコード・ドキュメントは、生成AI **Gemini 4 Argon**、**Gemini 3.8 Flash**、**Claude Sonnet 5.5** を使用して作成・改修しています。
+>
+> This project's code and documentation were created and modified with generative AI: **Gemini 4 Argon**, **Gemini 3.8 Flash** and **Claude Sonnet 5.5**.
+
+![ChordLaunch スクリーンショット](docs/screenshot.png)
+
 Windows 向け超軽量・高速コード進行演奏・音楽理論支援デスクトップアプリケーション。
 
 C++20 ネイティブ（Win32 + Direct2D / DirectWrite + WASAPI + OLE Drag & Drop）により構築されており、DAW との同時起動時でも CPU・メモリへの負荷を最小限に抑え、瞬時起動（50ms 未満）と高レスポンスを実現します。
