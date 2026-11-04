@@ -39,13 +39,15 @@ bool WasapiSynth::Initialize() {
 }
 
 void WasapiSynth::Shutdown() {
+    // RenderLoop は最大10msごとに m_running を確認するため、m_audioEvent への SetEvent は不要。
+    // (オーディオスレッド側で m_audioEvent が閉じられる競合を避ける)
     m_running.store(false);
-    if (m_audioEvent) {
-        SetEvent(m_audioEvent);
-    }
     if (m_threadHandle) {
-        WaitForSingleObject(m_threadHandle, 1500);
-        CloseHandle(m_threadHandle);
+        DWORD waitResult = WaitForSingleObject(m_threadHandle, 5000);
+        // スレッドが終了していない場合にハンドルを閉じるとスレッドが使用中の状態を壊すため、閉じずに放棄する
+        if (waitResult == WAIT_OBJECT_0) {
+            CloseHandle(m_threadHandle);
+        }
         m_threadHandle = nullptr;
     }
     if (m_initDoneEvent) {
@@ -354,6 +356,13 @@ void WasapiSynth::RenderLoop() {
         BYTE* pData = nullptr;
         hr = m_renderClient->GetBuffer(numFramesAvailable, &pData);
         if (FAILED(hr) || !pData) continue;
+
+        // 未対応フォーマットでは未初期化バッファを再生しないよう無音として返す
+        const bool formatSupported = isFloat || bitsPerSample == 16 || bitsPerSample == 24 || bitsPerSample == 32;
+        if (!formatSupported) {
+            m_renderClient->ReleaseBuffer(numFramesAvailable, AUDCLNT_BUFFERFLAGS_SILENT);
+            continue;
+        }
 
         float masterVol = m_masterVolume.load();
 

@@ -739,7 +739,26 @@ void AppWindow::OpenOnlineDocumentation() {
 // ---------------------------------------------------------------------------
 // ファイル操作・MIDIドラッグ
 // ---------------------------------------------------------------------------
+bool AppWindow::ConfirmDiscardChanges() {
+    if (!m_isDirty) return true;
+
+    int ret = MessageBoxW(
+        m_hwnd,
+        TR(L"保存されていない変更があります。保存しますか？", L"There are unsaved changes. Save them?"),
+        TR(L"未保存の変更", L"Unsaved Changes"),
+        MB_YESNOCANCEL | MB_ICONQUESTION
+    );
+    if (ret == IDCANCEL) return false;
+    if (ret == IDYES) {
+        DoFileSave();
+        // 保存に失敗、または名前を付けて保存をキャンセルした場合は続行しない
+        return !m_isDirty;
+    }
+    return true;
+}
+
 void AppWindow::DoFileNew() {
+    if (!ConfirmDiscardChanges()) return;
     PushUndo();
     m_partManager.GetParts().clear();
     Part emptyPart;
@@ -785,7 +804,7 @@ void AppWindow::DoFileSaveAs() {
     std::wstring initName = ToWString(m_projectTitle);
     if (initName.empty()) initName = L"MyProgression";
     initName += L".chord";
-    wcscpy_s(szFile, initName.c_str());
+    wcsncpy_s(szFile, MAX_PATH, initName.c_str(), _TRUNCATE);
 
     OPENFILENAMEW ofn = {};
     ofn.lStructSize = sizeof(ofn);
@@ -833,6 +852,8 @@ void AppWindow::DoFileOpen() {
     }
 
     if (GetOpenFileNameW(&ofn)) {
+        if (!ConfirmDiscardChanges()) return;
+
         std::string loadedTitle;
         VoicingStyle loadedVoicing;
         int loadedBassMode = 0;
@@ -847,6 +868,9 @@ void AppWindow::DoFileOpen() {
             m_timelineGridTicks = loadedGrid;
             m_inputGridTicks = loadedInputGrid;
             m_isDirty = false;
+            // 別プロジェクトの編集履歴が混入しないよう Undo/Redo を破棄
+            m_undoStack.clear();
+            m_redoStack.clear();
 
             SyncTimelineToText();
             UpdateWindowTitle();
@@ -879,11 +903,17 @@ void AppWindow::DoMidiSaveAs() {
         auto bytes = MidiBuilder::BuildMidi(bars, bpm, m_selectedVoicing, m_baseOctave, 90, m_bassOctaveMode);
         if (!bytes.empty()) {
             HANDLE hFile = CreateFileW(szFile, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            bool saved = false;
             if (hFile != INVALID_HANDLE_VALUE) {
                 DWORD written = 0;
-                WriteFile(hFile, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr);
+                BOOL wrote = WriteFile(hFile, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr);
                 CloseHandle(hFile);
+                saved = (wrote != FALSE) && (written == static_cast<DWORD>(bytes.size()));
+            }
+            if (saved) {
                 SetStatusMessage(TR(L"MIDIファイルを保存しました", L"MIDI file saved"));
+            } else {
+                MessageBoxW(m_hwnd, TR(L"MIDIファイルの保存に失敗しました。", L"Failed to save MIDI file."), TR(L"エラー", L"Error"), MB_OK | MB_ICONERROR);
             }
         }
     }
@@ -912,11 +942,15 @@ void AppWindow::CopyProgressionToClipboard() {
         size_t bytes = (wtext.size() + 1) * sizeof(wchar_t);
         HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, bytes);
         if (hMem) {
+            bool owned = false; // SetClipboardData 成功後は所有権がOSへ移る
             void* pMem = GlobalLock(hMem);
             if (pMem) {
                 memcpy(pMem, wtext.c_str(), bytes);
                 GlobalUnlock(hMem);
-                SetClipboardData(CF_UNICODETEXT, hMem);
+                owned = (SetClipboardData(CF_UNICODETEXT, hMem) != nullptr);
+            }
+            if (!owned) {
+                GlobalFree(hMem);
             }
         }
         CloseClipboard();
@@ -1039,6 +1073,8 @@ void AppWindow::OpenRecentFile(int index) {
         return;
     }
 
+    if (!ConfirmDiscardChanges()) return;
+
     std::string loadedTitle;
     VoicingStyle loadedVoicing;
     int loadedBassMode = 0;
@@ -1053,6 +1089,9 @@ void AppWindow::OpenRecentFile(int index) {
         m_timelineGridTicks = loadedGrid;
         m_inputGridTicks = loadedInputGrid;
         m_isDirty = false;
+        // 別プロジェクトの編集履歴が混入しないよう Undo/Redo を破棄
+        m_undoStack.clear();
+        m_redoStack.clear();
 
         AddRecentFile(path);
         SyncTimelineToText();
@@ -1099,7 +1138,23 @@ void AppWindow::LoadAppSettings() {
         size_t posRec = content.find("\"recentFiles\"");
         if (posRec != std::string::npos) {
             size_t arrStart = content.find('[', posRec);
-            size_t arrEnd = content.find(']', arrStart);
+            // 配列の終端 ']' は、引用符内（パス中の ']' など）を除外して探す
+            size_t arrEnd = std::string::npos;
+            if (arrStart != std::string::npos) {
+                bool inStr = false;
+                for (size_t k = arrStart + 1; k < content.size(); ++k) {
+                    char ch = content[k];
+                    if (inStr) {
+                        if (ch == '\\') { ++k; continue; }
+                        if (ch == '"') inStr = false;
+                    } else if (ch == '"') {
+                        inStr = true;
+                    } else if (ch == ']') {
+                        arrEnd = k;
+                        break;
+                    }
+                }
+            }
             if (arrStart != std::string::npos && arrEnd != std::string::npos) {
                 size_t cur = arrStart + 1;
                 while (cur < arrEnd) {

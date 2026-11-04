@@ -61,6 +61,10 @@ bool PartManager::RemovePart(int index) {
     if (index < 0 || index >= static_cast<int>(m_parts.size())) return false;
 
     m_parts.erase(m_parts.begin() + index);
+    // 選択中より前のパートを削除した場合は、同じパートを選択し続けるよう番号を補正する
+    if (index < m_activePartIndex) {
+        --m_activePartIndex;
+    }
     if (m_activePartIndex >= static_cast<int>(m_parts.size())) {
         m_activePartIndex = static_cast<int>(m_parts.size()) - 1;
     }
@@ -285,6 +289,8 @@ static std::string FindJsonString(const std::string& src, std::string_view key) 
             else if (next == 'n') result += '\n';
             else if (next == 'r') result += '\r';
             else if (next == 't') result += '\t';
+            else if (next == 'b') result += '\b';
+            else if (next == 'f') result += '\f';
             else result += next;
             pos += 2;
         } else if (src[pos] == '"') {
@@ -674,14 +680,27 @@ bool PartManager::PerformAutoBackup(
         char timeBuf[64];
         std::strftime(timeBuf, sizeof(timeBuf), "%Y%m%d_%H%M%S", &tmNow);
 
+        // タイトルは UTF-8。std::string のまま path に渡すと ACP 解釈で文字化けするため UTF-16 へ変換する
         std::string safeTitle = projectTitle.empty() ? "Untitled" : projectTitle;
-        for (char& c : safeTitle) {
-            if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') {
-                c = '_';
+        std::wstring wTitle;
+        {
+            int wlen = MultiByteToWideChar(CP_UTF8, 0, safeTitle.data(), static_cast<int>(safeTitle.size()), nullptr, 0);
+            if (wlen > 0) {
+                wTitle.resize(static_cast<size_t>(wlen));
+                MultiByteToWideChar(CP_UTF8, 0, safeTitle.data(), static_cast<int>(safeTitle.size()), wTitle.data(), wlen);
             }
         }
+        for (wchar_t& c : wTitle) {
+            if (c < 0x20 || c == L'/' || c == L'\\' || c == L':' || c == L'*' || c == L'?' || c == L'"' || c == L'<' || c == L'>' || c == L'|') {
+                c = L'_';
+            }
+        }
+        if (wTitle.size() > 100) wTitle.resize(100);
+        while (!wTitle.empty() && (wTitle.back() == L'.' || wTitle.back() == L' ')) wTitle.pop_back();
+        if (wTitle.empty()) wTitle = L"Untitled";
 
-        std::string fileName = "Backup_" + safeTitle + "_" + std::string(timeBuf) + ".chord";
+        std::wstring wTime(timeBuf, timeBuf + std::char_traits<char>::length(timeBuf));
+        std::wstring fileName = L"Backup_" + wTitle + L"_" + wTime + L".chord";
         std::filesystem::path backupFile = backupDir / fileName;
 
         std::ofstream ofs(backupFile, std::ios::binary | std::ios::trunc);

@@ -884,6 +884,12 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             OnMouseWheel(delta, static_cast<float>(pt.x), static_cast<float>(pt.y));
             return 0;
         }
+        case WM_CLOSE:
+            if (!ConfirmDiscardChanges()) {
+                return 0;
+            }
+            DestroyWindow(hwnd);
+            return 0;
         case WM_DESTROY:
             PostQuitMessage(0);
             return 0;

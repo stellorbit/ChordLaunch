@@ -11,6 +11,9 @@
 #include <cassert>
 #include <string>
 #include <filesystem>
+#include <fstream>
+#include <algorithm>
+#include <shlobj.h>
 
 using namespace clp;
 
@@ -1812,6 +1815,105 @@ void TestExistingProjectDeserializationRestoresPitch() {
     TEST_ASSERT(reSaved.find("\"rawText\": \"C\"") != std::string::npos, "Re-serialized project preserves rawText 'C'");
 }
 
+void TestAuditFixesRegression() {
+    std::cout << "[TEST] 29. Audit fixes: aug chord '+', template store, part removal, MIDI meta length, JSON escapes\n";
+
+    // 1. 'C+' は C# ではなく augmented
+    auto cAug = MusicEngine::ParseChordSymbol("C+", "C", MusicalMode::Major);
+    TEST_ASSERT(cAug.rootPitch == PitchClass::C, "C+ root is C");
+    TEST_ASSERT(cAug.quality == ChordQuality::Augmented, "C+ is Augmented");
+    auto cAug7 = MusicEngine::ParseChordSymbol("C+7", "C", MusicalMode::Major);
+    TEST_ASSERT(cAug7.rootPitch == PitchClass::C, "C+7 root is C");
+    TEST_ASSERT(cAug7.quality == ChordQuality::Augmented7, "C+7 is Augmented7");
+    auto fsAug = MusicEngine::ParseChordSymbol("F#+", "C", MusicalMode::Major);
+    TEST_ASSERT(fsAug.rootPitch == PitchClass::Fs && fsAug.quality == ChordQuality::Augmented, "F#+ is F# Augmented");
+    auto cSharp = MusicEngine::ParseChordSymbol("C#", "C", MusicalMode::Major);
+    TEST_ASSERT(cSharp.rootPitch == PitchClass::Cs && cSharp.quality == ChordQuality::Major, "C# remains C# major");
+
+    // 2. ノート番号は 0〜127 に収まる
+    auto extreme = MusicEngine::ParseChordSymbol("Bmaj7(13)", "C", MusicalMode::Major);
+    auto extremeNotes = MusicEngine::GetChordMidiNotes(extreme, 8, VoicingStyle::RootPosition, 0, 3);
+    TEST_ASSERT(!extremeNotes.empty(), "Extreme octave chord produces notes");
+    TEST_ASSERT(*std::max_element(extremeNotes.begin(), extremeNotes.end()) <= 127, "Notes clamped to <= 127");
+    auto lowNotes = MusicEngine::GetChordMidiNotes(MusicEngine::ParseChordSymbol("C", "C", MusicalMode::Major), 0, VoicingStyle::RootPosition, 0, 3);
+    TEST_ASSERT(*std::min_element(lowNotes.begin(), lowNotes.end()) >= 0, "Notes clamped to >= 0");
+
+    // 3. ユーザーテンプレート: 複数行・空の説明・タブ・バックスラッシュがファイル上で1レコード1行に保たれる
+    ProgressionTemplate pt;
+    pt.id = "audit_regression_tmpl";
+    pt.name = "Audit\tName";
+    pt.progression = "[Intro]\r\n| C | G |\n| Am | F \\ |";
+    pt.description = "";
+    pt.isUserCustom = true;
+    TEST_ASSERT(MusicEngine::SaveUserTemplate(pt), "Multi-line template saved");
+
+    bool foundInMemory = false;
+    for (const auto& t : MusicEngine::GetTemplatesByCategory("👤 ユーザー定義")) {
+        if (t.id == pt.id) {
+            foundInMemory = true;
+            TEST_ASSERT(t.progression == pt.progression, "Multi-line progression preserved in memory");
+            TEST_ASSERT(t.name == pt.name, "Tab in name preserved in memory");
+        }
+    }
+    TEST_ASSERT(foundInMemory, "Multi-line template visible via GetTemplatesByCategory");
+
+    wchar_t appData[MAX_PATH] = {};
+    if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, appData))) {
+        std::filesystem::path file = std::filesystem::path(appData) / L"ChordLaunch" / L"user_templates.txt";
+        std::ifstream ifs(file);
+        std::string line;
+        int recordLines = 0;
+        bool endsWithEmptyDesc = false;
+        bool hasNoRawBreakInside = true;
+        while (std::getline(ifs, line)) {
+            if (line.rfind(pt.id + "\t", 0) == 0) {
+                ++recordLines;
+                endsWithEmptyDesc = !line.empty() && line.back() == '\t';
+                size_t tabs = static_cast<size_t>(std::count(line.begin(), line.end(), '\t'));
+                hasNoRawBreakInside = (tabs == 3);
+            }
+        }
+        TEST_ASSERT(recordLines == 1, "Template stored as exactly one line");
+        TEST_ASSERT(endsWithEmptyDesc, "Empty description stored as trailing empty field");
+        TEST_ASSERT(hasNoRawBreakInside, "Escaped tab does not add extra fields");
+    }
+    TEST_ASSERT(MusicEngine::DeleteUserTemplate(pt.id), "Audit regression template deleted");
+
+    // 4. RemovePart: 選択中より前を削除しても同じパートが選択され続ける
+    PartManager pm;
+    pm.SetActiveIndex(2);
+    std::string activeName = pm.GetActivePart()->name;
+    TEST_ASSERT(pm.RemovePart(0), "RemovePart(0) succeeds");
+    TEST_ASSERT(pm.GetActiveIndex() == 1, "Active index shifted after removing earlier part");
+    TEST_ASSERT(pm.GetActivePart()->name == activeName, "Same part remains active after removing earlier part");
+
+    // 5. MIDI メタイベント長は可変長数量 (200 バイトのマーカー = 0x81 0x48)
+    auto bars = ProgressionParser::Parse("| C |", "C", MusicalMode::Major);
+    TEST_ASSERT(!bars.empty(), "Bars parsed for MIDI test");
+    bars[0].sectionMarker = std::string(200, 'A');
+    auto midi = MidiBuilder::BuildMidi(bars, 120, VoicingStyle::RootPosition, 4, 90, 0);
+    const uint8_t pattern[] = {0xFF, 0x06, 0x81, 0x48};
+    bool foundVlq = std::search(midi.begin(), midi.end(), std::begin(pattern), std::end(pattern)) != midi.end();
+    TEST_ASSERT(foundVlq, "Marker meta event length encoded as variable-length quantity");
+
+    // 6. ベロシティは 1〜127 にクランプ
+    bars[0].sectionMarker.clear();
+    auto midiOver = MidiBuilder::BuildMidi(bars, 120, VoicingStyle::RootPosition, 4, 300, 0);
+    auto midiMax = MidiBuilder::BuildMidi(bars, 120, VoicingStyle::RootPosition, 4, 127, 0);
+    TEST_ASSERT(midiOver == midiMax, "Velocity above 127 clamped to 127");
+
+    // 7. JSON の \b / \f がタイトルで往復する
+    std::string roundTripTitle = "A\bB\fC";
+    std::string json = pm.SerializeProject(roundTripTitle, VoicingStyle::RootPosition, 0, 480);
+    PartManager pm2;
+    std::string outTitle;
+    VoicingStyle outVoicing = VoicingStyle::RootPosition;
+    int outBass = 0;
+    int outGrid = 0;
+    TEST_ASSERT(pm2.DeserializeProject(json, outTitle, outVoicing, outBass, outGrid), "Project with control chars in title deserializes");
+    TEST_ASSERT(outTitle == roundTripTitle, "Backspace and formfeed in title round-trip");
+}
+
 int main() {
     std::cout << "========================================\n";
     std::cout << "ChordLaunch C++20 Core Test Suite\n";
@@ -1846,6 +1948,7 @@ int main() {
     TestOctaveAndGridSeparation();
     TestOneBarChordCrossBarInsertion();
     TestExistingProjectDeserializationRestoresPitch();
+    TestAuditFixesRegression();
 
     std::cout << "========================================\n";
     std::cout << "Tests Passed: " << g_passCount << ", Failed: " << g_failCount << "\n";

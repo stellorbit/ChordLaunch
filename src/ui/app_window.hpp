@@ -206,6 +206,7 @@ private:
     // クリップボード・ファイル・MIDIドラッグ
     void CopyProgressionToClipboard();
     void PasteProgressionFromClipboard();
+    bool ConfirmDiscardChanges();
     void DoFileNew();
     void DoFileOpen();
     void DoFileSave();

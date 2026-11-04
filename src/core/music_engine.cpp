@@ -64,6 +64,49 @@ void ParseTensionSubstr(std::string_view tStr, std::vector<int8_t>& outTensions)
     }
 }
 
+// ユーザーテンプレート用: タブ・改行・バックスラッシュをエスケープして1レコード1行を保証する
+std::string EscapeTemplateField(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 8);
+    for (char c : s) {
+        if (c == '\\') out += "\\\\";
+        else if (c == '\t') out += "\\t";
+        else if (c == '\n') out += "\\n";
+        else if (c == '\r') out += "\\r";
+        else out += c;
+    }
+    return out;
+}
+
+std::string UnescapeTemplateField(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '\\' && i + 1 < s.size()) {
+            char n = s[i + 1];
+            if (n == '\\') { out += '\\'; ++i; continue; }
+            if (n == 't') { out += '\t'; ++i; continue; }
+            if (n == 'n') { out += '\n'; ++i; continue; }
+            if (n == 'r') { out += '\r'; ++i; continue; }
+        }
+        out += s[i];
+    }
+    return out;
+}
+
+// GetAllGenreTemplates() の結合結果キャッシュが古い場合 true
+bool s_combinedDirty = true;
+
+bool WriteUserTemplateFile(const std::filesystem::path& file, const std::vector<ProgressionTemplate>& templates) {
+    std::ofstream ofs(file);
+    if (!ofs.is_open()) return false;
+    for (const auto& t : templates) {
+        ofs << EscapeTemplateField(t.id) << "\t" << EscapeTemplateField(t.name) << "\t"
+            << EscapeTemplateField(t.progression) << "\t" << EscapeTemplateField(t.description) << "\n";
+    }
+    return true;
+}
+
 } // namespace
 
 std::string MusicEngine::QualityToSuffix(ChordQuality quality) {
@@ -110,7 +153,7 @@ PitchClass MusicEngine::NoteToPitch(std::string_view noteName) {
 
     for (size_t i = 1; i < noteName.size(); ++i) {
         char acc = noteName[i];
-        if (acc == '#' || acc == '+') pitchVal = (pitchVal + 1) % 12;
+        if (acc == '#') pitchVal = (pitchVal + 1) % 12;
         else if (acc == 'b' || acc == 'B') pitchVal = (pitchVal + 11) % 12;
         else break;
     }
@@ -337,7 +380,7 @@ ChordToken MusicEngine::ParseChordSymbol(
     }
 
     size_t rootLen = 1;
-    if (mainPart.size() > 1 && (mainPart[1] == '#' || mainPart[1] == 'b' || mainPart[1] == '+')) {
+    if (mainPart.size() > 1 && (mainPart[1] == '#' || mainPart[1] == 'b')) {
         rootLen = 2;
     }
 
@@ -828,6 +871,11 @@ std::vector<int> MusicEngine::GetChordMidiNotes(
         }
     }
 
+    // MIDI有効範囲 (0〜127) へクランプ (極端なオクターブ設定での負値・範囲外ノート防止)
+    for (int& n : notes) {
+        n = std::clamp(n, 0, 127);
+    }
+
     return notes;
 }
 
@@ -901,10 +949,14 @@ const std::vector<ProgressionTemplate>& MusicEngine::GetAllGenreTemplates() {
         {"hardrock-riff", "🎸 Rock・Punk", "🎸 Rock・Punk", "ハードロック・リフ進行", "i bVII bVI bVII", "ヘビーなリフと相性抜群のマイナーリフ進行", false}
     };
 
+    // 結合結果はユーザーテンプレート更新時のみ再構築 (毎フレームの全コピーと参照無効化を回避)
     static std::vector<ProgressionTemplate> s_combined;
-    s_combined = kDefaultTemplates;
-    for (const auto& ut : s_userTemplates) {
-        s_combined.push_back(ut);
+    if (s_combinedDirty) {
+        s_combined = kDefaultTemplates;
+        for (const auto& ut : s_userTemplates) {
+            s_combined.push_back(ut);
+        }
+        s_combinedDirty = false;
     }
     return s_combined;
 }
@@ -946,26 +998,34 @@ void MusicEngine::LoadUserTemplates() {
             std::ifstream ifs(file);
             std::string line;
             while (std::getline(ifs, line)) {
+                if (!line.empty() && line.back() == '\r') line.pop_back();
                 if (line.empty() || line[0] == '#') continue;
-                std::stringstream ss(line);
-                std::string id, name, prog, desc;
-                if (std::getline(ss, id, '\t') &&
-                    std::getline(ss, name, '\t') &&
-                    std::getline(ss, prog, '\t') &&
-                    std::getline(ss, desc, '\t')) {
+
+                // タブ区切り4フィールド (末尾の説明が空でも保持する)
+                std::vector<std::string> fields;
+                size_t start = 0;
+                while (fields.size() < 3) {
+                    size_t tab = line.find('\t', start);
+                    if (tab == std::string::npos) break;
+                    fields.push_back(line.substr(start, tab - start));
+                    start = tab + 1;
+                }
+                if (fields.size() == 3) {
+                    fields.push_back(line.substr(start));
                     ProgressionTemplate pt;
-                    pt.id = id;
+                    pt.id = UnescapeTemplateField(fields[0]);
                     pt.majorCategory = "👤 ユーザー定義";
                     pt.subCategory = "カスタム";
-                    pt.name = name;
-                    pt.progression = prog;
-                    pt.description = desc;
+                    pt.name = UnescapeTemplateField(fields[1]);
+                    pt.progression = UnescapeTemplateField(fields[2]);
+                    pt.description = UnescapeTemplateField(fields[3]);
                     pt.isUserCustom = true;
                     s_userTemplates.push_back(pt);
                 }
             }
         }
     }
+    s_combinedDirty = true;
 }
 
 bool MusicEngine::SaveUserTemplate(const ProgressionTemplate& tmpl) {
@@ -981,19 +1041,13 @@ bool MusicEngine::SaveUserTemplate(const ProgressionTemplate& tmpl) {
     copy.majorCategory = "👤 ユーザー定義";
     copy.isUserCustom = true;
     s_userTemplates.push_back(copy);
+    s_combinedDirty = true;
 
     wchar_t appDataPath[MAX_PATH];
     if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, appDataPath))) {
         std::filesystem::path dir = std::filesystem::path(appDataPath) / L"ChordLaunch";
         std::filesystem::create_directories(dir);
-        std::filesystem::path file = dir / L"user_templates.txt";
-        std::ofstream ofs(file);
-        if (ofs.is_open()) {
-            for (const auto& t : s_userTemplates) {
-                ofs << t.id << "\t" << t.name << "\t" << t.progression << "\t" << t.description << "\n";
-            }
-            return true;
-        }
+        return WriteUserTemplateFile(dir / L"user_templates.txt", s_userTemplates);
     }
     return false;
 }
@@ -1009,18 +1063,12 @@ bool MusicEngine::DeleteUserTemplate(std::string_view id) {
     );
 
     if (s_userTemplates.size() == prevSize) return false;
+    s_combinedDirty = true;
 
     wchar_t appDataPath[MAX_PATH];
     if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, appDataPath))) {
         std::filesystem::path dir = std::filesystem::path(appDataPath) / L"ChordLaunch";
-        std::filesystem::path file = dir / L"user_templates.txt";
-        std::ofstream ofs(file);
-        if (ofs.is_open()) {
-            for (const auto& t : s_userTemplates) {
-                ofs << t.id << "\t" << t.name << "\t" << t.progression << "\t" << t.description << "\n";
-            }
-            return true;
-        }
+        return WriteUserTemplateFile(dir / L"user_templates.txt", s_userTemplates);
     }
     return false;
 }

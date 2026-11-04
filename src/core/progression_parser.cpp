@@ -1,8 +1,7 @@
 #include "progression_parser.hpp"
 #include "music_engine.hpp"
 #include <sstream>
-#include <regex>
-#include <numeric>
+#include <cctype>
 #include <algorithm>
 
 namespace clp {

@@ -80,7 +80,7 @@ std::vector<uint8_t> MidiBuilder::BuildMidi(
     trackBytes.push_back(0xFF);
     trackBytes.push_back(0x03);
     std::string trackName = "ChordLaunch";
-    trackBytes.push_back(static_cast<uint8_t>(trackName.size()));
+    WriteVariableLength(trackBytes, static_cast<uint32_t>(trackName.size()));
     trackBytes.insert(trackBytes.end(), trackName.begin(), trackName.end());
 
     // 各小節のコードをノートイベントに変換 (480 ticks = 1 beat)
@@ -93,7 +93,7 @@ std::vector<uint8_t> MidiBuilder::BuildMidi(
             pendingDeltaTicks = 0;
             trackBytes.push_back(0xFF);
             trackBytes.push_back(0x06); // Marker
-            trackBytes.push_back(static_cast<uint8_t>(bar.sectionMarker.size()));
+            WriteVariableLength(trackBytes, static_cast<uint32_t>(bar.sectionMarker.size()));
             trackBytes.insert(trackBytes.end(), bar.sectionMarker.begin(), bar.sectionMarker.end());
         }
         if (!bar.keyChange.empty()) {
@@ -102,7 +102,7 @@ std::vector<uint8_t> MidiBuilder::BuildMidi(
             trackBytes.push_back(0xFF);
             trackBytes.push_back(0x01); // Text Meta Event
             std::string text = "Key: " + bar.keyChange;
-            trackBytes.push_back(static_cast<uint8_t>(text.size()));
+            WriteVariableLength(trackBytes, static_cast<uint32_t>(text.size()));
             trackBytes.insert(trackBytes.end(), text.begin(), text.end());
         }
 
@@ -128,7 +128,7 @@ std::vector<uint8_t> MidiBuilder::BuildMidi(
                 WriteVariableLength(trackBytes, (ni == 0) ? pendingDeltaTicks : 0);
                 trackBytes.push_back(0x90); // Note On Ch 1
                 trackBytes.push_back(static_cast<uint8_t>(std::clamp(notes[ni], 0, 127)));
-                trackBytes.push_back(static_cast<uint8_t>(velocity));
+                trackBytes.push_back(static_cast<uint8_t>(std::clamp(velocity, 1, 127)));
             }
             pendingDeltaTicks = 0;
 
@@ -178,11 +178,36 @@ std::wstring MidiBuilder::ExportToTempFile(
 
     std::wstring filePath = std::wstring(tempPath) + filenamePrefix + L"_" + std::to_wstring(GetTickCount64()) + L".mid";
 
+    // 過去の一時MIDIファイル (24時間以上前) を削除してTempの肥大化を防ぐ
+    {
+        WIN32_FIND_DATAW fd;
+        HANDLE hFind = FindFirstFileW((std::wstring(tempPath) + filenamePrefix + L"_*.mid").c_str(), &fd);
+        if (hFind != INVALID_HANDLE_VALUE) {
+            FILETIME nowFt;
+            GetSystemTimeAsFileTime(&nowFt);
+            ULARGE_INTEGER nowUi;
+            nowUi.LowPart = nowFt.dwLowDateTime;
+            nowUi.HighPart = nowFt.dwHighDateTime;
+            constexpr ULONGLONG kDay100ns = 24ULL * 3600ULL * 10000000ULL;
+            do {
+                if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+                ULARGE_INTEGER wt;
+                wt.LowPart = fd.ftLastWriteTime.dwLowDateTime;
+                wt.HighPart = fd.ftLastWriteTime.dwHighDateTime;
+                if (nowUi.QuadPart > wt.QuadPart && nowUi.QuadPart - wt.QuadPart > kDay100ns) {
+                    DeleteFileW((std::wstring(tempPath) + fd.cFileName).c_str());
+                }
+            } while (FindNextFileW(hFind, &fd));
+            FindClose(hFind);
+        }
+    }
+
     std::ofstream ofs(filePath, std::ios::binary);
     if (!ofs.is_open()) return L"";
 
-    ofs.write(reinterpret_cast<const char*>(midiBytes.data()), midiBytes.size());
+    ofs.write(reinterpret_cast<const char*>(midiBytes.data()), static_cast<std::streamsize>(midiBytes.size()));
     ofs.close();
+    if (ofs.fail()) return L"";
 
     return filePath;
 }

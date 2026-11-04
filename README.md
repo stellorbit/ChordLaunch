@@ -37,16 +37,31 @@ C++20 ネイティブ（Win32 + Direct2D / DirectWrite + WASAPI + OLE Drag & Dro
 - Windows 10 / 11 (x64)
 - Visual Studio 2022 / 2026 (MSVC C++20 サポート)
 - CMake 3.25 以上
+- Ninja、ccache（任意だが推奨）、`../cmake/CppOptimization.cmake`（ワークスペース共通モジュール）
 
 ### ビルド手順
 
-```powershell
-# 設定
-cmake -B build -A x64
+本プロジェクトは Ninja + `CMakePresets.json` を前提とします（Visual Studio ジェネレータ用の `cmake -B build -A x64` は使用しません）。MSVC x64 環境（`vcvars64.bat`）をロードした上で実行してください。下記のスクリプトは環境ロード・ビルド・単体テスト実行を自動で行います。
 
-# ビルド (Release)
-cmake --build build --config Release
+```powershell
+# 推奨: 共通スクリプト（H:\Antigravity\cmake）。Mode は dev-fast / release-max / pgo
+& ..\cmake\Invoke-CppFastBuild.ps1 -Project ChordLaunchpad -Mode dev-fast
+```
+
+手動で実行する場合（`vcvars64.bat` ロード済みの Developer PowerShell で実行）:
+
+```powershell
+cmake --preset release-max
+cmake --build --preset release-max
 
 # 自動テスト実行
-& .\build\Release\clp_tests.exe
+& .\build\clp_tests.exe
 ```
+
+| プリセット | 出力先 | 用途 |
+| :--- | :--- | :--- |
+| `release-max` | `build/` | 最大最適化（/O2 /GL /LTCG /arch:AVX2） |
+| `dev-fast` | `build-dev/` | 開発用高速ビルド（lld-link） |
+| `pgo-instrument` / `pgo-optimize` | `build-pgo/` | PGO 2段階ビルド |
+
+生成物は `ChordLaunch.exe`（本体）と `clp_tests.exe`（単体テスト）です。
