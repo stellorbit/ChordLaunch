@@ -1926,6 +1926,124 @@ void TestAuditFixesRegression() {
     TEST_ASSERT(outTitle == roundTripTitle, "Backspace and formfeed in title round-trip");
 }
 
+void TestChordMoveAndClipboard() {
+    std::cout << "[TEST] 31. Cross-bar chord move and chord clipboard (Move/Extract/Remove/Insert)\n";
+
+    // 1. 小節線を越える移動: カードは分割されず1枚のまま小節を跨ぐ
+    {
+        Bar b1 = MakeTickBar4();
+        b1.chords.push_back(MakeTok("C", 1920));
+        Bar b2 = MakeTickBar4();
+        b2.chords.push_back(MakeRestTok(1920));
+
+        auto res = TimelineEdit::MoveChordSpan({ b1, b2 }, 0, 1440, 120);
+        TEST_ASSERT(res.bars.size() == 2, "Move keeps the bar count");
+        TEST_ASSERT(res.bars[0].chords.size() == 2, "Source bar holds a rest and one spanning card");
+        TEST_ASSERT(res.bars[0].chords[0].isRest && res.bars[0].chords[0].durationTicks == 1440, "Leading rest is 1440 ticks");
+        TEST_ASSERT(res.bars[0].chords[1].rootName == "C" && res.bars[0].chords[1].durationTicks == 1920,
+                    "Moved card keeps its full 1920 ticks across the bar line (not split)");
+        TEST_ASSERT(res.bars[1].chords.size() == 1 && res.bars[1].chords[0].isRest, "Next bar stays a single covered rest");
+        TEST_ASSERT(res.selectedBar == 0 && res.selectedChord == 1, "Moved card is reported as the selection");
+    }
+
+    // 2. 末尾を越える移動先は、長さを保ったまま曲末に収まる位置へクランプされる
+    {
+        Bar b1 = MakeTickBar4();
+        b1.chords.push_back(MakeTok("C", 960));
+        b1.chords.push_back(MakeRestTok(960));
+        auto res = TimelineEdit::MoveChordSpan({ b1 }, 0, 99999, 120);
+        TEST_ASSERT(res.bars[0].chords.back().rootName == "C" && res.bars[0].chords.back().durationTicks == 960,
+                    "Move beyond the song end clamps while keeping the length");
+        TEST_ASSERT(TimelineEdit::TotalTicks(res.bars[0]) == 1920, "Song length is unchanged after a clamped move");
+    }
+
+    // 3. 抽出 / 取り除き / 貼り付けの往復
+    {
+        Bar b1 = MakeTickBar4();
+        b1.chords.push_back(MakeTok("C", 960));
+        b1.chords.push_back(MakeTok("G", 960));
+        Bar b2 = MakeTickBar4();
+        b2.chords.push_back(MakeTok("Am", 960));
+        b2.chords.push_back(MakeTok("F", 960));
+        std::vector<Bar> bars = { b1, b2 };
+
+        auto items = TimelineEdit::ExtractChords(bars, { 960, 0 });
+        TEST_ASSERT(items.size() == 2, "Extract returns both selected chords");
+        TEST_ASSERT(items[0].startTick == 0 && items[0].chord.rootName == "C", "First item is relative tick 0 (sorted by time)");
+        TEST_ASSERT(items[1].startTick == 960 && items[1].chord.rootName == "G", "Second item keeps its relative offset");
+
+        auto removed = TimelineEdit::RemoveChords(bars, { 0, 960 });
+        TEST_ASSERT(removed[0].chords.size() == 1 && removed[0].chords[0].isRest && removed[0].chords[0].durationTicks == 1920,
+                    "Cut leaves a single full-bar rest");
+        TEST_ASSERT(removed[1].chords.size() == 2 && removed[1].chords[0].rootName == "Am", "Unselected bar is untouched by cut");
+
+        auto pasted = TimelineEdit::InsertRange(bars, items, 1920);
+        TEST_ASSERT(pasted[1].chords.size() == 2, "Paste over a bar keeps two chords");
+        TEST_ASSERT(pasted[1].chords[0].rootName == "C" && pasted[1].chords[1].rootName == "G", "Pasted chords replace the covered span");
+        TEST_ASSERT(TimelineEdit::TotalTicks(pasted[1]) == 1920, "Pasted bar length is preserved");
+        TEST_ASSERT(pasted[0].chords[0].rootName == "C" && pasted[0].chords[1].rootName == "G", "Source bar is unchanged by paste");
+
+        // 曲末を越える分は貼り付けない（切り詰め / 破棄）
+        auto tail = TimelineEdit::InsertRange(bars, items, 3360);
+        TEST_ASSERT(tail[1].chords.size() == 3, "Paste near the song end splits the last bar");
+        TEST_ASSERT(tail[1].chords[2].rootName == "C" && tail[1].chords[2].durationTicks == 480, "Tail paste is trimmed to the song end");
+        TEST_ASSERT(TimelineEdit::SongTicks(tail) == 3840, "Song length is unchanged after tail paste");
+    }
+}
+
+void TestBridgeSuggestions() {
+    std::cout << "[TEST] 32. Cross-part suggestion bridging (GetBridgeSuggestions / OrderBorrowedByContext)\n";
+
+    ChordToken am = MusicEngine::ParseChordSymbol("Am", "C", MusicalMode::Major);
+    ChordToken g = MusicEngine::ParseChordSymbol("G", "C", MusicalMode::Major);
+
+    // 同キー: 通常の候補と同じ結果（前パートから連続）
+    {
+        auto bridge = MusicEngine::GetBridgeSuggestions(am, "C", MusicalMode::Major, "C", MusicalMode::Major, false);
+        auto plain = MusicEngine::GetSuggestions({ am }, "C", MusicalMode::Major, false);
+        TEST_ASSERT(bridge.size() == plain.size() && !bridge.empty(), "Same key yields the same number of suggestions as GetSuggestions");
+        bool same = (bridge.size() == plain.size());
+        for (size_t i = 0; same && i < bridge.size(); ++i) {
+            same = (bridge[i].rootName == plain[i].rootName && bridge[i].quality == plain[i].quality);
+        }
+        TEST_ASSERT(same, "Same key keeps the GetSuggestions order");
+    }
+
+    // 異キー(C → G): 前パート末尾 G は両キーで使えるため先頭に来る（重複なし）
+    {
+        auto bridge = MusicEngine::GetBridgeSuggestions(g, "C", MusicalMode::Major, "G", MusicalMode::Major, false);
+        TEST_ASSERT(bridge.size() >= 4, "Different key yields at least four suggestions");
+        TEST_ASSERT(!bridge.empty() && bridge[0].rootName == "G", "Shared pivot chord (G) is suggested first");
+        bool unique = true;
+        for (size_t i = 0; i < bridge.size(); ++i) {
+            for (size_t j = i + 1; j < bridge.size(); ++j) {
+                if (bridge[i].rootPitch == bridge[j].rootPitch && bridge[i].quality == bridge[j].quality) unique = false;
+            }
+        }
+        TEST_ASSERT(unique, "Bridge suggestions contain no duplicates");
+    }
+
+    // 前コードなし（休符）は、通常の初期候補にフォールバックする
+    {
+        auto bridge = MusicEngine::GetBridgeSuggestions(MakeRestTok(480), "C", MusicalMode::Major, "G", MusicalMode::Major, false);
+        auto plain = MusicEngine::GetSuggestions({}, "G", MusicalMode::Major, false);
+        TEST_ASSERT(bridge.size() == plain.size() && !bridge.empty() && bridge[0].rootName == plain[0].rootName,
+                    "Rest as previous chord falls back to the default suggestions");
+    }
+
+    // 借用コードは基準コードに近い根音から並べる（件数は変わらない）
+    {
+        auto borrowed = MusicEngine::GetModalInterchangeChords("C", MusicalMode::Major, false);
+        auto ordered = MusicEngine::OrderBorrowedByContext(borrowed, g);
+        TEST_ASSERT(ordered.size() == borrowed.size(), "Borrowed chord count is preserved");
+        auto dist = [&](const ChordToken& c) {
+            int d = std::abs(static_cast<int>(c.rootPitch) - static_cast<int>(g.rootPitch)) % 12;
+            return std::min(d, 12 - d);
+        };
+        TEST_ASSERT(!ordered.empty() && dist(ordered.front()) <= dist(ordered.back()), "Borrowed chords are ordered by closeness to the base chord");
+    }
+}
+
 int main() {
     std::cout << "========================================\n";
     std::cout << "ChordLaunch C++20 Core Test Suite\n";
@@ -1962,6 +2080,8 @@ int main() {
     TestExistingProjectDeserializationRestoresPitch();
     TestAuditFixesRegression();
     TestVersionDefinition();
+    TestChordMoveAndClipboard();
+    TestBridgeSuggestions();
 
     std::cout << "========================================\n";
     std::cout << "Tests Passed: " << g_passCount << ", Failed: " << g_failCount << "\n";

@@ -688,6 +688,7 @@ void AppWindow::RenderTimelineCards(float x, float y, float width, float height)
         if (barTicks <= 0) barTicks = TICKS_PER_BAR_4_4;
 
         float chordOffsetTicks = 0.0f;
+        const int multiBarStart = m_multiSelTicks.empty() ? 0 : TimelineEdit::BarStartTick(bars, static_cast<int>(b));
 
         for (size_t ci = 0; ci < bar.chords.size(); ++ci) {
             const auto& chord = bar.chords[ci];
@@ -695,6 +696,7 @@ void AppWindow::RenderTimelineCards(float x, float y, float width, float height)
 
             float cx = bx + (chordOffsetTicks / barTicks) * barWidth;
             float cw = (static_cast<float>(cTicks) / barTicks) * barWidth;
+            int chordStartTick = multiBarStart + static_cast<int>(chordOffsetTicks);
             chordOffsetTicks += cTicks;
 
             if (cx + cw < x || cx > x + width) continue;
@@ -702,6 +704,10 @@ void AppWindow::RenderTimelineCards(float x, float y, float width, float height)
             D2D1_RECT_F cardRc = D2D1::RectF(cx + 2.0f, cardY, cx + cw - 2.0f, cardY + cardH);
 
             bool isSel = (static_cast<int>(b) == m_selectedBarIndex && static_cast<int>(ci) == m_selectedChordIndex);
+            if (!isSel && !m_isMergedView && !m_multiSelTicks.empty() &&
+                std::find(m_multiSelTicks.begin(), m_multiSelTicks.end(), chordStartTick) != m_multiSelTicks.end()) {
+                isSel = true; // 複数選択中のカード
+            }
             if (chord.isRest) {
                 // 休符・空白区間はカードを描画せず、背景グリッドを透過させてDAWライクな空白を表現
                 if (isSel) {
@@ -1068,16 +1074,7 @@ void AppWindow::RenderRightPane(float x, float y, float width, float height) {
     curY += 24.0f;
 
     if (m_accSuggestionsOpen) {
-        ChordToken lastChord;
-        if (m_selectedBarIndex >= 0 && pActive && m_selectedBarIndex < static_cast<int>(pActive->bars.size())) {
-            const auto& bar = pActive->bars[m_selectedBarIndex];
-            if (m_selectedChordIndex >= 0 && m_selectedChordIndex < static_cast<int>(bar.chords.size())) {
-                lastChord = bar.chords[m_selectedChordIndex];
-            }
-        }
-        std::vector<ChordToken> lastChords;
-        if (!lastChord.rawText.empty()) lastChords.push_back(lastChord);
-        auto suggestions = MusicEngine::GetSuggestions(lastChords, keyRoot, mode, use7th);
+        auto suggestions = BuildSuggestionList(use7th);
         float sCardW = (innerW - 3.0f * 4.0f) / 4.0f;
         float sCardH = 38.0f;
 
@@ -1096,7 +1093,7 @@ void AppWindow::RenderRightPane(float x, float y, float width, float height) {
     curY += 24.0f;
 
     if (m_accBorrowOpen) {
-        auto borrowChords = MusicEngine::GetModalInterchangeChords(keyRoot, mode, use7th);
+        auto borrowChords = BuildBorrowedList(use7th);
         float bCardW = (innerW - 2.0f * 4.0f) / 3.0f;
         float bCardH = 38.0f;
 

@@ -11,6 +11,7 @@
 #include "music_theory.hpp"
 #include "music_engine.hpp"
 #include "part_manager.hpp"
+#include "timeline_edit.hpp"
 #include "wasapi_synth.hpp"
 
 namespace clp {
@@ -149,6 +150,7 @@ private:
     void OnSize(UINT width, UINT height);
     bool HitTestPaletteCard(float x, float y, ChordToken& outChord);
     void InsertChordAtTimelineX(const ChordToken& chord, float x, bool pushUndo = true, int snapTicks = 0);
+    void MoveChordToTimelineX(const ChordToken& chord, int srcBar, int srcChord, float x);
     void InsertChordAtTimelinePosition(const ChordToken& chord, int targetBarIdx, int targetBeat);
     void InsertChordAtTimelineTick(const ChordToken& chord, int targetBarIdx, int targetTickInBar, bool pushUndo = true);
     void SplitSelectedChord();
@@ -198,6 +200,21 @@ private:
     void DeleteSelection();
     void SelectAll();
     void EnsureVisible(int barIndex);
+
+    // 選択解除・複数選択・コード単位のクリップボード
+    void ClearSelection();
+    int  PrimaryChordStartTick() const;               // 主選択コードの絶対開始tick（なし/休符は -1）
+    std::vector<int> GetSelectedStartTicks() const;   // 複数選択があればそれ、なければ主選択のみ
+    void ToggleChordSelection(int barIndex, int chordIndex); // Ctrl+クリック
+    void ExtendSelectionTo(int barIndex, int chordIndex);    // Shift+クリック（アンカーから範囲）
+    void DoEditCut();
+    void DoEditCopy();
+    void DoEditPaste();
+
+    // コード提案の基準（選択コード → パート末尾 → 前パート末尾の順）
+    bool FindSuggestionBase(ChordToken& outChord, const Part*& outPrevPart) const;
+    std::vector<ChordToken> BuildSuggestionList(bool use7th) const;
+    std::vector<ChordToken> BuildBorrowedList(bool use7th) const;
 
     // 再生エンジン (tick単位精密制御)
     void TogglePlayback();
@@ -297,6 +314,10 @@ private:
     float m_pixelsPerBeat = 64.0f;
     int   m_selectedBarIndex = -1;
     int   m_selectedChordIndex = -1;
+    std::vector<int> m_multiSelTicks;                    // 複数選択中コードの絶対開始tick（単一選択時は空）
+    int   m_selAnchorTick = -1;                          // Shift範囲選択のアンカー
+    std::vector<TimelineEdit::RangeItem> m_chordClipboard; // アプリ内コードクリップボード
+    DWORD m_chordClipSeq = 0;                            // コピー時のOSクリップボード連番（変化したら無効）
 
     // リサイズ・ドラッグ＆ドロップ状態
     enum class DragMode { None, CardMove, CardResizeLeft, CardResizeRight, ScrollBarThumb, PaletteCardDrag, CardTimelineDrag, RulerSeek };

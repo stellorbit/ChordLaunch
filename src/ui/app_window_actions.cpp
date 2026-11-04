@@ -5,8 +5,10 @@ namespace clp {
 // タイムライン・コード操作実装
 // ---------------------------------------------------------------------------
 void AppWindow::SelectChord(int barIndex, int chordIndex) {
+    m_multiSelTicks.clear();
     m_selectedBarIndex = barIndex;
     m_selectedChordIndex = chordIndex;
+    m_selAnchorTick = PrimaryChordStartTick();
     EnsureVisible(barIndex);
     InvalidateRect(m_hwnd, nullptr, FALSE);
 }
@@ -271,6 +273,68 @@ void AppWindow::InsertChordAtTimelineX(const ChordToken& chord, float x, bool pu
     InsertChordAtTimelineTick(placedChord, targetBarIdx, snappedTick, pushUndo);
 }
 
+void AppWindow::MoveChordToTimelineX(const ChordToken& chord, int srcBar, int srcChord, float x) {
+    Part* pActive = m_partManager.GetActivePart();
+    if (!pActive || srcBar < 0 || srcBar >= static_cast<int>(pActive->bars.size())) return;
+    if (srcChord < 0 || srcChord >= static_cast<int>(pActive->bars[srcBar].chords.size())) return;
+
+    float centerX = m_leftPaneWidth;
+    float barWidth = m_pixelsPerBeat * 4.0f;
+    float relX = std::max(0.0f, (x - centerX) + m_timelineScrollX);
+    int targetBarIdx = (barWidth > 0.0f) ? static_cast<int>(relX / barWidth) : 0;
+
+    if (targetBarIdx < static_cast<int>(pActive->bars.size())) {
+        // 曲内への移動: 絶対tickで移動する。小節線をまたいでもカードは1枚のまま保持される
+        int barTicks = pActive->bars[targetBarIdx].GetTotalTicks();
+        if (barTicks <= 0) barTicks = TICKS_PER_BAR_4_4;
+        float ratio = std::fmod(relX, barWidth) / barWidth;
+        int gridTicks = std::max(1, m_timelineGridTicks);
+        int snapped = static_cast<int>(std::round(ratio * static_cast<float>(barTicks) / static_cast<float>(gridTicks))) * gridTicks;
+        int newStart = TimelineEdit::BarStartTick(pActive->bars, targetBarIdx) + snapped;
+
+        int srcStart = TimelineEdit::BarStartTick(pActive->bars, srcBar);
+        for (int i = 0; i < srcChord; ++i) {
+            const auto& c = pActive->bars[srcBar].chords[i];
+            srcStart += (c.durationTicks > 0) ? c.durationTicks : std::max(1, c.durationBeats) * TICKS_PER_BEAT;
+        }
+        if (newStart == srcStart) return; // 位置が変わらなければ何もしない
+
+        auto res = TimelineEdit::MoveChordSpan(pActive->bars, srcStart, newStart, gridTicks);
+        if (res.selectedBar < 0) return;
+
+        PushUndo();
+        pActive->bars = std::move(res.bars);
+        m_selectedBarIndex = res.selectedBar;
+        m_selectedChordIndex = res.selectedChord;
+        m_selAnchorTick = PrimaryChordStartTick();
+        EnsureVisible(m_selectedBarIndex);
+        SyncTimelineToText();
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+        return;
+    }
+
+    // 曲末より後ろへの移動: 従来どおり移動元を休符化して末尾に小節を延長して挿入する
+    PushUndo();
+    auto& sBar = pActive->bars[srcBar];
+    sBar.chords[srcChord].isRest = true;
+    sBar.chords[srcChord].quality = ChordQuality::Rest;
+    sBar.chords[srcChord].rootName = "R";
+    sBar.chords[srcChord].degreeRoman = "R";
+    sBar.chords[srcChord].rawText = "_";
+
+    std::vector<ChordToken> mergedChords;
+    for (const auto& c : sBar.chords) {
+        if (!mergedChords.empty() && mergedChords.back().isRest && c.isRest) {
+            mergedChords.back().SetTicks(mergedChords.back().durationTicks + c.durationTicks);
+        } else {
+            mergedChords.push_back(c);
+        }
+    }
+    sBar.chords = std::move(mergedChords);
+
+    InsertChordAtTimelineX(chord, x, false);
+}
+
 void AppWindow::SyncTextToTimeline() {
     if (!m_hwndEdit) return;
 
@@ -307,6 +371,7 @@ void AppWindow::PushUndo() {
     snap.parts = m_partManager.GetParts();
     snap.activePartIndex = m_partManager.GetActiveIndex();
     m_undoStack.push_back(std::move(snap));
+    m_multiSelTicks.clear(); // 編集で tick 位置が変わるため複数選択は解除する
     if (m_undoStack.size() > 30) m_undoStack.erase(m_undoStack.begin());
     m_redoStack.clear();
     m_isDirty = true;
@@ -325,6 +390,7 @@ void AppWindow::Undo() {
 
     m_partManager.GetParts() = std::move(prev.parts);
     m_partManager.SetActiveIndex(prev.activePartIndex);
+    m_multiSelTicks.clear();
     m_isDirty = true;
     UpdateWindowTitle();
     SyncTimelineToText();
@@ -343,6 +409,7 @@ void AppWindow::Redo() {
 
     m_partManager.GetParts() = std::move(next.parts);
     m_partManager.SetActiveIndex(next.activePartIndex);
+    m_multiSelTicks.clear();
     m_isDirty = true;
     UpdateWindowTitle();
     SyncTimelineToText();
@@ -382,6 +449,15 @@ void AppWindow::DuplicateSelection() {
 
 void AppWindow::DeleteSelection() {
     Part* pActive = m_partManager.GetActivePart();
+    if (pActive && !m_isMergedView && !m_multiSelTicks.empty()) {
+        // 複数選択中は選択コードをまとめて取り除く（跡は休符になり曲長は変わらない）
+        std::vector<int> ticks = m_multiSelTicks;
+        PushUndo();
+        pActive->bars = TimelineEdit::RemoveChords(pActive->bars, ticks);
+        ClearSelection();
+        SyncTimelineToText();
+        return;
+    }
     if (!pActive || m_selectedBarIndex < 0 || m_selectedBarIndex >= static_cast<int>(pActive->bars.size())) return;
 
     auto& bar = pActive->bars[m_selectedBarIndex];
@@ -398,11 +474,311 @@ void AppWindow::DeleteSelection() {
     InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
+namespace {
+
+int ClipDur(const ChordToken& c) {
+    if (c.durationTicks > 0) return c.durationTicks;
+    return std::max(1, c.durationBeats) * TICKS_PER_BEAT;
+}
+
+// 絶対tick → (小節index, 小節内コードindex)。見つからなければ false。
+bool TickToChordIndex(const std::vector<Bar>& bars, int tick, int& outBar, int& outChord) {
+    int barStart = 0;
+    for (size_t b = 0; b < bars.size(); ++b) {
+        int bt = bars[b].GetTotalTicks();
+        if (bt <= 0) bt = TICKS_PER_BAR_4_4;
+        int local = 0;
+        for (size_t ci = 0; ci < bars[b].chords.size(); ++ci) {
+            if (barStart + local == tick && !bars[b].chords[ci].isRest) {
+                outBar = static_cast<int>(b);
+                outChord = static_cast<int>(ci);
+                return true;
+            }
+            local += ClipDur(bars[b].chords[ci]);
+        }
+        barStart += bt;
+    }
+    return false;
+}
+
+} // namespace
+
+void AppWindow::ClearSelection() {
+    m_multiSelTicks.clear();
+    m_selectedBarIndex = -1;
+    m_selectedChordIndex = -1;
+    m_selAnchorTick = -1;
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+int AppWindow::PrimaryChordStartTick() const {
+    const Part* pActive = m_partManager.GetActivePart();
+    if (!pActive || m_isMergedView) return -1;
+    if (m_selectedBarIndex < 0 || m_selectedBarIndex >= static_cast<int>(pActive->bars.size())) return -1;
+    const auto& bar = pActive->bars[m_selectedBarIndex];
+    if (m_selectedChordIndex < 0 || m_selectedChordIndex >= static_cast<int>(bar.chords.size())) return -1;
+    if (bar.chords[m_selectedChordIndex].isRest) return -1;
+    int tick = TimelineEdit::BarStartTick(pActive->bars, m_selectedBarIndex);
+    for (int i = 0; i < m_selectedChordIndex; ++i) tick += ClipDur(bar.chords[i]);
+    return tick;
+}
+
+std::vector<int> AppWindow::GetSelectedStartTicks() const {
+    if (!m_multiSelTicks.empty()) return m_multiSelTicks;
+    int t = PrimaryChordStartTick();
+    if (t >= 0) return { t };
+    return {};
+}
+
+void AppWindow::ToggleChordSelection(int barIndex, int chordIndex) {
+    Part* pActive = m_partManager.GetActivePart();
+    if (!pActive || m_isMergedView) return;
+    if (barIndex < 0 || barIndex >= static_cast<int>(pActive->bars.size())) return;
+    const auto& bar = pActive->bars[barIndex];
+    if (chordIndex < 0 || chordIndex >= static_cast<int>(bar.chords.size()) || bar.chords[chordIndex].isRest) return;
+
+    int tick = TimelineEdit::BarStartTick(pActive->bars, barIndex);
+    for (int i = 0; i < chordIndex; ++i) tick += ClipDur(bar.chords[i]);
+
+    if (m_multiSelTicks.empty()) {
+        int primary = PrimaryChordStartTick();
+        if (primary >= 0) m_multiSelTicks.push_back(primary);
+    }
+    auto it = std::find(m_multiSelTicks.begin(), m_multiSelTicks.end(), tick);
+    if (it != m_multiSelTicks.end()) m_multiSelTicks.erase(it);
+    else m_multiSelTicks.push_back(tick);
+
+    m_selectedBarIndex = barIndex;
+    m_selectedChordIndex = chordIndex;
+    m_selAnchorTick = tick;
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::ExtendSelectionTo(int barIndex, int chordIndex) {
+    Part* pActive = m_partManager.GetActivePart();
+    if (!pActive || m_isMergedView) return;
+    if (barIndex < 0 || barIndex >= static_cast<int>(pActive->bars.size())) return;
+    const auto& target = pActive->bars[barIndex];
+    if (chordIndex < 0 || chordIndex >= static_cast<int>(target.chords.size()) || target.chords[chordIndex].isRest) return;
+
+    int tick = TimelineEdit::BarStartTick(pActive->bars, barIndex);
+    for (int i = 0; i < chordIndex; ++i) tick += ClipDur(target.chords[i]);
+
+    int anchor = (m_selAnchorTick >= 0) ? m_selAnchorTick : tick;
+    int lo = std::min(anchor, tick);
+    int hi = std::max(anchor, tick);
+
+    m_multiSelTicks.clear();
+    int barStart = 0;
+    for (const auto& bar : pActive->bars) {
+        int bt = bar.GetTotalTicks();
+        if (bt <= 0) bt = TICKS_PER_BAR_4_4;
+        int local = 0;
+        for (const auto& c : bar.chords) {
+            int s = barStart + local;
+            if (!c.isRest && s >= lo && s <= hi) m_multiSelTicks.push_back(s);
+            local += ClipDur(c);
+        }
+        barStart += bt;
+    }
+    if (m_multiSelTicks.size() < 2) m_multiSelTicks.clear();
+
+    m_selectedBarIndex = barIndex;
+    m_selectedChordIndex = chordIndex;
+    m_selAnchorTick = anchor;
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
 void AppWindow::SelectAll() {
     Part* pActive = m_partManager.GetActivePart();
-    if (pActive && !pActive->bars.empty() && !pActive->bars[0].chords.empty()) {
-        SelectChord(0, 0);
+    if (!pActive || m_isMergedView || pActive->bars.empty()) return;
+
+    std::vector<int> all;
+    int firstBar = -1, firstChord = -1;
+    int barStart = 0;
+    for (size_t b = 0; b < pActive->bars.size(); ++b) {
+        const auto& bar = pActive->bars[b];
+        int bt = bar.GetTotalTicks();
+        if (bt <= 0) bt = TICKS_PER_BAR_4_4;
+        int local = 0;
+        for (size_t ci = 0; ci < bar.chords.size(); ++ci) {
+            if (!bar.chords[ci].isRest) {
+                all.push_back(barStart + local);
+                if (firstBar < 0) { firstBar = static_cast<int>(b); firstChord = static_cast<int>(ci); }
+            }
+            local += ClipDur(bar.chords[ci]);
+        }
+        barStart += bt;
     }
+    if (all.empty()) return;
+
+    SelectChord(firstBar, firstChord);
+    if (all.size() > 1) m_multiSelTicks = std::move(all);
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::DoEditCopy() {
+    Part* pActive = m_partManager.GetActivePart();
+    std::vector<int> ticks = GetSelectedStartTicks();
+    if (!pActive || ticks.empty()) {
+        CopyProgressionToClipboard(); // 選択なし: 従来どおり進行全体をテキストでコピー
+        return;
+    }
+    m_chordClipboard = TimelineEdit::ExtractChords(pActive->bars, ticks);
+    m_chordClipSeq = GetClipboardSequenceNumber();
+    SetStatusMessage(std::wstring(TR(L"コードをコピーしました: ", L"Copied chords: ")) + std::to_wstring(m_chordClipboard.size()));
+}
+
+void AppWindow::DoEditCut() {
+    Part* pActive = m_partManager.GetActivePart();
+    std::vector<int> ticks = GetSelectedStartTicks();
+    if (!pActive || m_isMergedView || ticks.empty()) return;
+
+    m_chordClipboard = TimelineEdit::ExtractChords(pActive->bars, ticks);
+    m_chordClipSeq = GetClipboardSequenceNumber();
+
+    PushUndo();
+    pActive->bars = TimelineEdit::RemoveChords(pActive->bars, ticks);
+    ClearSelection();
+    SyncTimelineToText();
+    SetStatusMessage(std::wstring(TR(L"コードを切り取りました: ", L"Cut chords: ")) + std::to_wstring(m_chordClipboard.size()));
+}
+
+void AppWindow::DoEditPaste() {
+    Part* pActive = m_partManager.GetActivePart();
+    // アプリ内クリップボードが無効（空、またはコピー後にOS側が更新された）なら、従来のテキスト貼り付け
+    if (!pActive || m_isMergedView || m_chordClipboard.empty() || GetClipboardSequenceNumber() != m_chordClipSeq) {
+        PasteProgressionFromClipboard();
+        return;
+    }
+
+    // 貼り付け位置: 選択範囲の直後。選択なしの場合は再生ヘッド位置（グリッドにスナップ）
+    int atTick = 0;
+    std::vector<int> sel = GetSelectedStartTicks();
+    if (!sel.empty()) {
+        int maxEnd = 0;
+        int barStart = 0;
+        for (const auto& bar : pActive->bars) {
+            int bt = bar.GetTotalTicks();
+            if (bt <= 0) bt = TICKS_PER_BAR_4_4;
+            int local = 0;
+            for (const auto& c : bar.chords) {
+                int s = barStart + local;
+                if (std::find(sel.begin(), sel.end(), s) != sel.end()) maxEnd = std::max(maxEnd, s + ClipDur(c));
+                local += ClipDur(c);
+            }
+            barStart += bt;
+        }
+        atTick = maxEnd;
+    } else {
+        int grid = std::max(1, m_timelineGridTicks);
+        atTick = (static_cast<int>(m_playbackTick) / grid) * grid;
+    }
+    const int songTicks = TimelineEdit::SongTicks(pActive->bars);
+    if (atTick >= songTicks) {
+        SetStatusMessage(TR(L"貼り付け位置が曲の末尾を超えています", L"Paste position is past the end of the song"));
+        return;
+    }
+
+    PushUndo();
+    pActive->bars = TimelineEdit::InsertRange(pActive->bars, m_chordClipboard, atTick);
+
+    // 貼り付けたコードを選択状態にする
+    std::vector<int> pasted;
+    for (const auto& it : m_chordClipboard) {
+        int s = atTick + it.startTick;
+        int b = 0, c = 0;
+        if (TickToChordIndex(pActive->bars, s, b, c)) pasted.push_back(s);
+    }
+    if (!pasted.empty()) {
+        int b = 0, c = 0;
+        if (TickToChordIndex(pActive->bars, pasted.front(), b, c)) {
+            m_selectedBarIndex = b;
+            m_selectedChordIndex = c;
+            m_selAnchorTick = pasted.front();
+            EnsureVisible(b);
+        }
+        if (pasted.size() > 1) m_multiSelTicks = std::move(pasted);
+    }
+    SyncTimelineToText();
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+    SetStatusMessage(std::wstring(TR(L"コードを貼り付けました: ", L"Pasted chords: ")) + std::to_wstring(m_chordClipboard.size()));
+}
+
+// ---------------------------------------------------------------------------
+// コード提案の基準コード（選択 → アクティブパート末尾 → 前パート末尾）
+// ---------------------------------------------------------------------------
+bool AppWindow::FindSuggestionBase(ChordToken& outChord, const Part*& outPrevPart) const {
+    outPrevPart = nullptr;
+    const auto& parts = m_partManager.GetParts();
+    const Part* pActive = m_partManager.GetActivePart();
+    if (!pActive) return false;
+
+    // 1. 選択中のコード
+    if (m_selectedBarIndex >= 0 && m_selectedBarIndex < static_cast<int>(pActive->bars.size())) {
+        const auto& bar = pActive->bars[m_selectedBarIndex];
+        if (m_selectedChordIndex >= 0 && m_selectedChordIndex < static_cast<int>(bar.chords.size())) {
+            const auto& c = bar.chords[m_selectedChordIndex];
+            if (!c.isRest && !c.rawText.empty()) {
+                outChord = c;
+                return true;
+            }
+        }
+    }
+
+    auto lastChordOf = [](const Part& p, ChordToken& out) {
+        for (auto bi = p.bars.rbegin(); bi != p.bars.rend(); ++bi) {
+            for (auto ci = bi->chords.rbegin(); ci != bi->chords.rend(); ++ci) {
+                if (!ci->isRest && !ci->rawText.empty()) {
+                    out = *ci;
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    // 2. アクティブパート自身の末尾コード
+    if (lastChordOf(*pActive, outChord)) return true;
+
+    // 3. 直前パート（空パートはさかのぼる）の末尾コード
+    for (int i = m_partManager.GetActiveIndex() - 1; i >= 0 && i < static_cast<int>(parts.size()); --i) {
+        if (lastChordOf(parts[static_cast<size_t>(i)], outChord)) {
+            outPrevPart = &parts[static_cast<size_t>(i)];
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<ChordToken> AppWindow::BuildSuggestionList(bool use7th) const {
+    const Part* pActive = m_partManager.GetActivePart();
+    std::string keyRoot = pActive ? pActive->keyRoot : "C";
+    MusicalMode mode = pActive ? pActive->mode : MusicalMode::Major;
+
+    ChordToken base;
+    const Part* prevPart = nullptr;
+    if (!FindSuggestionBase(base, prevPart)) {
+        return MusicEngine::GetSuggestions({}, keyRoot, mode, use7th);
+    }
+    if (prevPart) {
+        return MusicEngine::GetBridgeSuggestions(base, prevPart->keyRoot, prevPart->mode, keyRoot, mode, use7th);
+    }
+    return MusicEngine::GetSuggestions({ base }, keyRoot, mode, use7th);
+}
+
+std::vector<ChordToken> AppWindow::BuildBorrowedList(bool use7th) const {
+    const Part* pActive = m_partManager.GetActivePart();
+    std::string keyRoot = pActive ? pActive->keyRoot : "C";
+    MusicalMode mode = pActive ? pActive->mode : MusicalMode::Major;
+    auto borrowed = MusicEngine::GetModalInterchangeChords(keyRoot, mode, use7th);
+
+    ChordToken base;
+    const Part* prevPart = nullptr;
+    if (FindSuggestionBase(base, prevPart)) {
+        return MusicEngine::OrderBorrowedByContext(std::move(borrowed), base);
+    }
+    return borrowed;
 }
 
 // ---------------------------------------------------------------------------

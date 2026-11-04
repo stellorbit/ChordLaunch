@@ -112,6 +112,85 @@ void AbsorbByRests(std::vector<Item>& items, int barTicks, int insertStart) {
     }
 }
 
+// 絶対tick配置（開始順）から、小節ごとのコード列を再構築する。
+// 小節の開始位置は拍子ぶん固定。小節線を越えるカードは開始小節に1枚のまま保持し、
+// 跨ぎカードに覆われた後続区間は切り詰める。
+std::vector<Bar> RebuildBars(const std::vector<Bar>& baseBars, const std::vector<Item>& out) {
+    std::vector<Bar> result;
+    result.reserve(baseBars.size());
+    size_t pi = 0;
+    int coveredUntil = 0;
+    int barStart = 0;
+    for (const auto& baseBar : baseBars) {
+        Bar bar = baseBar;
+        int barTicks = BarTicksOf(bar);
+        int b0 = barStart;
+        int b1 = barStart + barTicks;
+
+        std::vector<Item> local;
+        while (pi < out.size() && out[pi].start < b0) ++pi; // 前小節開始分は前小節に格納済み
+        while (pi < out.size() && out[pi].start < b1) {
+            Item p = out[pi];
+            int start = std::max(p.start, coveredUntil);
+            int end = p.start + DurOf(p.chord);
+            if (start >= b1) break;
+            if (end > start) {
+                ChordToken c = p.chord;
+                c.SetTicks(end - start);
+                local.push_back(Item{start - b0, c});
+                coveredUntil = std::max(coveredUntil, end);
+            }
+            ++pi;
+        }
+        WriteItems(bar, std::move(local));
+        result.push_back(std::move(bar));
+        barStart = b1;
+    }
+    return result;
+}
+
+// 全コード（休符除く）を絶対tick配置として収集する。
+std::vector<Item> CollectAbsolute(const std::vector<Bar>& bars) {
+    std::vector<Item> placements;
+    int barStart = 0;
+    for (const auto& bar : bars) {
+        int local = 0;
+        for (const auto& c : bar.chords) {
+            int d = DurOf(c);
+            if (d <= 0) continue;
+            if (!c.isRest) placements.push_back(Item{barStart + local, c});
+            local += d;
+        }
+        barStart += BarTicksOf(bar);
+    }
+    return placements;
+}
+
+// 配置リストから [s, e) と重なる部分を取り除く（前後の残りは切り詰めて保持）。
+void CarveOut(std::vector<Item>& items, int s, int e) {
+    std::vector<Item> next;
+    next.reserve(items.size() + 1);
+    for (const auto& p : items) {
+        int ps = p.start;
+        int pe = ps + DurOf(p.chord);
+        if (pe <= s || ps >= e) {
+            next.push_back(p);
+            continue;
+        }
+        if (ps < s) {
+            ChordToken left = p.chord;
+            left.SetTicks(s - ps);
+            next.push_back(Item{ps, left});
+        }
+        if (pe > e) {
+            ChordToken right = p.chord;
+            right.SetTicks(pe - e);
+            next.push_back(Item{e, right});
+        }
+    }
+    items = std::move(next);
+}
+
 } // namespace
 
 int TimelineEdit::TotalTicks(const Bar& bar) {
@@ -271,36 +350,7 @@ TimelineEdit::SpanResult TimelineEdit::ResizeChordSpan(const std::vector<Bar>& b
     });
 
     // 3. 小節ごとに再構築（小節の開始位置は拍子ぶん固定。跨ぎカードは開始小節に保持）
-    res.bars.clear();
-    res.bars.reserve(baseBars.size());
-    size_t pi = 0;
-    int coveredUntil = 0;
-    barStart = 0;
-    for (const auto& baseBar : baseBars) {
-        Bar bar = baseBar;
-        int barTicks = BarTicksOf(bar);
-        int b0 = barStart;
-        int b1 = barStart + barTicks;
-
-        std::vector<Item> local;
-        while (pi < out.size() && out[pi].start < b0) ++pi; // 前小節開始分は前小節に格納済み
-        while (pi < out.size() && out[pi].start < b1) {
-            Item p = out[pi];
-            int start = std::max(p.start, coveredUntil); // 跨ぎカードに覆われた区間は切り詰め
-            int end = p.start + DurOf(p.chord);
-            if (start >= b1) break;
-            if (end > start) {
-                ChordToken c = p.chord;
-                c.SetTicks(end - start);
-                local.push_back(Item{start - b0, c});
-                coveredUntil = std::max(coveredUntil, end);
-            }
-            ++pi;
-        }
-        WriteItems(bar, std::move(local));
-        res.bars.push_back(std::move(bar));
-        barStart = b1;
-    }
+    res.bars = RebuildBars(baseBars, out);
 
     // 4. 対象コードの新しい位置を選択状態として返す
     barStart = 0;
@@ -314,6 +364,75 @@ TimelineEdit::SpanResult TimelineEdit::ResizeChordSpan(const std::vector<Bar>& b
         barStart += bt;
     }
     return res;
+}
+
+TimelineEdit::SpanResult TimelineEdit::MoveChordSpan(const std::vector<Bar>& baseBars,
+                                                     int targetStartTick,
+                                                     int newStartTick,
+                                                     int minTicks) {
+    SpanResult res;
+    res.bars = baseBars;
+    if (baseBars.empty()) return res;
+
+    const int songTicks = SongTicks(baseBars);
+    int oldLen = 0;
+    for (const auto& p : CollectAbsolute(baseBars)) {
+        if (p.start == targetStartTick) {
+            oldLen = DurOf(p.chord);
+            break;
+        }
+    }
+    if (oldLen <= 0) return res;
+
+    newStartTick = std::clamp(newStartTick, 0, std::max(0, songTicks - oldLen));
+    return ResizeChordSpan(baseBars, targetStartTick, newStartTick, newStartTick + oldLen, minTicks);
+}
+
+std::vector<TimelineEdit::RangeItem> TimelineEdit::ExtractChords(const std::vector<Bar>& bars,
+                                                                 const std::vector<int>& startTicks) {
+    std::vector<RangeItem> items;
+    int minStart = -1;
+    for (const auto& p : CollectAbsolute(bars)) {
+        if (std::find(startTicks.begin(), startTicks.end(), p.start) == startTicks.end()) continue;
+        if (minStart < 0) minStart = p.start; // CollectAbsolute は開始順
+        items.push_back(RangeItem{p.start - minStart, p.chord});
+    }
+    return items;
+}
+
+std::vector<Bar> TimelineEdit::RemoveChords(const std::vector<Bar>& bars,
+                                            const std::vector<int>& startTicks) {
+    if (bars.empty()) return bars;
+    std::vector<Item> kept;
+    for (const auto& p : CollectAbsolute(bars)) {
+        if (std::find(startTicks.begin(), startTicks.end(), p.start) != startTicks.end()) continue;
+        kept.push_back(p);
+    }
+    return RebuildBars(bars, kept);
+}
+
+std::vector<Bar> TimelineEdit::InsertRange(const std::vector<Bar>& bars,
+                                           const std::vector<RangeItem>& items,
+                                           int atTick) {
+    if (bars.empty() || items.empty()) return bars;
+    const int songTicks = SongTicks(bars);
+    std::vector<Item> placements = CollectAbsolute(bars);
+    std::vector<Item> added;
+    for (const auto& it : items) {
+        int s = atTick + it.startTick;
+        if (s < 0 || s >= songTicks) continue; // 曲末を越える分は貼り付けない
+        int e = std::min(songTicks, s + DurOf(it.chord));
+        if (e <= s) continue;
+        ChordToken c = it.chord;
+        c.SetTicks(e - s);
+        CarveOut(placements, s, e);
+        // 先に貼ったアイテムとの重なりも後勝ちで解消する
+        CarveOut(added, s, e);
+        added.push_back(Item{s, c});
+    }
+    for (auto& a : added) placements.push_back(std::move(a));
+    placements = MergeAndSort(std::move(placements));
+    return RebuildBars(bars, placements);
 }
 
 std::vector<TimelineEdit::OverflowItem> TimelineEdit::InsertChord(Bar& bar, const ChordToken& chord, int startTick) {

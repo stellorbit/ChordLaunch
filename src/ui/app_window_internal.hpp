@@ -40,6 +40,9 @@ namespace clp {
 #define IDM_EDIT_OCTAVE_UP   1018
 #define IDM_EDIT_OCTAVE_DOWN 1019
 #define IDM_EDIT_OCTAVE_RESET 1020
+#define IDM_EDIT_CUT         1026
+#define IDM_EDIT_COPY        1027
+#define IDM_EDIT_PASTE       1028
 
 #define IDM_VIEW_PIANOROLL   1021
 #define IDM_VIEW_RIGHTPANE   1022

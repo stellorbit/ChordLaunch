@@ -51,6 +51,33 @@ public:
                                       int newEndTick,
                                       int minTicks);
 
+    // 1枚のコードを絶対tickで移動する。長さは保持し、小節線を越えても1枚のままとする。
+    // 移動先に重なる他コードはその区間だけ切り詰められる（曲長は変化しない）。
+    static SpanResult MoveChordSpan(const std::vector<Bar>& baseBars,
+                                    int targetStartTick,
+                                    int newStartTick,
+                                    int minTicks);
+
+    // クリップボード用: 選択コード群を、先頭コードを 0 とした相対tickで保持する。
+    struct RangeItem {
+        int startTick = 0; // 先頭コードからの相対 tick
+        ChordToken chord;
+    };
+
+    // 絶対開始tickで指定したコード群を取り出す（開始順。該当なしは空）。
+    static std::vector<RangeItem> ExtractChords(const std::vector<Bar>& bars,
+                                                const std::vector<int>& startTicks);
+
+    // 絶対開始tickで指定したコード群を取り除く（跡は休符になり、曲長は変化しない）。
+    static std::vector<Bar> RemoveChords(const std::vector<Bar>& bars,
+                                         const std::vector<int>& startTicks);
+
+    // 取り出したコード群を atTick（絶対tick）を基点に貼り付ける。
+    // 重なる既存コードはその区間だけ切り詰め、曲末を越える分は貼り付けない。
+    static std::vector<Bar> InsertRange(const std::vector<Bar>& bars,
+                                        const std::vector<RangeItem>& items,
+                                        int atTick);
+
     // tick → 小節内のコード index（範囲外は -1）
     static int ChordIndexAtTick(const Bar& bar, int tick);
 };

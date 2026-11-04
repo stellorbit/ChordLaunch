@@ -235,6 +235,10 @@ void AppWindow::RebuildMainMenu() {
     AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_UNDO, TR(L"元に戻す(&U)\tCtrl+Z", L"Undo(&U)\tCtrl+Z"));
     AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_REDO, TR(L"やり直し(&R)\tCtrl+Y", L"Redo(&R)\tCtrl+Y"));
     AppendMenuW(hEditMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_CUT, TR(L"切り取り(&T)\tCtrl+X", L"Cut(&T)\tCtrl+X"));
+    AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_COPY, TR(L"コピー(&C)\tCtrl+C", L"Copy(&C)\tCtrl+C"));
+    AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_PASTE, TR(L"貼り付け(&P)\tCtrl+V", L"Paste(&P)\tCtrl+V"));
+    AppendMenuW(hEditMenu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_SPLIT, TR(L"選択コードの分割(&S)\tB", L"Split Chord(&S)\tB"));
     AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_DUPLICATE, TR(L"選択コードの複製(&D)\tCtrl+D", L"Duplicate Chord(&D)\tCtrl+D"));
     AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_DELETE, TR(L"選択コードの削除(&D)\tDel", L"Delete Chord(&D)\tDel"));
@@ -461,7 +465,9 @@ int AppWindow::Run() {
                     continue;
                 }
                 if (msg.wParam == VK_ESCAPE) {
-                    StopPlayback();
+                    // 再生中、または選択がなければ停止。停止中に選択があれば選択解除
+                    if (m_isPlaying || (m_selectedChordIndex < 0 && m_multiSelTicks.empty())) StopPlayback();
+                    else ClearSelection();
                     continue;
                 }
                 if (!isCtrl && msg.wParam == 'L' && msg.hwnd != m_hwndEdit) {
@@ -486,11 +492,15 @@ int AppWindow::Run() {
                     continue;
                 }
                 if (isCtrl && msg.wParam == 'C' && msg.hwnd != m_hwndEdit) {
-                    CopyProgressionToClipboard();
+                    DoEditCopy(); // 選択コードがあればコード単位、なければ進行全体をテキストでコピー
+                    continue;
+                }
+                if (isCtrl && msg.wParam == 'X' && msg.hwnd != m_hwndEdit) {
+                    DoEditCut();
                     continue;
                 }
                 if (isCtrl && msg.wParam == 'V' && msg.hwnd != m_hwndEdit) {
-                    PasteProgressionFromClipboard();
+                    DoEditPaste();
                     continue;
                 }
                 if (isCtrl && msg.wParam == 'A' && msg.hwnd != m_hwndEdit) {
@@ -813,6 +823,9 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
                 case IDM_EDIT_UNDO: Undo(); break;
                 case IDM_EDIT_REDO: Redo(); break;
+                case IDM_EDIT_CUT: DoEditCut(); break;
+                case IDM_EDIT_COPY: DoEditCopy(); break;
+                case IDM_EDIT_PASTE: DoEditPaste(); break;
                 case IDM_EDIT_SPLIT: SplitSelectedChord(); break;
                 case IDM_EDIT_OCTAVE_UP: ShiftSelectedChordOctave(1); break;
                 case IDM_EDIT_OCTAVE_DOWN: ShiftSelectedChordOctave(-1); break;

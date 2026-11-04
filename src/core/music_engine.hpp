@@ -42,6 +42,20 @@ public:
     static std::vector<ChordToken> GetTritoneSubstitutions(std::string_view keyRoot, MusicalMode mode);
     static std::vector<ChordToken> GetSuggestions(const std::vector<ChordToken>& chords, std::string_view keyRoot, MusicalMode mode, bool with7th = true);
 
+    // 前パート末尾のコードを起点にした次候補。同キーなら GetSuggestions と同じ結果、
+    // 異キーなら両キー共通のピボットコード、新キーのV・Iの順に並べる。
+    static std::vector<ChordToken> GetBridgeSuggestions(
+        const ChordToken& prevLast,
+        std::string_view prevKeyRoot,
+        MusicalMode prevMode,
+        std::string_view keyRoot,
+        MusicalMode mode,
+        bool with7th = true
+    );
+
+    // 借用コードの並びを、基準コードの根音に近い順（半音距離）へ並べ替える。
+    static std::vector<ChordToken> OrderBorrowedByContext(std::vector<ChordToken> borrowed, const ChordToken& baseChord);
+
     // 後方互換用テンプレート定義
     struct TemplateInfo {
         std::string id;

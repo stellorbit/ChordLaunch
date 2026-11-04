@@ -1,6 +1,7 @@
 #include "music_engine.hpp"
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <array>
 #include <sstream>
 #include <fstream>
@@ -786,6 +787,77 @@ std::vector<ChordToken> MusicEngine::GetSuggestions(
     }
 
     return pick({4, 5, 3, 1}); // V, vi, IV, ii
+}
+
+std::vector<ChordToken> MusicEngine::GetBridgeSuggestions(
+    const ChordToken& prevLast,
+    std::string_view prevKeyRoot,
+    MusicalMode prevMode,
+    std::string_view keyRoot,
+    MusicalMode mode,
+    bool with7th
+) {
+    if (prevLast.isRest || prevLast.rawText.empty() || prevLast.rootPitch == PitchClass::Unknown) {
+        return GetSuggestions({}, keyRoot, mode, with7th);
+    }
+
+    PitchClass prevKeyP = NoteToPitch(prevKeyRoot);
+    PitchClass keyP = NoteToPitch(keyRoot);
+    if (prevKeyP == keyP && prevMode == mode) {
+        // 同じキー: 前パート末尾のコードからそのまま連続した進行として提案する
+        return GetSuggestions({ prevLast }, keyRoot, mode, with7th);
+    }
+
+    auto newDiatonics = GetDiatonicChords(keyRoot, mode, with7th);
+    if (newDiatonics.empty()) return GetSuggestions({}, keyRoot, mode, with7th);
+    auto oldDiatonics = GetDiatonicChords(prevKeyRoot, prevMode, with7th);
+
+    auto isCommon = [&](const ChordToken& c) {
+        for (const auto& o : oldDiatonics) {
+            if (o.rootPitch == c.rootPitch && o.quality == c.quality) return true;
+        }
+        return false;
+    };
+
+    std::vector<ChordToken> result;
+    auto addUnique = [&](const ChordToken& c) {
+        for (const auto& r : result) {
+            if (r.rootPitch == c.rootPitch && r.quality == c.quality) return;
+        }
+        result.push_back(c);
+    };
+
+    // 1. 前パート末尾のコードそのものが新キーでも使える場合（機能を読み替えるピボット）を最優先
+    for (const auto& c : newDiatonics) {
+        if (c.rootPitch == prevLast.rootPitch && isCommon(c)) addUnique(c);
+    }
+    // 2. 両キーに共通するダイアトニックコード
+    for (const auto& c : newDiatonics) {
+        if (isCommon(c)) addUnique(c);
+    }
+    // 3. 新キーのドミナント(V)と主和音(I)へ向かう候補
+    if (newDiatonics.size() > 4) addUnique(newDiatonics[4]);
+    addUnique(newDiatonics[0]);
+    // 4. 不足分は通常の候補で補う
+    for (const auto& c : GetSuggestions({}, keyRoot, mode, with7th)) addUnique(c);
+
+    return result;
+}
+
+std::vector<ChordToken> MusicEngine::OrderBorrowedByContext(
+    std::vector<ChordToken> borrowed,
+    const ChordToken& baseChord
+) {
+    if (baseChord.isRest || baseChord.rootPitch == PitchClass::Unknown) return borrowed;
+    const int base = static_cast<int>(baseChord.rootPitch);
+    auto dist = [&](const ChordToken& c) {
+        int d = std::abs(static_cast<int>(c.rootPitch) - base) % 12;
+        return std::min(d, 12 - d);
+    };
+    std::stable_sort(borrowed.begin(), borrowed.end(), [&](const ChordToken& a, const ChordToken& b) {
+        return dist(a) < dist(b);
+    });
+    return borrowed;
 }
 
 std::vector<int> MusicEngine::GetChordMidiNotes(

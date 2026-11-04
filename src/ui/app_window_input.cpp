@@ -272,7 +272,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
             float sy = curY + (i / 4) * (sBtnH + 3.0f);
             if (PtInRectF(D2D1::RectF(sx, sy, sx + sBtnW, sy + sBtnH), x, y)) {
                 m_customSuffix = suffixes[i];
-                if (!m_isMergedView && pActive && m_selectedBarIndex >= 0 && m_selectedBarIndex < static_cast<int>(pActive->bars.size())) {
+                if (!m_isMergedView && !m_isPlaying && pActive && m_selectedBarIndex >= 0 && m_selectedBarIndex < static_cast<int>(pActive->bars.size())) {
                     auto& bar = pActive->bars[m_selectedBarIndex];
                     if (m_selectedChordIndex >= 0 && m_selectedChordIndex < static_cast<int>(bar.chords.size())) {
                         auto& selC = bar.chords[m_selectedChordIndex];
@@ -319,7 +319,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
             float by = curY + (i / 4) * (bBtnH + 3.0f);
             if (PtInRectF(D2D1::RectF(bx, by, bx + bBtnW, by + bBtnH), x, y)) {
                 m_customBass = (i == 0) ? PitchClass::Unknown : MusicEngine::NoteToPitch(bassNotes[i]);
-                if (!m_isMergedView && pActive && m_selectedBarIndex >= 0 && m_selectedBarIndex < static_cast<int>(pActive->bars.size())) {
+                if (!m_isMergedView && !m_isPlaying && pActive && m_selectedBarIndex >= 0 && m_selectedBarIndex < static_cast<int>(pActive->bars.size())) {
                     auto& bar = pActive->bars[m_selectedBarIndex];
                     if (m_selectedChordIndex >= 0 && m_selectedChordIndex < static_cast<int>(bar.chords.size())) {
                         auto& selC = bar.chords[m_selectedChordIndex];
@@ -372,6 +372,9 @@ void AppWindow::OnLButtonDown(float x, float y) {
 
             AuditionChord(c);
             AppendChordToTimeline(c);
+            // 追加直後のカードを選択したままにすると、続けてビルダーを操作した際に
+            // いま追加したコードを上書きしてしまうため、選択を解除する
+            ClearSelection();
             return;
         }
         return;
@@ -408,6 +411,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
                 if (PtInRectF(D2D1::RectF(curX, ty, curX + pTabW, ty + tabH), x, y)) {
                     m_isMergedView = false;
                     m_partManager.SetActiveIndex(static_cast<int>(i));
+                    ClearSelection(); // 別パートの添字・tickを持ち越さない
                     SyncTimelineToText();
                     InvalidateRect(m_hwnd, nullptr, FALSE);
                     return;
@@ -582,6 +586,19 @@ void AppWindow::OnLButtonDown(float x, float y) {
                             return;
                         }
 
+                        if (!m_isMergedView && (GetKeyState(VK_CONTROL) & 0x8000)) {
+                            // Ctrl+クリック: 選択に追加/除外（ドラッグ操作は開始しない）
+                            ToggleChordSelection(static_cast<int>(b), static_cast<int>(ci));
+                            AuditionChord(chord);
+                            return;
+                        }
+                        if (!m_isMergedView && (GetKeyState(VK_SHIFT) & 0x8000)) {
+                            // Shift+クリック: アンカーからの範囲選択
+                            ExtendSelectionTo(static_cast<int>(b), static_cast<int>(ci));
+                            AuditionChord(chord);
+                            return;
+                        }
+
                         SelectChord(static_cast<int>(b), static_cast<int>(ci));
                         AuditionChord(chord);
 
@@ -641,6 +658,8 @@ void AppWindow::OnLButtonDown(float x, float y) {
                 }
             }
         }
+        // カード以外（空白スロット・ピアノロール領域）のクリックで選択を解除する
+        ClearSelection();
         return;
     }
 
@@ -679,19 +698,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
         curY += 24.0f;
 
         if (m_accSuggestionsOpen) {
-            Part* pActive = m_partManager.GetActivePart();
-            ChordToken lastChord;
-            if (m_selectedBarIndex >= 0 && pActive && m_selectedBarIndex < static_cast<int>(pActive->bars.size())) {
-                const auto& bar = pActive->bars[m_selectedBarIndex];
-                if (m_selectedChordIndex >= 0 && m_selectedChordIndex < static_cast<int>(bar.chords.size())) {
-                    lastChord = bar.chords[m_selectedChordIndex];
-                }
-            }
-            std::string keyRoot = pActive ? pActive->keyRoot : "C";
-            MusicalMode mode = pActive ? pActive->mode : MusicalMode::Major;
-            std::vector<ChordToken> lastChords;
-            if (!lastChord.rawText.empty()) lastChords.push_back(lastChord);
-            auto suggestions = MusicEngine::GetSuggestions(lastChords, keyRoot, mode, use7th);
+            auto suggestions = BuildSuggestionList(use7th);
             float sCardW = (innerW - 3.0f * 4.0f) / 4.0f;
             float sCardH = 38.0f;
 
@@ -724,10 +731,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
         curY += 24.0f;
 
         if (m_accBorrowOpen) {
-            Part* pActive = m_partManager.GetActivePart();
-            std::string keyRoot = pActive ? pActive->keyRoot : "C";
-            MusicalMode mode = pActive ? pActive->mode : MusicalMode::Major;
-            auto borrowChords = MusicEngine::GetModalInterchangeChords(keyRoot, mode, use7th);
+            auto borrowChords = BuildBorrowedList(use7th);
             float bCardW = (innerW - 2.0f * 4.0f) / 3.0f;
             float bCardH = 38.0f;
 
@@ -863,16 +867,7 @@ bool AppWindow::HitTestPaletteCard(float x, float y, ChordToken& outChord) {
         bool use7th = ((m_diatonicChordTypeTab % 5) == 1) || (m_diatonicChordTypeTab >= 5);
 
         if (m_accSuggestionsOpen) {
-            ChordToken lastChord;
-            if (m_selectedBarIndex >= 0 && pActive && m_selectedBarIndex < static_cast<int>(pActive->bars.size())) {
-                const auto& bar = pActive->bars[m_selectedBarIndex];
-                if (m_selectedChordIndex >= 0 && m_selectedChordIndex < static_cast<int>(bar.chords.size())) {
-                    lastChord = bar.chords[m_selectedChordIndex];
-                }
-            }
-            std::vector<ChordToken> lastChords;
-            if (!lastChord.rawText.empty()) lastChords.push_back(lastChord);
-            auto suggestions = MusicEngine::GetSuggestions(lastChords, keyRoot, mode, use7th);
+            auto suggestions = BuildSuggestionList(use7th);
             float sCardW = (innerW - 3.0f * 4.0f) / 4.0f;
             float sCardH = 38.0f;
 
@@ -890,7 +885,7 @@ bool AppWindow::HitTestPaletteCard(float x, float y, ChordToken& outChord) {
 
         curY += 24.0f;
         if (m_accBorrowOpen) {
-            auto borrowChords = MusicEngine::GetModalInterchangeChords(keyRoot, mode, use7th);
+            auto borrowChords = BuildBorrowedList(use7th);
             float bCardW = (innerW - 2.0f * 4.0f) / 3.0f;
             float bCardH = 38.0f;
 
@@ -1190,28 +1185,8 @@ void AppWindow::OnLButtonUp(float x, float y) {
             if (x >= centerX && x <= centerX + centerW && y >= m_toolbarHeight && y <= m_height - curDockH) {
                 Part* pActive = m_partManager.GetActivePart();
                 if (pActive && srcBar >= 0 && srcBar < static_cast<int>(pActive->bars.size())) {
-                    auto& sBar = pActive->bars[srcBar];
-                    if (srcChord >= 0 && srcChord < static_cast<int>(sBar.chords.size())) {
-                        PushUndo();
-                        // 移動元のコード位置を休符（空白）化
-                        sBar.chords[srcChord].isRest = true;
-                        sBar.chords[srcChord].quality = ChordQuality::Rest;
-                        sBar.chords[srcChord].rootName = "R";
-                        sBar.chords[srcChord].degreeRoman = "R";
-                        sBar.chords[srcChord].rawText = "_";
-
-                        // 移動元小節内の連続する休符を結合整理
-                        std::vector<ChordToken> mergedChords;
-                        for (const auto& c : sBar.chords) {
-                            if (!mergedChords.empty() && mergedChords.back().isRest && c.isRest) {
-                                mergedChords.back().SetTicks(mergedChords.back().durationTicks + c.durationTicks);
-                            } else {
-                                mergedChords.push_back(c);
-                            }
-                        }
-                        sBar.chords = std::move(mergedChords);
-
-                        InsertChordAtTimelineX(movedChord, x - m_dragCardGrabOffsetX, false);
+                    if (srcChord >= 0 && srcChord < static_cast<int>(pActive->bars[srcBar].chords.size())) {
+                        MoveChordToTimelineX(movedChord, srcBar, srcChord, x - m_dragCardGrabOffsetX);
                     }
                 }
             }
