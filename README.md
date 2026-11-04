@@ -11,6 +11,13 @@
 
 Windows 向け超軽量・高速コード進行演奏・音楽理論支援デスクトップアプリケーション。
 
+> [!NOTE]
+> **ChordLaunch は、旧アプリ「ChordLaunchpad」の後継アプリです。** ChordLaunchpad（C# / WinUI 3 版）の機能と設計を引き継ぎ、C++20 ネイティブで全面的に再実装しています。
+
+## ダウンロード
+
+[Releases](https://github.com/stellorbit/ChordLaunch/releases) から、ポータブル版（zip）またはインストーラー（ユーザー権限でインストール可能）を入手できます。現在のバージョンは **v26.11-Pre**（プレリリース）です。コード署名は行っていないため、初回起動時に Windows SmartScreen の警告が表示されることがあります。
+
 C++20 ネイティブ（Win32 + Direct2D / DirectWrite + WASAPI + OLE Drag & Drop）により構築されており、DAW との同時起動時でも CPU・メモリへの負荷を最小限に抑え、瞬時起動（50ms 未満）と高レスポンスを実現します。
 
 ## 特長

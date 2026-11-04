@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(ChordLaunch LANGUAGES CXX)
+project(ChordLaunch VERSION 26.11 LANGUAGES CXX RC)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -69,6 +69,7 @@ target_link_libraries(clp_core PUBLIC
 # メイン実行ファイル (GUI / WinMain)
 add_executable(ChordLaunch WIN32
     src/main.cpp
+    resources/ChordLaunch.rc
 )
 target_link_libraries(ChordLaunch PRIVATE clp_core)
 

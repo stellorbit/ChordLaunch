@@ -1,4 +1,5 @@
 #include "app_window_internal.hpp"
+#include "../resource.h"
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
 #pragma comment(lib, "comctl32.lib")
@@ -289,6 +290,11 @@ bool AppWindow::Create(HINSTANCE hInstance, int nCmdShow) {
     wcex.hInstance = hInstance;
     wcex.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wcex.hbrBackground = nullptr;
+    // アプリアイコン (exe のリソースから読込。テスト実行ファイル等でリソースが無い場合は既定アイコン)
+    wcex.hIcon = static_cast<HICON>(LoadImageW(hInstance, MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON,
+        GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
+    wcex.hIconSm = static_cast<HICON>(LoadImageW(hInstance, MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
     wcex.lpszClassName = L"ChordLaunchMainWindowClass";
     RegisterClassExW(&wcex);
 

@@ -9,6 +9,7 @@ out/
 *.ilk
 *.mid
 *.old
+dist/
 
 build-*/
 CMakePresets.json

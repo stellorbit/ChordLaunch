@@ -1,0 +1,39 @@
+#include <winres.h>
+#include "../src/resource.h"
+
+// アプリケーションアイコン (タスクバー・タイトルバー・エクスプローラー)
+IDI_APPICON ICON "ChordLaunch.ico"
+
+// バージョン情報: 製品バージョンは v26.11-Pre (プレリリース)
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 26,11,0,0
+ PRODUCTVERSION 26,11,0,0
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+ FILEFLAGS VS_FF_DEBUG | VS_FF_PRERELEASE
+#else
+ FILEFLAGS VS_FF_PRERELEASE
+#endif
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "stellorbit"
+            VALUE "FileDescription", "ChordLaunch - Chord progression tool"
+            VALUE "FileVersion", "26.11.0.0"
+            VALUE "InternalName", "ChordLaunch"
+            VALUE "LegalCopyright", "Copyright (C) stellorbit"
+            VALUE "OriginalFilename", "ChordLaunch.exe"
+            VALUE "ProductName", "ChordLaunch"
+            VALUE "ProductVersion", "v26.11-Pre"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END
