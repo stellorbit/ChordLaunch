@@ -42,7 +42,8 @@ enum class ModalType {
     Templates,
     Help,
     TapTempo,
-    RenamePart
+    RenamePart,
+    About
 };
 
 class AppWindow {
@@ -81,7 +82,7 @@ private:
     void RenderSettingsModal(const D2D1_RECT_F& rc);
     void RenderTemplatesModal(const D2D1_RECT_F& rc);
     void RenderHelpModal(const D2D1_RECT_F& rc);
-    void RenderAboutTab(const D2D1_RECT_F& rc);
+    void RenderAboutModal(const D2D1_RECT_F& rc);
     void RenderTapTempoModal(const D2D1_RECT_F& rc);
     void RenderRenamePartModal(const D2D1_RECT_F& rc);
 

@@ -8,8 +8,11 @@ void AppWindow::RenderModal(float width, float height) {
     D2D1_RECT_F fullRc = D2D1::RectF(0, 0, width, height);
     m_pRenderTarget->FillRectangle(fullRc, m_pBrushModalBackdrop);
 
-    float cardW = (m_activeModal == ModalType::TapTempo || m_activeModal == ModalType::RenamePart) ? 480.0f : std::min(740.0f, width - 40.0f);
-    float cardH = (m_activeModal == ModalType::RenamePart) ? 240.0f : ((m_activeModal == ModalType::TapTempo) ? 320.0f : std::min(520.0f, height - 40.0f));
+    float cardW = (m_activeModal == ModalType::TapTempo || m_activeModal == ModalType::RenamePart) ? 480.0f
+                : ((m_activeModal == ModalType::About) ? std::min(560.0f, width - 40.0f) : std::min(740.0f, width - 40.0f));
+    float cardH = (m_activeModal == ModalType::RenamePart) ? 240.0f
+                : ((m_activeModal == ModalType::TapTempo) ? 320.0f
+                : ((m_activeModal == ModalType::About) ? std::min(360.0f, height - 40.0f) : std::min(520.0f, height - 40.0f)));
     float cardX = (width - cardW) * 0.5f;
     float cardY = (height - cardH) * 0.5f;
 
@@ -61,6 +64,12 @@ void AppWindow::RenderModal(float width, float height) {
             D2D1_RECT_F titleRc = D2D1::RectF(cardX + 20.0f, cardY + 10.0f, cardX + cardW - 50.0f, cardY + 36.0f);
             DrawTextSafe(TR(L"パート名の変更 (Rename Part)", L"Rename Part"), m_pFontModalTitle, titleRc, m_pBrushText);
             RenderRenamePartModal(bodyRc);
+            break;
+        }
+        case ModalType::About: {
+            D2D1_RECT_F titleRc = D2D1::RectF(cardX + 20.0f, cardY + 10.0f, cardX + cardW - 50.0f, cardY + 36.0f);
+            DrawTextSafe(TR(L"バージョン情報 (About)", L"About ChordLaunch"), m_pFontModalTitle, titleRc, m_pBrushText);
+            RenderAboutModal(bodyRc);
             break;
         }
         default: break;
@@ -457,8 +466,8 @@ void AppWindow::RenderTemplatesModal(const D2D1_RECT_F& rc) {
     }
 }
 
-// ヘルプ「バージョン情報」タブ本体 (製品名・バージョン・後継の旨・生成AI使用表明・リポジトリ)
-void AppWindow::RenderAboutTab(const D2D1_RECT_F& rc) {
+// バージョン情報ダイアログ本体 (製品名・バージョン・後継の旨・生成AI使用表明・リポジトリ)
+void AppWindow::RenderAboutModal(const D2D1_RECT_F& rc) {
     float y = rc.top;
     DrawTextSafe(L"ChordLaunch", m_pFontModalTitle, D2D1::RectF(rc.left, y, rc.right, y + 30.0f), m_pBrushText);
     y += 34.0f;
@@ -489,6 +498,13 @@ void AppWindow::RenderAboutTab(const D2D1_RECT_F& rc) {
 
     DrawTextSafe(std::wstring(TR(L"リポジトリ: ", L"Repository: ")) + CHORDLAUNCH_REPO_URL_WSTR,
                  m_pFontInspector, D2D1::RectF(rc.left, y, rc.right, y + 20.0f), m_pBrushTextMuted);
+
+    // 下部アクションボタン (ヘルプと同じ配置)
+    D2D1_RECT_F bDoc = D2D1::RectF(rc.left, rc.bottom - 36.0f, rc.left + 260.0f, rc.bottom);
+    DrawButton(bDoc, TR(L"オンラインドキュメント (GitHub)", L"Online Documentation (GitHub)"), IconType::None);
+
+    D2D1_RECT_F bClose = D2D1::RectF(rc.right - 100.0f, rc.bottom - 36.0f, rc.right, rc.bottom);
+    DrawButton(bClose, TR(L"閉じる", L"Close"), IconType::None);
 }
 
 void AppWindow::RenderHelpModal(const D2D1_RECT_F& rc) {
@@ -497,11 +513,10 @@ void AppWindow::RenderHelpModal(const D2D1_RECT_F& rc) {
     const wchar_t* helpTabs[] = {
         TR(L"入力形式", L"Input Formats"),
         TR(L"数字接尾辞", L"Numeric Suffixes"),
-        TR(L"ショートカット", L"Shortcuts"),
-        TR(L"バージョン情報", L"About")
+        TR(L"ショートカット", L"Shortcuts")
     };
 
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 3; ++i) {
         float tx = rc.left + i * (tabW + 8.0f);
         D2D1_RECT_F tRc = D2D1::RectF(tx, rc.top, tx + tabW, rc.top + tabH);
         DrawButton(tRc, helpTabs[i], IconType::None, false, false, m_helpActiveTab == i);
@@ -597,9 +612,6 @@ void AppWindow::RenderHelpModal(const D2D1_RECT_F& rc) {
             DrawTextSafe(suffixes[si].example, m_pFontInspector, D2D1::RectF(trRc.left + col1W + col2W + 8.0f, textY + 2.0f, trRc.right - 8.0f, textY + 20.0f), m_pBrushAccent);
             textY += 23.0f;
         }
-    } else if (m_helpActiveTab == 3) {
-        // --- タブ3: バージョン情報 ---
-        RenderAboutTab(D2D1::RectF(boxRc.left + pad, textY, boxRc.right - pad, boxRc.bottom - 8.0f));
     } else {
         // --- タブ2: ショートカットキー一覧 ---
         struct ShortcutRow {
@@ -907,8 +919,11 @@ void AppWindow::ShowInputGridMenu(float screenX, float screenY) {
 bool AppWindow::OnModalClick(float x, float y) {
     if (m_activeModal == ModalType::None) return false;
 
-    float cardW = (m_activeModal == ModalType::TapTempo || m_activeModal == ModalType::RenamePart) ? 480.0f : std::min(740.0f, m_width - 40.0f);
-    float cardH = (m_activeModal == ModalType::RenamePart) ? 240.0f : ((m_activeModal == ModalType::TapTempo) ? 320.0f : std::min(520.0f, m_height - 40.0f));
+    float cardW = (m_activeModal == ModalType::TapTempo || m_activeModal == ModalType::RenamePart) ? 480.0f
+                : ((m_activeModal == ModalType::About) ? std::min(560.0f, m_width - 40.0f) : std::min(740.0f, m_width - 40.0f));
+    float cardH = (m_activeModal == ModalType::RenamePart) ? 240.0f
+                : ((m_activeModal == ModalType::TapTempo) ? 320.0f
+                : ((m_activeModal == ModalType::About) ? std::min(360.0f, m_height - 40.0f) : std::min(520.0f, m_height - 40.0f)));
     float cardX = (m_width - cardW) * 0.5f;
     float cardY = (m_height - cardH) * 0.5f;
 
@@ -1280,7 +1295,7 @@ bool AppWindow::OnModalClick(float x, float y) {
         case ModalType::Help: {
             float tabW = 140.0f;
             float tabH = 32.0f;
-            for (int i = 0; i < 4; ++i) {
+            for (int i = 0; i < 3; ++i) {
                 float tx = bodyRc.left + i * (tabW + 8.0f);
                 if (PtInRectF(D2D1::RectF(tx, bodyRc.top, tx + tabW, bodyRc.top + tabH), x, y)) {
                     m_helpActiveTab = i;
@@ -1289,6 +1304,20 @@ bool AppWindow::OnModalClick(float x, float y) {
                 }
             }
 
+            D2D1_RECT_F bDoc = D2D1::RectF(bodyRc.left, bodyRc.bottom - 36.0f, bodyRc.left + 260.0f, bodyRc.bottom);
+            if (PtInRectF(bDoc, x, y)) {
+                OpenOnlineDocumentation();
+                return true;
+            }
+
+            D2D1_RECT_F bClose = D2D1::RectF(bodyRc.right - 100.0f, bodyRc.bottom - 36.0f, bodyRc.right, bodyRc.bottom);
+            if (PtInRectF(bClose, x, y)) {
+                CloseModal();
+                return true;
+            }
+            break;
+        }
+        case ModalType::About: {
             D2D1_RECT_F bDoc = D2D1::RectF(bodyRc.left, bodyRc.bottom - 36.0f, bodyRc.left + 260.0f, bodyRc.bottom);
             if (PtInRectF(bDoc, x, y)) {
                 OpenOnlineDocumentation();

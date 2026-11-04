@@ -267,6 +267,7 @@ void AppWindow::RebuildMainMenu() {
     AppendMenuW(hToolMenu, MF_STRING, IDM_TOOL_SETTINGS, TR(L"環境設定(&S)...", L"Settings(&S)..."));
     AppendMenuW(hToolMenu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(hToolMenu, MF_STRING, IDM_TOOL_HELP, TR(L"記法ヘルプ・リファレンス(&H)...", L"Notation Help & Reference(&H)..."));
+    AppendMenuW(hToolMenu, MF_STRING, IDM_TOOL_ABOUT, TR(L"バージョン情報(&A)...", L"About ChordLaunch(&A)..."));
     AppendMenuW(hNewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hToolMenu), TR(L"ツール(&T)", L"Tools(&T)"));
 
     HMENU hOldMenu = m_hMainMenu;
@@ -859,6 +860,7 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 case IDM_TOOL_TEMPLATES: OpenModal(ModalType::Templates); break;
                 case IDM_TOOL_SETTINGS:  OpenModal(ModalType::Settings); break;
                 case IDM_TOOL_HELP:      OpenModal(ModalType::Help); break;
+                case IDM_TOOL_ABOUT:     OpenModal(ModalType::About); break;
             }
             return 0;
         }

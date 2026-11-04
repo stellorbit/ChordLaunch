@@ -55,6 +55,7 @@ namespace clp {
 #define IDM_TOOL_SETTINGS    1042
 #define IDM_TOOL_HELP        1043
 #define IDM_TOOL_MERGE_NEW   1044
+#define IDM_TOOL_ABOUT       1045
 
 // プルダウンメニュー用コマンドID
 #define IDM_KEY_BASE         3000
