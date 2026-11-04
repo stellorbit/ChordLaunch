@@ -10,10 +10,16 @@
     出力する ICO のパス。省略時は ..\resources\ChordLaunch.ico。
 .PARAMETER PreviewPng
     指定時は 256px のプレビュー PNG も保存する。
+.PARAMETER ExportDir
+    指定時は、Web サイトのサムネイル等に使う大サイズ PNG (透過) を ChordLaunch-icon-<size>.png として保存する。
+.PARAMETER ExportSizes
+    ExportDir 指定時に出力する一辺のピクセル数。既定は 1024 と 512。
 #>
 param(
     [string]$OutIco = (Join-Path $PSScriptRoot "..\resources\ChordLaunch.ico"),
-    [string]$PreviewPng = ""
+    [string]$PreviewPng = "",
+    [string]$ExportDir = "",
+    [int[]]$ExportSizes = @(1024, 512)
 )
 
 Add-Type -AssemblyName System.Drawing
@@ -123,3 +129,14 @@ for ($i = 0; $i -lt $sizes.Count; $i++) {
 foreach ($p in $pngs) { $bw.Write($p) }
 $bw.Dispose(); $fs.Dispose()
 Write-Host "Generated: $OutIco"
+
+if ($ExportDir) {
+    if (-not (Test-Path $ExportDir)) { New-Item -ItemType Directory -Force $ExportDir | Out-Null }
+    foreach ($s in $ExportSizes) {
+        $bmp = New-IconBitmap $s
+        $path = Join-Path $ExportDir "ChordLaunch-icon-$s.png"
+        $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+        $bmp.Dispose()
+        Write-Host "Exported: $path"
+    }
+}
