@@ -771,7 +771,13 @@ std::vector<ChordToken> MusicEngine::GetSuggestions(
     }
 
     const auto& last = chords.back();
+    // 保存済みの度数は、キー変更や別キーでの入力で古くなっていることがあるため、
+    // 渡されたキーで毎回計算し直す（根音やキーが不明な場合のみ保存値を使う）
     std::string deg = last.degreeRoman;
+    PitchClass suggestKeyP = NoteToPitch(keyRoot);
+    if (!last.isRest && last.rootPitch != PitchClass::Unknown && suggestKeyP != PitchClass::Unknown) {
+        deg = CalculateDegree(last.rootPitch, last.quality, suggestKeyP, mode, last.bassPitch);
+    }
 
     if (deg.starts_with("V") && !deg.starts_with("VI")) {
         return pick({0, 5, 3, 1}); // I, vi, IV, ii
@@ -831,8 +837,10 @@ std::vector<ChordToken> MusicEngine::GetBridgeSuggestions(
     for (const auto& c : newDiatonics) {
         if (c.rootPitch == prevLast.rootPitch && isCommon(c)) addUnique(c);
     }
-    // 2. 両キーに共通するダイアトニックコード
+    // 2. 両キーに共通するダイアトニックコード（ピボットは合計2件まで。V と I の枠を残す）
+    constexpr size_t kMaxPivots = 2;
     for (const auto& c : newDiatonics) {
+        if (result.size() >= kMaxPivots) break;
         if (isCommon(c)) addUnique(c);
     }
     // 3. 新キーのドミナント(V)と主和音(I)へ向かう候補
@@ -858,6 +866,71 @@ std::vector<ChordToken> MusicEngine::OrderBorrowedByContext(
         return dist(a) < dist(b);
     });
     return borrowed;
+}
+
+std::string MusicEngine::KeyModeLabel(std::string_view keyRoot, MusicalMode mode) {
+    const char* modeText = "maj";
+    switch (mode) {
+        case MusicalMode::Major: modeText = "maj"; break;
+        case MusicalMode::NaturalMinor: modeText = "min"; break;
+        case MusicalMode::HarmonicMinor: modeText = "hm"; break;
+        case MusicalMode::MelodicMinor: modeText = "mm"; break;
+        case MusicalMode::Dorian: modeText = "dor"; break;
+        case MusicalMode::Phrygian: modeText = "phr"; break;
+        case MusicalMode::Lydian: modeText = "lyd"; break;
+        case MusicalMode::Mixolydian: modeText = "mix"; break;
+        case MusicalMode::Locrian: modeText = "loc"; break;
+    }
+    return std::string(keyRoot) + " " + modeText;
+}
+
+std::vector<ChordToken> MusicEngine::GetModulationBorrowed(
+    std::string_view baseKeyRoot,
+    MusicalMode baseMode,
+    std::string_view targetKeyRoot,
+    MusicalMode targetMode,
+    bool with7th
+) {
+    PitchClass baseP = NoteToPitch(baseKeyRoot);
+    PitchClass targetP = NoteToPitch(targetKeyRoot);
+    if (baseP == targetP && baseMode == targetMode) return {};
+    if (targetP == PitchClass::Unknown) return {};
+
+    std::vector<ChordToken> result;
+
+    // 1. 接続先キーの V7（転調先の主和音へ最も強く解決するコード）
+    {
+        PitchClass domPitch = static_cast<PitchClass>((static_cast<int>(targetP) + 7) % 12);
+        ChordToken ct;
+        ct.rootPitch = domPitch;
+        ct.rootName = PitchToNoteForKey(domPitch, targetKeyRoot, targetMode);
+        ct.quality = ChordQuality::Dominant7;
+        ct.qualitySuffix = "7";
+        ct.degreeRoman = "V7";
+        ct.rawText = ct.rootName + ct.qualitySuffix;
+        result.push_back(ct);
+    }
+
+    // 2. 接続先キーの副ドミナント（V7/V, V7/IV）
+    auto secondary = GetSecondaryDominants(targetKeyRoot, targetMode);
+    for (size_t idx : { static_cast<size_t>(3), static_cast<size_t>(2) }) {
+        if (idx < secondary.size()) result.push_back(secondary[idx]);
+    }
+
+    // 3. 接続先キーの IV（サブドミナント）
+    auto diatonic = GetDiatonicChords(targetKeyRoot, targetMode, with7th);
+    if (diatonic.size() > 3) result.push_back(diatonic[3]);
+
+    // 同じ根音・種類の重複を取り除く
+    std::vector<ChordToken> unique;
+    for (const auto& c : result) {
+        bool dup = false;
+        for (const auto& u : unique) {
+            if (u.rootPitch == c.rootPitch && u.quality == c.quality) { dup = true; break; }
+        }
+        if (!dup) unique.push_back(c);
+    }
+    return unique;
 }
 
 std::vector<int> MusicEngine::GetChordMidiNotes(

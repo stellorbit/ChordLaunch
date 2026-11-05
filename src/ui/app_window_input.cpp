@@ -765,10 +765,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
         curY += 24.0f;
 
         if (m_accSecondaryOpen) {
-            Part* pActive = m_partManager.GetActivePart();
-            std::string keyRoot = pActive ? pActive->keyRoot : "C";
-            MusicalMode mode = pActive ? pActive->mode : MusicalMode::Major;
-            auto secChords = MusicEngine::GetSecondaryDominants(keyRoot, mode);
+            auto secChords = BuildSecondaryList();
             float scCardW = (innerW - 2.0f * 4.0f) / 3.0f;
             float scCardH = 38.0f;
 
@@ -904,7 +901,7 @@ bool AppWindow::HitTestPaletteCard(float x, float y, ChordToken& outChord) {
 
         curY += 24.0f;
         if (m_accSecondaryOpen) {
-            auto secChords = MusicEngine::GetSecondaryDominants(keyRoot, mode);
+            auto secChords = BuildSecondaryList();
             float scCardW = (innerW - 2.0f * 4.0f) / 3.0f;
             float scCardH = 38.0f;
 
@@ -1170,7 +1167,6 @@ void AppWindow::OnLButtonUp(float x, float y) {
 
     if (m_dragMode == DragMode::CardTimelineDrag) {
         bool wasDragging = m_isPaletteDragging;
-        ChordToken movedChord = m_dragPaletteChord;
         int srcBar = m_dragBarIndex;
         int srcChord = m_dragChordIndex;
         m_dragMode = DragMode::None;
@@ -1186,7 +1182,7 @@ void AppWindow::OnLButtonUp(float x, float y) {
                 Part* pActive = m_partManager.GetActivePart();
                 if (pActive && srcBar >= 0 && srcBar < static_cast<int>(pActive->bars.size())) {
                     if (srcChord >= 0 && srcChord < static_cast<int>(pActive->bars[srcBar].chords.size())) {
-                        MoveChordToTimelineX(movedChord, srcBar, srcChord, x - m_dragCardGrabOffsetX);
+                        MoveChordToTimelineX(srcBar, srcChord, x - m_dragCardGrabOffsetX);
                     }
                 }
             }

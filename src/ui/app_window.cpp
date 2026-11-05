@@ -666,6 +666,7 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 Part* pActive = m_partManager.GetActivePart();
                 if (pActive) {
                     pActive->keyRoot = keys[wmId - IDM_KEY_BASE];
+                    RefreshPartDegrees(*pActive);
                     SyncTimelineToText();
                     InvalidateRect(m_hwnd, nullptr, FALSE);
                 }
@@ -675,6 +676,7 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 Part* pActive = m_partManager.GetActivePart();
                 if (pActive) {
                     pActive->mode = static_cast<MusicalMode>(wmId - IDM_SCALE_BASE);
+                    RefreshPartDegrees(*pActive);
                     SyncTimelineToText();
                     InvalidateRect(m_hwnd, nullptr, FALSE);
                 }

@@ -67,6 +67,10 @@ void AppWindow::OnRender() {
             int maxStart = std::max(0, barTotalTicks - std::min(barTotalTicks, gridTicks));
             int covered = (pActive) ? TimelineEdit::IncomingCoverUntil(pActive->bars, targetBarIdx) : 0;
             snappedTick = std::clamp(snappedTick, std::min(covered, maxStart), maxStart);
+            if (m_dragMode == DragMode::CardTimelineDrag) {
+                // 既存カードの移動は小節内の上限・前小節のカバー範囲で制限せず、実際の移動処理と同じ位置を表示する
+                TimelineTickFromX(dragTargetX, gridTicks, &targetBarIdx, &snappedTick, &barTotalTicks);
+            }
 
             float barLeftX = centerX + targetBarIdx * barWidth - m_timelineScrollX;
             float slotX = barLeftX + (static_cast<float>(snappedTick) / static_cast<float>(barTotalTicks)) * barWidth;
@@ -607,6 +611,34 @@ void AppWindow::RenderPartTabs(float x, float y, float width, float height) {
     const auto& parts = m_partManager.GetParts();
     int activeIdx = m_partManager.GetActiveIndex();
 
+    // 文字列の描画幅を実測する（DirectWrite）。測れない場合は十分大きい値を返して短縮側へ倒す
+    auto measureWidth = [&](const std::wstring& text) -> float {
+        if (!m_pDWriteFactory || !m_pFontTab || text.empty()) return text.empty() ? 0.0f : 10000.0f;
+        IDWriteTextLayout* pLayout = nullptr;
+        HRESULT hr = m_pDWriteFactory->CreateTextLayout(text.c_str(), static_cast<UINT32>(text.size()), m_pFontTab, 10000.0f, 100.0f, &pLayout);
+        if (FAILED(hr) || !pLayout) return 10000.0f;
+        DWRITE_TEXT_METRICS metrics{};
+        pLayout->GetMetrics(&metrics);
+        pLayout->Release();
+        return metrics.widthIncludingTrailingWhitespace;
+    };
+
+    // タブ幅に収まる最も詳しい表記を選ぶ: 「名前 (D min)」→「名前 (Dm)」→「名前」→「名前…」
+    auto fitTabLabel = [&](const Part& part, float maxW) -> std::wstring {
+        std::wstring name = ToWString(part.name);
+        const bool minor = (part.mode == MusicalMode::NaturalMinor || part.mode == MusicalMode::HarmonicMinor ||
+                            part.mode == MusicalMode::MelodicMinor);
+        std::wstring full = name + L" (" + ToWString(MusicEngine::KeyModeLabel(part.keyRoot, part.mode)) + L")";
+        std::wstring compact = name + L" (" + ToWString(part.keyRoot) + (minor ? L"m" : L"") + L")";
+        if (measureWidth(full) <= maxW) return full;
+        if (measureWidth(compact) <= maxW) return compact;
+        if (measureWidth(name) <= maxW) return name;
+        // 名前だけでも収まらない場合は、末尾を省略記号に置き換えて収める
+        std::wstring cut = name;
+        while (!cut.empty() && measureWidth(cut + L"…") > maxW) cut.pop_back();
+        return cut.empty() ? std::wstring(L"…") : cut + L"…";
+    };
+
     // 横幅縮小時にタブや［＋パート］ボタンが隠れないよう動的縮小計算
     float rightReserve = m_showRightPane ? 8.0f : 114.0f;
     float availTotalW = std::max(200.0f, width - 8.0f - rightReserve);
@@ -621,9 +653,7 @@ void AppWindow::RenderPartTabs(float x, float y, float width, float height) {
 
     for (size_t i = 0; i < parts.size(); ++i) {
         bool isActive = (!m_isMergedView && static_cast<int>(i) == activeIdx);
-        std::wstring pName = (pTabW < 68.0f)
-            ? ToWString(parts[i].name)
-            : (ToWString(parts[i].name) + L" (" + ToWString(parts[i].keyRoot) + L")");
+        std::wstring pName = fitTabLabel(parts[i], pTabW - 12.0f);
         D2D1_RECT_F rcPart = D2D1::RectF(curX, tabY, curX + pTabW, bottomY);
         drawFolderTab(rcPart, pName, isActive);
         curX += pTabW + 3.0f;
@@ -704,9 +734,9 @@ void AppWindow::RenderTimelineCards(float x, float y, float width, float height)
             D2D1_RECT_F cardRc = D2D1::RectF(cx + 2.0f, cardY, cx + cw - 2.0f, cardY + cardH);
 
             bool isSel = (static_cast<int>(b) == m_selectedBarIndex && static_cast<int>(ci) == m_selectedChordIndex);
-            if (!isSel && !m_isMergedView && !m_multiSelTicks.empty() &&
-                std::find(m_multiSelTicks.begin(), m_multiSelTicks.end(), chordStartTick) != m_multiSelTicks.end()) {
-                isSel = true; // 複数選択中のカード
+            if (!m_isMergedView && !m_multiSelTicks.empty()) {
+                // 複数選択中は選択集合に含まれるカードだけを強調する（主選択が外れていれば強調しない）
+                isSel = std::find(m_multiSelTicks.begin(), m_multiSelTicks.end(), chordStartTick) != m_multiSelTicks.end();
             }
             if (chord.isRest) {
                 // 休符・空白区間はカードを描画せず、背景グリッドを透過させてDAWライクな空白を表現
@@ -1051,9 +1081,6 @@ void AppWindow::RenderRightPane(float x, float y, float width, float height) {
     float pad = 12.0f;
     float innerW = width - pad * 2.0f;
 
-    Part* pActive = m_partManager.GetActivePart();
-    std::string keyRoot = pActive ? pActive->keyRoot : "C";
-    MusicalMode mode = pActive ? pActive->mode : MusicalMode::Major;
     bool use7th = ((m_diatonicChordTypeTab % 5) == 1) || (m_diatonicChordTypeTab >= 5);
 
     D2D1_RECT_F titleRc = D2D1::RectF(x + pad, curY, x + width - pad - 126.0f, curY + 20.0f);
@@ -1113,7 +1140,7 @@ void AppWindow::RenderRightPane(float x, float y, float width, float height) {
     curY += 24.0f;
 
     if (m_accSecondaryOpen) {
-        auto secChords = MusicEngine::GetSecondaryDominants(keyRoot, mode);
+        auto secChords = BuildSecondaryList();
         float scCardW = (innerW - 2.0f * 4.0f) / 3.0f;
         float scCardH = 38.0f;
 

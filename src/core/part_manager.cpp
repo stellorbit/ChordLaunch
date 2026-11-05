@@ -23,6 +23,18 @@ void PartManager::SetActiveIndex(int index) {
     }
 }
 
+int PartManager::FindKeyRunStart(int index) const {
+    if (index < 0 || index >= static_cast<int>(m_parts.size())) return index;
+    int start = index;
+    while (start > 0) {
+        const Part& cur = m_parts[static_cast<size_t>(start)];
+        const Part& prev = m_parts[static_cast<size_t>(start) - 1];
+        if (MusicEngine::NoteToPitch(cur.keyRoot) != MusicEngine::NoteToPitch(prev.keyRoot) || cur.mode != prev.mode) break;
+        --start;
+    }
+    return start;
+}
+
 Part* PartManager::GetActivePart() {
     if (m_parts.empty()) return nullptr;
     if (m_activePartIndex < 0 || m_activePartIndex >= static_cast<int>(m_parts.size())) {

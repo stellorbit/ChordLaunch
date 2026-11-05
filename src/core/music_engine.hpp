@@ -24,6 +24,9 @@ public:
     static std::string PitchToNote(PitchClass pitch, bool preferFlat = false);
     static std::string PitchToNoteForKey(PitchClass pitch, std::string_view keyRoot, MusicalMode mode);
 
+    // パートタブ用のキー表記（例: "D maj", "D min"。他のモードは短い略称）
+    static std::string KeyModeLabel(std::string_view keyRoot, MusicalMode mode);
+
     static std::string QualityToSuffix(ChordQuality quality);
     static ChordToken ParseChordSymbol(std::string_view symbol, std::string_view currentKey = "C", MusicalMode currentMode = MusicalMode::Major);
 
@@ -50,6 +53,16 @@ public:
         MusicalMode prevMode,
         std::string_view keyRoot,
         MusicalMode mode,
+        bool with7th = true
+    );
+
+    // 転調先（接続先）キーへ向かう借用候補: 接続先の V7、副ドミナント(V7/V, V7/IV)、IV の順。
+    // 基準キーと接続先キーが同じ場合は空を返す。
+    static std::vector<ChordToken> GetModulationBorrowed(
+        std::string_view baseKeyRoot,
+        MusicalMode baseMode,
+        std::string_view targetKeyRoot,
+        MusicalMode targetMode,
         bool with7th = true
     );
 

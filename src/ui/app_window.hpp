@@ -150,7 +150,11 @@ private:
     void OnSize(UINT width, UINT height);
     bool HitTestPaletteCard(float x, float y, ChordToken& outChord);
     void InsertChordAtTimelineX(const ChordToken& chord, float x, bool pushUndo = true, int snapTicks = 0);
-    void MoveChordToTimelineX(const ChordToken& chord, int srcBar, int srcChord, float x);
+    void MoveChordToTimelineX(int srcBar, int srcChord, float x);
+    // x座標 → グリッドにスナップした絶対tick（小節内の上限・前小節のカバー範囲による制限なし。曲末より後ろも可）
+    int  TimelineTickFromX(float x, int gridTicks, int* outBar = nullptr, int* outTickInBar = nullptr, int* outBarTicks = nullptr) const;
+    // 曲末が endTick に満たない場合、休符のみの小節を末尾に足す
+    void EnsureBarsCoverTick(std::vector<Bar>& bars, int endTick) const;
     void InsertChordAtTimelinePosition(const ChordToken& chord, int targetBarIdx, int targetBeat);
     void InsertChordAtTimelineTick(const ChordToken& chord, int targetBarIdx, int targetTickInBar, bool pushUndo = true);
     void SplitSelectedChord();
@@ -201,6 +205,9 @@ private:
     void SelectAll();
     void EnsureVisible(int barIndex);
 
+    // パートのキー/スケール変更後に、全コードの度数表記をそのパートのキーで計算し直す
+    void RefreshPartDegrees(Part& part);
+
     // 選択解除・複数選択・コード単位のクリップボード
     void ClearSelection();
     int  PrimaryChordStartTick() const;               // 主選択コードの絶対開始tick（なし/休符は -1）
@@ -211,8 +218,11 @@ private:
     void DoEditCopy();
     void DoEditPaste();
 
-    // コード提案の基準（選択コード → パート末尾 → 前パート末尾の順）
-    bool FindSuggestionBase(ChordToken& outChord, const Part*& outPrevPart) const;
+    // コード提案の基準: 直前パート（空パートはさかのぼる）の最終コード（接続先 = 表示中パート）。
+    // 直前パートに最終コードがなければ、表示中パート自身の最終コード（接続先なし）。選択コードには依存しない。
+    bool FindSuggestionBase(ChordToken& outChord, const Part*& outBasePart, const Part*& outTargetPart) const;
+    // 繋ぎコード（セカンダリードミナント）: 接続先（表示中パート）のキーで生成する
+    std::vector<ChordToken> BuildSecondaryList() const;
     std::vector<ChordToken> BuildSuggestionList(bool use7th) const;
     std::vector<ChordToken> BuildBorrowedList(bool use7th) const;
 

@@ -21,6 +21,10 @@ public:
     Part* GetActivePart();
     const Part* GetActivePart() const;
 
+    // 指定パートから、キーとモードが同じ間だけ前へさかのぼり、その連続範囲の先頭パートの index を返す。
+    // 範囲外の index はそのまま返す。
+    int FindKeyRunStart(int index) const;
+
     Part& AddPart(std::string_view name = "New Part", std::string_view key = "C", MusicalMode mode = MusicalMode::Major);
     bool RemovePart(int index);
     bool DuplicatePart(int index);

@@ -1957,6 +1957,25 @@ void TestChordMoveAndClipboard() {
         TEST_ASSERT(TimelineEdit::TotalTicks(res.bars[0]) == 1920, "Song length is unchanged after a clamped move");
     }
 
+    // 2b. 小節を足した上での移動（アプリは曲末を越える移動前に休符小節を足す）: 位置が引き戻されない
+    {
+        Bar b1 = MakeTickBar4();
+        b1.chords.push_back(MakeTok("C", 1920));
+        Bar b2 = MakeTickBar4();
+        b2.chords.push_back(MakeRestTok(1920));
+        Bar b3 = MakeTickBar4();
+        b3.chords.push_back(MakeRestTok(1920));
+
+        auto res = TimelineEdit::MoveChordSpan({ b1, b2, b3 }, 0, 3360, 480);
+        TEST_ASSERT(res.bars.size() == 3, "Extended song keeps three bars after the move");
+        TEST_ASSERT(res.bars[1].chords.size() == 2 && res.bars[1].chords[0].isRest && res.bars[1].chords[0].durationTicks == 1440,
+                    "Move to beat 4 of bar 2 is not pulled back to the bar line");
+        TEST_ASSERT(res.bars[1].chords[1].rootName == "C" && res.bars[1].chords[1].durationTicks == 1920,
+                    "Card placed at the grid position keeps its full length across the bar line");
+        TEST_ASSERT(res.bars[2].chords.size() == 1 && res.bars[2].chords[0].isRest, "Bar after the moved card is a covered rest");
+        TEST_ASSERT(res.selectedBar == 1 && res.selectedChord == 1, "Moved card is selected at the requested position");
+    }
+
     // 3. 抽出 / 取り除き / 貼り付けの往復
     {
         Bar b1 = MakeTickBar4();
@@ -1991,6 +2010,48 @@ void TestChordMoveAndClipboard() {
     }
 }
 
+void TestKeyRunAndKeyLabel() {
+    std::cout << "[TEST] 33. Same-key run start (FindKeyRunStart) and tab key label (KeyModeLabel)\n";
+
+    PartManager pm;
+    pm.GetParts().clear();
+    auto addPart = [&](const char* name, const char* key, MusicalMode mode) {
+        Part p;
+        p.name = name;
+        p.keyRoot = key;
+        p.mode = mode;
+        pm.GetParts().push_back(p);
+    };
+    addPart("Intro", "D", MusicalMode::NaturalMinor);
+    addPart("Verse", "D", MusicalMode::NaturalMinor);
+    addPart("Pre", "C", MusicalMode::Major);
+    addPart("Pre2", "C", MusicalMode::Major);
+    addPart("Pre3", "C", MusicalMode::Major);
+    addPart("Chorus", "Eb", MusicalMode::Major);
+    addPart("Bridge", "Eb", MusicalMode::NaturalMinor);
+
+    const int expected[] = { 0, 0, 2, 2, 2, 5, 6 };
+    for (int i = 0; i < 7; ++i) {
+        TEST_ASSERT(pm.FindKeyRunStart(i) == expected[i], "FindKeyRunStart returns the first part of the same key/mode run");
+    }
+    TEST_ASSERT(pm.FindKeyRunStart(-1) == -1 && pm.FindKeyRunStart(99) == 99, "FindKeyRunStart returns out-of-range indices unchanged");
+
+    // エンハーモニック表記違い（C# と Db）は同じ音として同キー扱い
+    PartManager pm2;
+    pm2.GetParts().clear();
+    Part a; a.keyRoot = "C#"; a.mode = MusicalMode::Major;
+    Part b; b.keyRoot = "Db"; b.mode = MusicalMode::Major;
+    pm2.GetParts().push_back(a);
+    pm2.GetParts().push_back(b);
+    TEST_ASSERT(pm2.FindKeyRunStart(1) == 0, "Enharmonic key spellings belong to the same run");
+
+    TEST_ASSERT(MusicEngine::KeyModeLabel("D", MusicalMode::Major) == "D maj", "Major tab label is 'D maj'");
+    TEST_ASSERT(MusicEngine::KeyModeLabel("D", MusicalMode::NaturalMinor) == "D min", "Natural minor tab label is 'D min'");
+    TEST_ASSERT(MusicEngine::KeyModeLabel("Eb", MusicalMode::Dorian) == "Eb dor", "Other modes use a short abbreviation");
+    TEST_ASSERT(MusicEngine::KeyModeLabel("D", MusicalMode::Major) != MusicEngine::KeyModeLabel("D", MusicalMode::NaturalMinor),
+                "Major and minor labels differ for the same tonic");
+}
+
 void TestBridgeSuggestions() {
     std::cout << "[TEST] 32. Cross-part suggestion bridging (GetBridgeSuggestions / OrderBorrowedByContext)\n";
 
@@ -2023,6 +2084,27 @@ void TestBridgeSuggestions() {
         TEST_ASSERT(unique, "Bridge suggestions contain no duplicates");
     }
 
+    // 保存済みの度数が古い（別キー基準の "bIII"）G でも、D マイナーでの機能(IV)で候補が決まる
+    {
+        ChordToken gStale = MusicEngine::ParseChordSymbol("G", "D", MusicalMode::NaturalMinor);
+        TEST_ASSERT(gStale.degreeRoman == "IV", "G in D minor is degree IV");
+        ChordToken gOld = gStale;
+        gOld.degreeRoman = "bIII"; // E 基準の古い度数
+        auto fresh = MusicEngine::GetSuggestions({ gStale }, "D", MusicalMode::NaturalMinor, false);
+        auto stale = MusicEngine::GetSuggestions({ gOld }, "D", MusicalMode::NaturalMinor, false);
+        TEST_ASSERT(!fresh.empty() && fresh[0].rootName == "A" && fresh[0].qualitySuffix == "m", "IV-function chord suggests Am first in D minor");
+        bool same = (fresh.size() == stale.size());
+        for (size_t i = 0; same && i < fresh.size(); ++i) {
+            same = (fresh[i].rootName == stale[i].rootName && fresh[i].quality == stale[i].quality);
+        }
+        TEST_ASSERT(same, "A stale stored degree does not change the suggestions");
+
+        ChordToken em = MusicEngine::ParseChordSymbol("Em", "D", MusicalMode::NaturalMinor);
+        TEST_ASSERT(em.degreeRoman == "IIm", "Em in D minor is degree IIm");
+        std::string recomputed = MusicEngine::CalculateDegree(em.rootPitch, em.quality, MusicEngine::NoteToPitch("C"), MusicalMode::Major, em.bassPitch);
+        TEST_ASSERT(recomputed == "IIIm", "The same Em is degree IIIm when read in C");
+    }
+
     // 前コードなし（休符）は、通常の初期候補にフォールバックする
     {
         auto bridge = MusicEngine::GetBridgeSuggestions(MakeRestTok(480), "C", MusicalMode::Major, "G", MusicalMode::Major, false);
@@ -2041,6 +2123,60 @@ void TestBridgeSuggestions() {
             return std::min(d, 12 - d);
         };
         TEST_ASSERT(!ordered.empty() && dist(ordered.front()) <= dist(ordered.back()), "Borrowed chords are ordered by closeness to the base chord");
+    }
+
+    // 転調先（接続先）キーへ向かう借用候補
+    {
+        auto same = MusicEngine::GetModulationBorrowed("C", MusicalMode::Major, "C", MusicalMode::Major, false);
+        TEST_ASSERT(same.empty(), "No modulation borrowed chords when the key does not change");
+
+        // D → C（全音下への転調）: 接続先 C の V7 (G7) が先頭
+        auto toC = MusicEngine::GetModulationBorrowed("D", MusicalMode::Major, "C", MusicalMode::Major, false);
+        TEST_ASSERT(toC.size() >= 3, "Modulation borrowed list has several candidates");
+        TEST_ASSERT(!toC.empty() && toC[0].rootName == "G" && toC[0].quality == ChordQuality::Dominant7,
+                    "First modulation candidate is V7 of the target key (G7 for C)");
+        bool unique = true;
+        for (size_t i = 0; i < toC.size(); ++i) {
+            for (size_t j = i + 1; j < toC.size(); ++j) {
+                if (toC[i].rootPitch == toC[j].rootPitch && toC[i].quality == toC[j].quality) unique = false;
+            }
+        }
+        TEST_ASSERT(unique, "Modulation borrowed candidates contain no duplicates");
+
+        // モードだけが違う場合（C major → C minor）も転調先として扱う
+        auto toMinor = MusicEngine::GetModulationBorrowed("C", MusicalMode::Major, "C", MusicalMode::NaturalMinor, false);
+        TEST_ASSERT(!toMinor.empty(), "Mode change at the same tonic also yields modulation candidates");
+    }
+
+    // 異キーの橋渡し（D の最終コード D → 次パート C）でも、重複なく4件以上返る
+    {
+        ChordToken d = MusicEngine::ParseChordSymbol("D", "D", MusicalMode::Major);
+        auto bridge = MusicEngine::GetBridgeSuggestions(d, "D", MusicalMode::Major, "C", MusicalMode::Major, false);
+        TEST_ASSERT(bridge.size() >= 4, "Bridge from the last chord to the next part's key returns at least four candidates");
+        bool hasDominant = false;
+        for (const auto& c : bridge) {
+            if (c.rootName == "G") hasDominant = true;
+        }
+        TEST_ASSERT(hasDominant, "Bridge to key C includes its dominant (G)");
+    }
+
+    // D minor の最終コード Dm → 次パート C major: 共通ピボット(Dm/C/F/Am)が枠を埋めず、V(G)が先頭4件に入る
+    {
+        ChordToken dm = MusicEngine::ParseChordSymbol("Dm", "D", MusicalMode::NaturalMinor);
+        auto bridge = MusicEngine::GetBridgeSuggestions(dm, "D", MusicalMode::NaturalMinor, "C", MusicalMode::Major, false);
+        TEST_ASSERT(bridge.size() >= 4, "D minor to C major bridge returns at least four candidates");
+        TEST_ASSERT(bridge[0].rootName == "Dm" || (bridge[0].rootName == "D" && bridge[0].quality == dm.quality),
+                    "The previous chord itself leads as the first pivot");
+        bool gInTop4 = false;
+        bool fInTop4 = false;
+        for (size_t i = 0; i < 4 && i < bridge.size(); ++i) {
+            if (bridge[i].rootName == "G") gInTop4 = true;
+            if (bridge[i].rootName == "F") fInTop4 = true;
+        }
+        TEST_ASSERT(gInTop4, "Dominant (G) of the target key is within the top four candidates");
+        // 共通ピボット4件(Dm/C/F/Am)のうち、先頭4件に入るのは Dm と C の2件まで（F は V/I の後ろ）
+        TEST_ASSERT(bridge[1].rootName == "C" && !fInTop4 && bridge[2].rootName == "G",
+                    "Pivots are capped at two (Dm, C) and V (G) follows immediately");
     }
 }
 
@@ -2081,6 +2217,7 @@ int main() {
     TestAuditFixesRegression();
     TestVersionDefinition();
     TestChordMoveAndClipboard();
+    TestKeyRunAndKeyLabel();
     TestBridgeSuggestions();
 
     std::cout << "========================================\n";
