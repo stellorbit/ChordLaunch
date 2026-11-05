@@ -247,6 +247,8 @@ void AppWindow::RebuildMainMenu() {
     AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_OCTAVE_DOWN, TR(L"選択コードをオクターブ下へ(&L)\tCtrl+↓", L"Octave Down(&L)\tCtrl+Down"));
     AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_OCTAVE_RESET, TR(L"選択コードのオクターブをリセット", L"Reset Chord Octave"));
     AppendMenuW(hEditMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_ADD_MARKER, TR(L"再生ヘッド位置にマーカーを追加\tM", L"Add Marker at Playhead\tM"));
+    AppendMenuW(hEditMenu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_SELECTALL, TR(L"すべて選択(&A)\tCtrl+A", L"Select All(&A)\tCtrl+A"));
     AppendMenuW(hEditMenu, MF_STRING, IDM_EDIT_CLEARALL, TR(L"全クリア(&C)", L"Clear All(&C)"));
     AppendMenuW(hNewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hEditMenu), TR(L"編集(&E)", L"Edit(&E)"));
@@ -314,11 +316,12 @@ bool AppWindow::Create(HINSTANCE hInstance, int nCmdShow) {
 
     if (!m_hwnd) return false;
 
-    // 左ペイン上部のコードテキスト入力欄（2段ツールバー 74px の直下から開始）
+    // 左ペインのコードテキスト入力欄（入力専用。位置は共通レイアウト ComputeLeftPaneLayout に従う）
+    const LeftPaneLayout editLayout = ComputeLeftPaneLayout(m_toolbarHeight, m_leftPaneWidth);
     m_hwndEdit = CreateWindowExW(
-        WS_EX_CLIENTEDGE, L"EDIT", L"| C | G | Am | F |",
+        WS_EX_CLIENTEDGE, L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL,
-        16, static_cast<int>(m_toolbarHeight) + 23, static_cast<int>(m_leftPaneWidth) - 32, 50,
+        static_cast<int>(editLayout.pad), static_cast<int>(editLayout.editY), static_cast<int>(editLayout.innerW), static_cast<int>(editLayout.editH),
         m_hwnd, reinterpret_cast<HMENU>(IDC_TEXT_EDIT), hInstance, nullptr
     );
 
@@ -710,6 +713,12 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 InvalidateRect(m_hwnd, nullptr, FALSE);
                 return 0;
             }
+            if (wmId >= IDM_DIA_VARIANT_BASE && wmId < IDM_DIA_VARIANT_BASE + 7) {
+                // 「その他」バリエーション: メニュー順 = ダイアトニックタブ 2,3,4,5,6,7,8
+                m_diatonicChordTypeTab = 2 + (wmId - IDM_DIA_VARIANT_BASE);
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return 0;
+            }
             if (wmId >= IDM_PRESET_BASE && wmId < IDM_PRESET_BASE + 4) {
                 m_synth.SetPreset(static_cast<WasapiSynth::Preset>(wmId - IDM_PRESET_BASE));
                 InvalidateRect(m_hwnd, nullptr, FALSE);
@@ -717,6 +726,18 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             }
             if (wmId == IDM_CTX_PART_RENAME && m_contextPartIndex >= 0) {
                 OpenRenamePartModal(m_contextPartIndex);
+                return 0;
+            }
+            if (wmId == IDM_CTX_MARKER_EDIT && m_contextMarkerTick >= 0) {
+                OpenMarkerModal(m_contextMarkerTick);
+                return 0;
+            }
+            if (wmId == IDM_CTX_MARKER_DEL && m_contextMarkerTick >= 0) {
+                ClearMarker(m_contextMarkerTick);
+                return 0;
+            }
+            if (wmId == IDM_EDIT_ADD_MARKER) {
+                AddMarkerAtPlayhead();
                 return 0;
             }
             if (wmId == IDM_CTX_PART_DUP && m_contextPartIndex >= 0) {
@@ -935,7 +956,8 @@ void AppWindow::OnSize(UINT width, UINT height) {
     }
 
     if (m_hwndEdit) {
-        SetWindowPos(m_hwndEdit, nullptr, 16, static_cast<int>(m_toolbarHeight) + 23, static_cast<int>(m_leftPaneWidth) - 32, 50, SWP_NOZORDER);
+        const LeftPaneLayout editLayout = ComputeLeftPaneLayout(m_toolbarHeight, m_leftPaneWidth);
+        SetWindowPos(m_hwndEdit, nullptr, static_cast<int>(editLayout.pad), static_cast<int>(editLayout.editY), static_cast<int>(editLayout.innerW), static_cast<int>(editLayout.editH), SWP_NOZORDER);
     }
 
     InvalidateRect(m_hwnd, nullptr, FALSE);
@@ -1306,11 +1328,13 @@ void AppWindow::DrawCard(
     bool useCompactFont = (w < 84.0f && chordName.size() >= 5) || (chordName.size() >= 8);
     IDWriteTextFormat* pTitleFont = useCompactFont ? m_pFontButton : m_pFontCardTitle;
 
-    D2D1_RECT_F titleRect = D2D1::RectF(rect.left + 8.0f, rect.top + 3.0f, rect.right - 14.0f, degree.empty() ? (rect.bottom - 3.0f) : (rect.top + h * 0.56f));
+    // 閉じるボタンがないカードは左右の余白を対称にして、文字が左へ寄るズレを防ぐ
+    const float textRightPad = showCloseButton ? 14.0f : 8.0f;
+    D2D1_RECT_F titleRect = D2D1::RectF(rect.left + 8.0f, rect.top + 3.0f, rect.right - textRightPad, degree.empty() ? (rect.bottom - 3.0f) : (rect.top + h * 0.56f));
     DrawTextSafe(chordName, pTitleFont, titleRect, isRest ? m_pBrushTextMuted : m_pBrushText);
 
     if (!degree.empty()) {
-        D2D1_RECT_F degRect = D2D1::RectF(rect.left + 8.0f, rect.top + h * 0.55f, rect.right - 14.0f, rect.bottom - 2.0f);
+        D2D1_RECT_F degRect = D2D1::RectF(rect.left + 8.0f, rect.top + h * 0.55f, rect.right - textRightPad, rect.bottom - 2.0f);
         DrawTextSafe(degree, m_pFontCardDegree, degRect, m_pBrushAccent);
     }
 

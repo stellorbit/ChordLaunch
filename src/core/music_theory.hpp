@@ -105,7 +105,9 @@ struct Bar {
     int timeDenominator = 4;
     std::vector<ChordToken> chords; // 小節内のコード列
     std::string keyChange;          // 転調マーカー（空文字でなければこの小節から転調）
-    std::string sectionMarker;      // 例: "Intro", "A", "Chorus"
+    // 旧形式のマーカー（テキスト記法 [名前] の読込と旧ファイルの変換用）。
+    // 現行のマーカーは Part::markers（自由位置）で持つ。MIDI 出力は両方を扱う。
+    std::string sectionMarker;
 
     // 小節全体の総 tick 数を取得
     int GetTotalTicks() const {
@@ -115,8 +117,16 @@ struct Bar {
     }
 };
 
+// 自由位置マーカー。tick はパート先頭（マージ後は曲頭）からの絶対位置。
+struct PartMarker {
+    int tick = 0;
+    std::string name;
+
+    bool operator==(const PartMarker& other) const = default;
+};
+
 struct Part {
-    std::string id;            // 一意のID (UUIDまたは短縮文字列)
+    std::string id;           // 一意のID (UUIDまたは短縮文字列)
     std::string name;          // 表示名 (例: "Intro", "Aメロ", "サビ")
     std::string keyRoot = "C"; // パート固有のキー
     MusicalMode mode = MusicalMode::Major;
@@ -125,6 +135,7 @@ struct Part {
     int timeDenominator = 4;
     std::vector<Bar> bars;
     std::string rawProgressionText; // パートのコードテキスト
+    std::vector<PartMarker> markers; // 自由位置マーカー（tick 昇順・同一 tick は1件）
 };
 
 } // namespace clp

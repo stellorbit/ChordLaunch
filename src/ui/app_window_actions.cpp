@@ -384,26 +384,35 @@ void AppWindow::SyncTextToTimeline() {
 
     Part* pActive = m_partManager.GetActivePart();
     if (!pActive) return;
+    if (m_isMergedView) return; // 全体表示中は編集対象のパートがない
 
-    PushUndo();
+    // 空入力（空白のみを含む）は何もしない（既存の進行を消さない）
     std::string utf8 = ToUtf8String(text);
-    pActive->bars = ProgressionParser::Parse(utf8, pActive->keyRoot, pActive->mode);
-    pActive->rawProgressionText = utf8;
+    if (utf8.find_first_not_of(" \t\r\n|") == std::string::npos) return;
+
+    auto parsed = ProgressionParser::Parse(utf8, pActive->keyRoot, pActive->mode);
+    if (parsed.empty()) return;
+
+    // テキストはタイムラインと同期しない入力専用欄。入力内容を末尾へ追記し、反映後に欄を空にする
+    PushUndo();
+    for (auto& bar : parsed) {
+        pActive->bars.push_back(std::move(bar));
+    }
+    ClearSelection();
+    SyncTimelineToText();
+    SetWindowTextW(m_hwndEdit, L"");
 
     InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
+// テキスト欄へは書き戻さない（入力専用）。パートの保存用テキストのみ更新する。
 void AppWindow::SyncTimelineToText() {
-    if (!m_hwndEdit) return;
-
     Part* pActive = m_partManager.GetActivePart();
     if (!pActive) return;
 
-    std::string text = ProgressionParser::Format(pActive->bars);
-    pActive->rawProgressionText = text;
-    std::wstring wtext = ToWString(text);
-
-    SetWindowTextW(m_hwndEdit, wtext.c_str());
+    PartManager::RenumberBars(pActive->bars); // 各パートは常に1小節目から始まる連番
+    PartManager::MigrateBarMarkers(*pActive); // [名前] 記法由来の小節マーカーを自由位置マーカーへ変換し、範囲外を丸める
+    pActive->rawProgressionText = ProgressionParser::Format(pActive->bars);
 }
 
 void AppWindow::PushUndo() {
@@ -1386,7 +1395,8 @@ void AppWindow::DoMidiSaveAs() {
 
     if (GetSaveFileNameW(&ofn)) {
         int bpm = pActive ? pActive->bpm : 120;
-        auto bytes = MidiBuilder::BuildMidi(bars, bpm, m_selectedVoicing, m_baseOctave, 90, m_bassOctaveMode);
+        const std::vector<PartMarker> markers = CurrentViewMarkers();
+        auto bytes = MidiBuilder::BuildMidi(bars, bpm, m_selectedVoicing, m_baseOctave, 90, m_bassOctaveMode, &markers);
         if (!bytes.empty()) {
             HANDLE hFile = CreateFileW(szFile, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
             bool saved = false;
@@ -1411,7 +1421,8 @@ void AppWindow::StartDawDrag() {
     if (bars.empty()) return;
 
     int bpm = pActive ? pActive->bpm : 120;
-    std::wstring tempMidiPath = MidiBuilder::ExportToTempFile(bars, bpm, m_selectedVoicing, L"ChordLaunch_Progression", m_bassOctaveMode);
+    const std::vector<PartMarker> markers = CurrentViewMarkers();
+    std::wstring tempMidiPath = MidiBuilder::ExportToTempFile(bars, bpm, m_selectedVoicing, L"ChordLaunch_Progression", m_bassOctaveMode, &markers);
     if (!tempMidiPath.empty()) {
         OleFileDataObject::StartFileDrag(m_hwnd, tempMidiPath);
     }
@@ -1748,6 +1759,7 @@ void AppWindow::DoMergeAllToNewPart() {
     newPart.timeNumerator = 4;
     newPart.timeDenominator = 4;
     newPart.bars = mergedBars;
+    newPart.markers = m_partManager.GenerateMergedMarkers(); // 各パート名は mergedBars の sectionMarker から変換される
 
     std::string text;
     for (size_t bi = 0; bi < mergedBars.size(); ++bi) {
@@ -1772,8 +1784,117 @@ void AppWindow::OpenRenamePartModal(int partIndex) {
     if (partIndex < 0 || partIndex >= static_cast<int>(parts.size())) return;
 
     m_renamePartIndex = partIndex;
+    m_renameMarkerTick = -1;
     m_renamePartName = ToWString(parts[partIndex].name);
     OpenModal(ModalType::RenamePart);
+}
+
+std::vector<PartMarker> AppWindow::CurrentViewMarkers() const {
+    if (m_isMergedView) return m_partManager.GenerateMergedMarkers();
+    const Part* pActive = m_partManager.GetActivePart();
+    return pActive ? pActive->markers : std::vector<PartMarker>{};
+}
+
+int AppWindow::MarkerHitToleranceTicks() const {
+    float barWidth = m_pixelsPerBeat * 4.0f;
+    if (barWidth <= 0.0f) return TICKS_PER_BEAT / 4;
+    // 約 8px 以内を「既存マーカーを指している」とみなす
+    return std::max(1, static_cast<int>(std::round(8.0f / barWidth * static_cast<float>(TICKS_PER_BAR_4_4))));
+}
+
+int AppWindow::HitTestRulerTick(float x) const {
+    const Part* pActive = m_partManager.GetActivePart();
+    if (!pActive || m_isMergedView) return -1;
+    float relX = (x - m_leftPaneWidth) + m_timelineScrollX;
+    float barWidth = m_pixelsPerBeat * 4.0f;
+    if (relX < 0.0f || barWidth <= 0.0f) return -1;
+    double rawTick = (static_cast<double>(relX) / barWidth) * TICKS_PER_BAR_4_4;
+    if (rawTick > static_cast<double>(PartManager::PartLengthTicks(*pActive))) return -1;
+    return static_cast<int>(std::llround(rawTick));
+}
+
+void AppWindow::OpenMarkerModal(int tick) {
+    Part* pActive = m_partManager.GetActivePart();
+    if (!pActive || m_isMergedView || tick < 0) return;
+
+    // パート先頭（tick 0 付近）のマーカーはパートタブ名そのものなので、パート名の変更に振り替える
+    const int tol = MarkerHitToleranceTicks();
+    if (tick <= tol && m_partManager.FindMarkerNear(m_partManager.GetActiveIndex(), tick, tol) < 0) {
+        OpenRenamePartModal(m_partManager.GetActiveIndex());
+        return;
+    }
+
+    // 既存マーカーの近くなら編集、なければ（グリッドへスナップした）その位置に新規作成
+    int existing = m_partManager.FindMarkerNear(m_partManager.GetActiveIndex(), tick, tol);
+    std::string initial;
+    if (existing >= 0) {
+        tick = existing;
+        for (const auto& m : pActive->markers) {
+            if (m.tick == existing) initial = m.name;
+        }
+    } else {
+        int grid = std::max(1, m_timelineGridTicks);
+        tick = ((tick + grid / 2) / grid) * grid;
+        if (tick <= 0) tick = grid;
+    }
+
+    m_renamePartIndex = m_partManager.GetActiveIndex();
+    m_renameMarkerTick = tick;
+    m_renamePartName = ToWString(initial);
+    OpenModal(ModalType::RenamePart);
+}
+
+void AppWindow::AddMarkerAtPlayhead() {
+    if (m_isMergedView) {
+        SetStatusMessage(TR(L"マーカーはパートごとに追加します（全体表示では追加できません）", L"Add markers per part (not available in merged view)"));
+        return;
+    }
+    Part* pActive = m_partManager.GetActivePart();
+    if (!pActive) return;
+
+    int grid = std::max(1, m_timelineGridTicks);
+    int tick = static_cast<int>(std::llround(m_playbackTick / grid)) * grid;
+    if (tick <= 0) {
+        SetStatusMessage(TR(L"再生ヘッドをパート先頭以外へ移動してからマーカーを追加してください（先頭はパート名）",
+                            L"Move the playhead past the part start to add a marker (the start is the part name)"));
+        return;
+    }
+    OpenMarkerModal(tick);
+}
+
+void AppWindow::ClearMarker(int tick) {
+    if (m_isMergedView) return;
+    int idx = m_partManager.GetActiveIndex();
+    if (m_partManager.FindMarkerNear(idx, tick, 0) < 0) return;
+
+    PushUndo();
+    m_partManager.RemoveMarker(idx, tick);
+    SetStatusMessage(TR(L"マーカーを削除しました", L"Marker removed"));
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::CommitRenameModal() {
+    auto& parts = m_partManager.GetParts();
+    if (m_renamePartIndex < 0 || m_renamePartIndex >= static_cast<int>(parts.size())) return;
+
+    if (m_renameMarkerTick > 0) {
+        // 空文字はマーカー解除（新規で空なら何もしない）
+        const std::string name = ToUtf8String(m_renamePartName);
+        const bool existed = m_partManager.FindMarkerNear(m_renamePartIndex, m_renameMarkerTick, 0) >= 0;
+        if (name.empty() && !existed) return;
+        PushUndo();
+        if (!m_partManager.SetMarker(m_renamePartIndex, m_renameMarkerTick, name)) {
+            SetStatusMessage(TR(L"このマーカー名は使用できません（\"Key:\" 始まりなど）", L"This marker name is not allowed (e.g. starting with \"Key:\")"));
+        }
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+        return;
+    }
+
+    if (m_renamePartName.empty()) return;
+    PushUndo();
+    parts[static_cast<size_t>(m_renamePartIndex)].name = ToUtf8String(m_renamePartName);
+    SyncTimelineToText();
+    InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
 void AppWindow::OpenDashboardModal() {

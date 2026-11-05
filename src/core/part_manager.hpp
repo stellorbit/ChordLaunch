@@ -39,6 +39,27 @@ public:
     bool DuplicatePart(int index);
     void MovePart(int fromIndex, int toIndex);
 
+    // 小節番号を1から振り直す（各パートは常に1小節目から始まる）
+    static void RenumberBars(std::vector<Bar>& bars);
+
+    // パートの総 tick 数（各小節の GetTotalTicks の合計）
+    static int PartLengthTicks(const Part& part);
+
+    // パート内の任意位置（パート先頭からの tick）にマーカーを設定する。空文字で解除。同一 tick は上書き。
+    // tick <= 0（パート先頭＝タブ名の位置）、パート長が 2 tick 未満、パート不正、"Key:" 始まりの名前は false。
+    // パート長以上の tick は末尾（長さ-1）へ丸める。[ ] と改行は名前から除去する。
+    bool SetMarker(int partIndex, int tick, std::string_view name);
+    bool RemoveMarker(int partIndex, int tick);
+    // 指定 tick から tolerance 以内で最も近いマーカーの tick を返す（無ければ -1）
+    int FindMarkerNear(int partIndex, int tick, int tolerance) const;
+
+    // 旧形式（Bar::sectionMarker）のマーカーを自由位置マーカーへ変換し、範囲外のマーカーを丸める。
+    // 先頭小節のマーカーはタブ名と同義のため破棄する。変換後は全小節の sectionMarker が空になる。
+    static void MigrateBarMarkers(Part& part);
+
+    // 全パートの自由位置マーカーを、曲頭からの絶対 tick に直して返す（パート先頭のタブ名は含まない）
+    std::vector<PartMarker> GenerateMergedMarkers() const;
+
     // 全体マージ（結合）処理
     // 全パートを順次結合し、転調箇所にキー変更マーカーを自動割り当てした小節列を生成
     std::vector<Bar> GenerateMergedProgression() const;

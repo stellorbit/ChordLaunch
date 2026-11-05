@@ -312,6 +312,19 @@ void TestNewAuditFixes() {
     TEST_ASSERT(repeatChords[0].chords[3].isRest && repeatChords[0].chords[3].durationBeats == 1, "Second trailing rest must be 1 beat");
     TEST_ASSERT(diaAdd9.size() == 7 && diaAdd9[0].qualitySuffix == "add9", "Add9 diatonic tab generates Cadd9");
 
+    // ダイアトニック追加バリエーション (tab 5〜8)
+    auto diaSus2 = MusicEngine::GetDiatonicChordsByTab("C", MusicalMode::Major, 5);
+    TEST_ASSERT(diaSus2.size() == 7 && diaSus2[0].qualitySuffix == "sus2" && diaSus2[4].rootName == "G", "Sus2 diatonic tab generates Csus2 / Gsus2");
+    auto diaSix = MusicEngine::GetDiatonicChordsByTab("C", MusicalMode::Major, 6);
+    TEST_ASSERT(diaSix.size() == 7 && diaSix[0].qualitySuffix == "6" && diaSix[1].qualitySuffix == "m6" && diaSix[6].qualitySuffix == "dim", "6th diatonic tab keeps major/minor/dim character (C6, Dm6, Bdim)");
+    auto dia7sus4 = MusicEngine::GetDiatonicChordsByTab("C", MusicalMode::Major, 7);
+    TEST_ASSERT(dia7sus4.size() == 7 && dia7sus4[0].qualitySuffix == "7sus4", "7sus4 diatonic tab generates C7sus4");
+    auto diaMAdd9 = MusicEngine::GetDiatonicChordsByTab("C", MusicalMode::Major, 8);
+    TEST_ASSERT(diaMAdd9.size() == 7 && diaMAdd9[0].qualitySuffix == "add9" && diaMAdd9[1].qualitySuffix == "madd9", "Quality-aware add9 tab generates Cadd9 / Dmadd9");
+    auto diaSixMinor = MusicEngine::GetDiatonicChordsByTab("A", MusicalMode::NaturalMinor, 6);
+    TEST_ASSERT(diaSixMinor.size() == 7 && diaSixMinor[0].qualitySuffix == "m6" && diaSixMinor[2].qualitySuffix == "6", "6th tab in A minor generates Am6 / C6");
+    TEST_ASSERT(MusicEngine::IsSeventhDiatonicTab(1) && MusicEngine::IsSeventhDiatonicTab(7) && !MusicEngine::IsSeventhDiatonicTab(0) && !MusicEngine::IsSeventhDiatonicTab(6), "Seventh-tab helper recognises 7th and 7sus4 only");
+
     // C-10: CM7 vs Cm7 distinction
     auto chordMaj7 = MusicEngine::ParseChordSymbol("CM7");
     TEST_ASSERT(chordMaj7.quality == ChordQuality::Major7, "CM7 parses as Major7");
@@ -2212,6 +2225,128 @@ void TestBridgeSuggestions() {
     }
 }
 
+// MIDI バイナリから Marker(FF 06) メタイベントの (絶対tick, 名前) を取り出す簡易パーサ
+static std::vector<std::pair<uint32_t, std::string>> ExtractMidiMarkers(const std::vector<uint8_t>& midi) {
+    std::vector<std::pair<uint32_t, std::string>> out;
+    size_t pos = 22; // MThd(14) + MTrk(4) + length(4)
+    uint32_t tick = 0;
+    while (pos < midi.size()) {
+        uint32_t delta = 0;
+        while (pos < midi.size()) {
+            uint8_t b = midi[pos++];
+            delta = (delta << 7) | (b & 0x7F);
+            if (!(b & 0x80)) break;
+        }
+        tick += delta;
+        if (pos >= midi.size()) break;
+        uint8_t status = midi[pos++];
+        if (status == 0xFF) {
+            uint8_t type = midi[pos++];
+            uint32_t len = 0;
+            while (pos < midi.size()) {
+                uint8_t b = midi[pos++];
+                len = (len << 7) | (b & 0x7F);
+                if (!(b & 0x80)) break;
+            }
+            if (type == 0x06) out.emplace_back(tick, std::string(midi.begin() + pos, midi.begin() + pos + len));
+            pos += len;
+            if (type == 0x2F) break;
+        } else {
+            pos += 2; // Note On/Off はデータ2バイト
+        }
+    }
+    return out;
+}
+
+void TestPartBarNumberingAndMarkers() {
+    std::cout << "[TEST] 34. Per-part bar numbering from 1 and free-position markers (tick based)\n";
+
+    PartManager pm;
+    pm.GetParts().clear();
+    pm.AddPart("Verse", "C", MusicalMode::Major);
+    pm.AddPart("Chorus", "C", MusicalMode::Major);
+    auto& parts = pm.GetParts();
+    TEST_ASSERT(parts.size() == 2, "Two parts created");
+    const int len0 = PartManager::PartLengthTicks(parts[0]);
+    TEST_ASSERT(len0 == 4 * TICKS_PER_BAR_4_4, "Part length is the sum of bar ticks");
+
+    // 1. RenumberBars
+    parts[1].bars[0].barNumber = 9;
+    parts[1].bars[1].barNumber = 9;
+    PartManager::RenumberBars(parts[1].bars);
+    bool seq = true;
+    for (size_t i = 0; i < parts[1].bars.size(); ++i) seq = seq && (parts[1].bars[i].barNumber == static_cast<int>(i) + 1);
+    TEST_ASSERT(seq, "RenumberBars restores 1..N numbering");
+
+    // 2. SetMarker: 小節の途中にも置ける。ソート・上書き・解除・不正入力
+    const int midBar = TICKS_PER_BAR_4_4 + TICKS_PER_BEAT * 2 + 120; // 2小節目の途中（拍の途中）
+    TEST_ASSERT(pm.SetMarker(0, midBar, "Hook"), "SetMarker places a marker mid-bar");
+    TEST_ASSERT(pm.SetMarker(0, TICKS_PER_BEAT, "Early"), "SetMarker places an earlier marker");
+    TEST_ASSERT(parts[0].markers.size() == 2 && parts[0].markers[0].tick == TICKS_PER_BEAT && parts[0].markers[1].tick == midBar,
+                "Markers are kept sorted by tick");
+    TEST_ASSERT(pm.SetMarker(0, midBar, "  [Hook2]\n "), "Same tick overwrites with sanitized name");
+    TEST_ASSERT(parts[0].markers.size() == 2 && parts[0].markers[1].name == "Hook2", "Overwrite keeps one marker per tick");
+    TEST_ASSERT(!pm.SetMarker(0, midBar, "Key: G"), "Names starting with Key: are rejected");
+    TEST_ASSERT(parts[0].markers[1].name == "Hook2", "Rejected name leaves the marker unchanged");
+    TEST_ASSERT(!pm.SetMarker(0, 0, "X") && !pm.SetMarker(0, -5, "X") && !pm.SetMarker(9, 100, "X"), "Tick 0, negative tick and bad part are rejected");
+    TEST_ASSERT(pm.SetMarker(0, len0 + 5000, "Tail"), "Tick beyond the part end is accepted and clamped");
+    TEST_ASSERT(parts[0].markers.back().tick == len0 - 1, "Out-of-range tick is clamped to length-1");
+    TEST_ASSERT(pm.FindMarkerNear(0, midBar + 10, 20) == midBar && pm.FindMarkerNear(0, midBar + 100, 20) == -1, "FindMarkerNear honors tolerance");
+    TEST_ASSERT(pm.RemoveMarker(0, len0 - 1) && parts[0].markers.size() == 2, "RemoveMarker deletes by exact tick");
+    TEST_ASSERT(pm.SetMarker(0, TICKS_PER_BEAT, "") && parts[0].markers.size() == 1, "Empty name removes the marker");
+
+    // 3. マージ: 後続パートへ長さ分オフセットされ、パート先頭はタブ名のまま
+    TEST_ASSERT(pm.SetMarker(1, TICKS_PER_BEAT * 3, "Drop"), "Marker in the second part");
+    auto mergedMarkers = pm.GenerateMergedMarkers();
+    TEST_ASSERT(mergedMarkers.size() == 2 && mergedMarkers[0].tick == midBar, "Merged markers keep first-part ticks");
+    TEST_ASSERT(mergedMarkers[1].tick == len0 + TICKS_PER_BEAT * 3 && mergedMarkers[1].name == "Drop", "Second-part marker is offset by the first part length");
+    auto merged = pm.GenerateMergedProgression();
+    TEST_ASSERT(merged[0].sectionMarker == "Verse" && merged[parts[0].bars.size()].sectionMarker == "Chorus", "Part-first bars carry the tab names");
+    TEST_ASSERT(merged[parts[0].bars.size()].barNumber == static_cast<int>(parts[0].bars.size()) + 1, "Merged bar numbers are continuous");
+
+    // 4. 旧形式（小節マーカー）の変換: 2小節目以降は小節先頭へ、先頭小節は破棄
+    {
+        Part legacy;
+        legacy.keyRoot = "C";
+        legacy.bars = ProgressionParser::Parse("[Intro]\n| C | G |\n[Verse]\n| Am | F |", "C", MusicalMode::Major);
+        TEST_ASSERT(legacy.bars.size() == 4 && legacy.bars[2].sectionMarker == "Verse", "Parser still reads [name] into the bar");
+        PartManager::MigrateBarMarkers(legacy);
+        TEST_ASSERT(legacy.markers.size() == 1 && legacy.markers[0].tick == 2 * TICKS_PER_BAR_4_4 && legacy.markers[0].name == "Verse",
+                    "Legacy bar marker becomes a marker at the bar start (first bar dropped)");
+        bool cleared = true;
+        for (const auto& b : legacy.bars) cleared = cleared && b.sectionMarker.empty();
+        TEST_ASSERT(cleared, "Bar markers are cleared after migration");
+
+        legacy.markers.push_back(PartMarker{ 99999, "Far" });
+        PartManager::MigrateBarMarkers(legacy);
+        TEST_ASSERT(legacy.markers.back().tick == PartManager::PartLengthTicks(legacy) - 1, "Migration clamps markers beyond the part end");
+    }
+
+    // 5. 保存・読込でマーカー位置が保たれ、小節番号は1始まりに正規化される
+    parts[1].bars[0].barNumber = 7;
+    std::string json = pm.SerializeProject("MarkerSong", VoicingStyle::RootPosition, 0, 480);
+    PartManager pm2;
+    std::string t; VoicingStyle v = VoicingStyle::RootPosition; int bm = 0; int g = 0;
+    TEST_ASSERT(pm2.DeserializeProject(json, t, v, bm, g), "Project with markers deserializes");
+    TEST_ASSERT(pm2.GetParts().size() == 2 && pm2.GetParts()[0].markers.size() == 1 &&
+                pm2.GetParts()[0].markers[0].tick == midBar && pm2.GetParts()[0].markers[0].name == "Hook2",
+                "Mid-bar marker survives project save/load at the exact tick");
+    TEST_ASSERT(pm2.GetParts()[1].markers.size() == 1 && pm2.GetParts()[1].markers[0].name == "Drop", "Second-part marker survives save/load");
+    TEST_ASSERT(pm2.GetParts()[1].bars[0].barNumber == 1, "Loaded parts are renumbered from bar 1");
+
+    // 6. MIDI: マーカーが指定 tick（小節の途中）に Marker イベントとして出力される
+    {
+        auto bars = ProgressionParser::Parse("| C | G |", "C", MusicalMode::Major);
+        std::vector<PartMarker> mk = { { 960, "Mid" }, { 2 * TICKS_PER_BAR_4_4 - 1, "Edge" } };
+        auto midi = MidiBuilder::BuildMidi(bars, 120, VoicingStyle::RootPosition, 4, 90, 0, &mk);
+        auto found = ExtractMidiMarkers(midi);
+        TEST_ASSERT(found.size() == 2 && found[0].first == 960 && found[0].second == "Mid", "MIDI marker is written at the exact mid-bar tick");
+        TEST_ASSERT(found.size() == 2 && found[1].first == 2u * TICKS_PER_BAR_4_4 - 1 && found[1].second == "Edge", "MIDI marker near the end keeps its tick");
+        auto plain = MidiBuilder::BuildMidi(bars, 120, VoicingStyle::RootPosition, 4, 90, 0);
+        TEST_ASSERT(ExtractMidiMarkers(plain).empty(), "No markers argument writes no Marker events");
+    }
+}
+
 int main() {
     std::cout << "========================================\n";
     std::cout << "ChordLaunch C++20 Core Test Suite\n";
@@ -2252,6 +2387,7 @@ int main() {
     TestChordMoveAndClipboard();
     TestKeyRunAndKeyLabel();
     TestBridgeSuggestions();
+    TestPartBarNumberingAndMarkers();
 
     std::cout << "========================================\n";
     std::cout << "Tests Passed: " << g_passCount << ", Failed: " << g_failCount << "\n";

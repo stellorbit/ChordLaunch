@@ -68,11 +68,15 @@ namespace clp {
 #define IDM_GRID_BASE        3400
 #define IDM_INPUT_GRID_BASE  3420
 #define IDM_PRESET_BASE      3500
+#define IDM_DIA_VARIANT_BASE 3550
 #define IDM_CTX_PART_DUP     3601
 #define IDM_CTX_PART_DEL     3602
 #define IDM_CTX_PART_LEFT    3603
 #define IDM_CTX_PART_RIGHT   3604
 #define IDM_CTX_PART_RENAME  3605
+#define IDM_CTX_MARKER_EDIT  3606
+#define IDM_CTX_MARKER_DEL   3607
+#define IDM_EDIT_ADD_MARKER  3608
 #define IDM_CTX_CARD_INV0    3700
 #define IDM_CTX_CARD_INV1    3701
 #define IDM_CTX_CARD_INV2    3702
@@ -107,6 +111,128 @@ inline std::string ToUtf8String(const std::wstring& wstr) {
 
 inline bool PtInRectF(const D2D1_RECT_F& rc, float x, float y) {
     return (x >= rc.left && x <= rc.right && y >= rc.top && y <= rc.bottom);
+}
+
+// ---------------------------------------------------------------------------
+// 共通レイアウト算出（描画とヒットテストが同じ矩形を使い、座標のズレを根絶する）
+// ---------------------------------------------------------------------------
+
+// n列グリッドの1セル。右端が必ず innerW に一致するよう幅を均等割りする。
+inline D2D1_RECT_F GridCellRect(float left, float innerW, int cols, int col, float top, float h, float gap) {
+    float w = (innerW - gap * static_cast<float>(cols - 1)) / static_cast<float>(cols);
+    float x = left + static_cast<float>(col) * (w + gap);
+    return D2D1::RectF(x, top, x + w, top + h);
+}
+
+// ツールバー（上段: 再生系・保存系 / 下段: ラベル＋プルダウン群）
+struct ToolbarLayout {
+    // 上段
+    D2D1_RECT_F play, stop, loop, merge;
+    D2D1_RECT_F counter;
+    D2D1_RECT_F midiSave, dawDrag, templates, help, settings;
+    // 下段 (ラベルは非クリック領域、値側がプルダウン)
+    D2D1_RECT_F keyLbl, key, scaleLbl, scale;
+    D2D1_RECT_F bpmLbl, bpmVal, spinUp, spinDown, tap;
+    D2D1_RECT_F soundLbl, sound, voicingLbl, voicing, bassLbl, bass, inputLbl, input, gridLbl, grid;
+    float sepX1, sepX2, sepX3, row2Y, row2H;
+};
+
+inline ToolbarLayout ComputeToolbarLayout(float width) {
+    ToolbarLayout L{};
+    const float r1Y = 4.0f, r1H = 28.0f;
+    const float gap = 4.0f;
+
+    // 上段 左: アイコンのみの再生・停止・ループ ＋ 全体マージ
+    float x = 12.0f;
+    L.play  = D2D1::RectF(x, r1Y, x + 32.0f, r1Y + r1H); x += 32.0f + gap;
+    L.stop  = D2D1::RectF(x, r1Y, x + 32.0f, r1Y + r1H); x += 32.0f + gap;
+    L.loop  = D2D1::RectF(x, r1Y, x + 32.0f, r1Y + r1H); x += 32.0f + gap + 8.0f;
+    L.merge = D2D1::RectF(x, r1Y, x + 84.0f, r1Y + r1H);
+
+    // 上段 中央: 小節/拍カウンター
+    const float counterW = 124.0f;
+    float counterX = (width - counterW) * 0.5f;
+    L.counter = D2D1::RectF(counterX, r1Y, counterX + counterW, r1Y + r1H);
+
+    // 上段 右（右端から順に）
+    float rx = width - 12.0f;
+    rx -= 32.0f; L.settings  = D2D1::RectF(rx, r1Y, rx + 32.0f,  r1Y + r1H); rx -= gap;
+    rx -= 32.0f; L.help      = D2D1::RectF(rx, r1Y, rx + 32.0f,  r1Y + r1H); rx -= gap;
+    rx -= 100.0f; L.templates = D2D1::RectF(rx, r1Y, rx + 100.0f, r1Y + r1H); rx -= gap;
+    rx -= 112.0f; L.dawDrag  = D2D1::RectF(rx, r1Y, rx + 112.0f, r1Y + r1H); rx -= gap;
+    rx -= 84.0f;  L.midiSave = D2D1::RectF(rx, r1Y, rx + 84.0f,  r1Y + r1H);
+
+    // 下段
+    const float r2Y = 38.0f, r2H = 28.0f;
+    L.row2Y = r2Y; L.row2H = r2H;
+    const float groupGap = 8.0f;
+    x = 12.0f;
+    auto pair = [&](D2D1_RECT_F& lbl, D2D1_RECT_F& val, float lblW, float valW) {
+        lbl = D2D1::RectF(x, r2Y, x + lblW, r2Y + r2H);
+        x += lblW;
+        val = D2D1::RectF(x, r2Y, x + valW, r2Y + r2H);
+        x += valW + groupGap;
+    };
+
+    pair(L.keyLbl, L.key, 28.0f, 44.0f);
+    pair(L.scaleLbl, L.scale, 50.0f, 112.0f);
+    L.sepX1 = x; x += groupGap + 2.0f;
+
+    L.bpmLbl = D2D1::RectF(x, r2Y, x + 34.0f, r2Y + r2H); x += 34.0f;
+    L.bpmVal = D2D1::RectF(x, r2Y, x + 40.0f, r2Y + r2H); x += 42.0f;
+    L.spinUp   = D2D1::RectF(x, r2Y, x + 18.0f, r2Y + r2H * 0.5f - 1.0f);
+    L.spinDown = D2D1::RectF(x, r2Y + r2H * 0.5f + 1.0f, x + 18.0f, r2Y + r2H);
+    x += 18.0f + gap;
+    L.tap = D2D1::RectF(x, r2Y, x + 44.0f, r2Y + r2H); x += 44.0f + groupGap;
+    L.sepX2 = x; x += groupGap + 2.0f;
+
+    pair(L.soundLbl, L.sound, 38.0f, 100.0f);
+    pair(L.voicingLbl, L.voicing, 62.0f, 88.0f);
+    pair(L.bassLbl, L.bass, 38.0f, 64.0f);
+    pair(L.inputLbl, L.input, 36.0f, 84.0f);
+    pair(L.gridLbl, L.grid, 50.0f, 84.0f);
+    L.sepX3 = x - groupGap * 0.5f;
+    return L;
+}
+
+// 左ペイン（上から: ダイアトニックコード → コード進行テキスト入力 → カスタムコードビルダー）
+struct LeftPaneLayout {
+    float pad, innerW, gap;
+    float diaTitleY, tabY, tabH, cardY, cardH, sep1Y;
+    float textTitleY, editY, editH, applyY, applyH, sep2Y;
+    float builderHeaderY, builderTop;
+    // ビルダー内（builderTop 起点の絶対Y）
+    float rootsY, suffixY, tensionY, bassY, addY;
+    float btnH, rowGap;
+};
+
+inline LeftPaneLayout ComputeLeftPaneLayout(float top, float paneW) {
+    LeftPaneLayout L{};
+    L.pad = 16.0f;
+    L.gap = 4.0f;
+    L.innerW = paneW - L.pad * 2.0f;
+    L.btnH = 20.0f;
+    L.rowGap = 3.0f;
+
+    float y = top + 5.0f;
+    L.diaTitleY = y;           y += 17.0f;
+    L.tabY = y; L.tabH = 21.0f; y += 24.0f;
+    L.cardY = y; L.cardH = 38.0f; y += L.cardH * 2.0f + L.gap + 6.0f;
+    L.sep1Y = y;               y += 4.0f;
+    L.textTitleY = y;          y += 18.0f;
+    L.editY = y; L.editH = 50.0f; y += 54.0f;
+    L.applyY = y; L.applyH = 24.0f; y += 28.0f;
+    L.sep2Y = y;               y += 4.0f;
+    L.builderHeaderY = y;      y += 22.0f;
+    L.builderTop = y;
+
+    const float rowPair = L.btnH * 2.0f + L.rowGap;
+    L.rootsY   = y;                          y += rowPair + 4.0f;
+    L.suffixY  = y;                          y += rowPair + 4.0f;
+    L.tensionY = y;                          y += L.btnH + 4.0f;
+    L.bassY    = y;                          y += rowPair + 5.0f;
+    L.addY     = y;
+    return L;
 }
 
 inline std::string StripLeadingEmoji(std::string_view s) {

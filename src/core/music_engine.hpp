@@ -39,7 +39,10 @@ public:
     );
 
     static std::vector<ChordToken> GetDiatonicChords(std::string_view keyRoot, MusicalMode mode, bool with7th);
+    // tabIndex: 0=3和音 / 1=7th / 2=sus4 / 3=add9 / 4=分数 / 5=sus2 / 6=6・m6 / 7=7sus4 / 8=add9・madd9(調性準拠)
     static std::vector<ChordToken> GetDiatonicChordsByTab(std::string_view keyRoot, MusicalMode mode, int tabIndex);
+    // 提案・借用コードを7th系で出すべきタブか（7th と 7sus4）
+    static bool IsSeventhDiatonicTab(int tabIndex) { return tabIndex == 1 || tabIndex == 7; }
     static std::vector<ChordToken> GetModalInterchangeChords(std::string_view keyRoot, MusicalMode mode, bool with7th = true);
     static std::vector<ChordToken> GetSecondaryDominants(std::string_view keyRoot, MusicalMode mode);
     static std::vector<ChordToken> GetTritoneSubstitutions(std::string_view keyRoot, MusicalMode mode);

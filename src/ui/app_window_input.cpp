@@ -5,105 +5,71 @@ void AppWindow::OnLButtonDown(float x, float y) {
 
     if (OnModalClick(x, y)) return;
 
-    // ---------------- 1. 上部ツールバー (2段構成) ----------------
+    // ---------------- 1. 上部ツールバー (2段構成。座標は描画と共通のレイアウト) ----------------
     if (y >= 0 && y <= m_toolbarHeight) {
+        const ToolbarLayout L = ComputeToolbarLayout(m_width);
+
         // --- 上段 (y = 0 〜 38px) ---
         if (y <= 38.0f) {
-            float r1Y = 4.0f;
-            float r1H = 28.0f;
-            float curX = 12.0f;
-
-            if (PtInRectF(D2D1::RectF(curX, r1Y, curX + 74.0f, r1Y + r1H), x, y)) {
+            if (PtInRectF(L.play, x, y)) {
                 TogglePlayback();
                 return;
             }
-            curX += 78.0f;
-
-            if (PtInRectF(D2D1::RectF(curX, r1Y, curX + 58.0f, r1Y + r1H), x, y)) {
+            if (PtInRectF(L.stop, x, y)) {
                 StopPlayback();
                 return;
             }
-            curX += 62.0f;
-
-            if (PtInRectF(D2D1::RectF(curX, r1Y, curX + 66.0f, r1Y + r1H), x, y)) {
+            if (PtInRectF(L.loop, x, y)) {
                 m_isLooping = !m_isLooping;
                 InvalidateRect(m_hwnd, nullptr, FALSE);
                 return;
             }
-            curX += 74.0f;
-
             // 全体マージ (新規パート生成)
-            if (PtInRectF(D2D1::RectF(curX + 6.0f, r1Y, curX + 116.0f, r1Y + r1H), x, y)) {
+            if (PtInRectF(L.merge, x, y)) {
                 DoMergeAllToNewPart();
                 return;
             }
-
-            // 右側ボタン群
-            float rightCurX = m_width - 12.0f;
-
-            rightCurX -= 34.0f;
-            if (PtInRectF(D2D1::RectF(rightCurX, r1Y, rightCurX + 32.0f, r1Y + r1H), x, y)) {
+            if (PtInRectF(L.settings, x, y)) {
                 OpenModal(ModalType::Settings);
                 return;
             }
-
-            rightCurX -= 34.0f;
-            if (PtInRectF(D2D1::RectF(rightCurX, r1Y, rightCurX + 32.0f, r1Y + r1H), x, y)) {
+            if (PtInRectF(L.help, x, y)) {
                 OpenModal(ModalType::Help);
                 return;
             }
-
-            rightCurX -= 110.0f;
-            if (PtInRectF(D2D1::RectF(rightCurX, r1Y, rightCurX + 104.0f, r1Y + r1H), x, y)) {
+            if (PtInRectF(L.templates, x, y)) {
                 OpenModal(ModalType::Templates);
                 return;
             }
-
-            rightCurX -= 130.0f;
-            if (PtInRectF(D2D1::RectF(rightCurX, r1Y, rightCurX + 124.0f, r1Y + r1H), x, y)) {
+            if (PtInRectF(L.dawDrag, x, y)) {
                 StartDawDrag();
                 return;
             }
-
-            rightCurX -= 95.0f;
-            if (PtInRectF(D2D1::RectF(rightCurX, r1Y, rightCurX + 88.0f, r1Y + r1H), x, y)) {
+            if (PtInRectF(L.midiSave, x, y)) {
                 DoMidiSaveAs();
                 return;
             }
             return;
         }
 
-        // --- 下段 (y = 38 〜 74px): キー, スケール, BPM, TAP, ボイシング, ベース, グリッド ---
-        float r2Y = 38.0f;
-        float r2H = 28.0f;
-        float curX = 12.0f;
-
-        POINT pt = { static_cast<LONG>(x), static_cast<LONG>(r2Y + r2H) };
-        ClientToScreen(m_hwnd, &pt);
-
-        // キー (プルダウン)
-        if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 78.0f, r2Y + r2H), x, y)) {
-            POINT btnPt = { static_cast<LONG>(curX), static_cast<LONG>(r2Y + r2H) };
+        // --- 下段 (y = 38 〜 74px): キー, スケール, BPM, TAP, 音色, ボイシング, ベース, グリッド ---
+        // ラベル／値のどちらをクリックしても同じプルダウンを開く
+        auto openMenu = [&](const D2D1_RECT_F& lbl, const D2D1_RECT_F& val, void (AppWindow::*show)(float, float)) -> bool {
+            if (!PtInRectF(lbl, x, y) && !PtInRectF(val, x, y)) return false;
+            POINT btnPt = { static_cast<LONG>(lbl.left), static_cast<LONG>(val.bottom) };
             ClientToScreen(m_hwnd, &btnPt);
-            ShowKeyMenu(static_cast<float>(btnPt.x), static_cast<float>(btnPt.y));
-            return;
-        }
-        curX += 82.0f;
+            (this->*show)(static_cast<float>(btnPt.x), static_cast<float>(btnPt.y));
+            return true;
+        };
 
-        // スケール (プルダウン)
-        if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 115.0f, r2Y + r2H), x, y)) {
-            POINT btnPt = { static_cast<LONG>(curX), static_cast<LONG>(r2Y + r2H) };
-            ClientToScreen(m_hwnd, &btnPt);
-            ShowScaleMenu(static_cast<float>(btnPt.x), static_cast<float>(btnPt.y));
-            return;
-        }
-        curX += 120.0f + 10.0f + 34.0f + 42.0f; // BPMラベル+値の分
+        if (openMenu(L.keyLbl, L.key, &AppWindow::ShowKeyMenu)) return;
+        if (openMenu(L.scaleLbl, L.scale, &AppWindow::ShowScaleMenu)) return;
 
         // BPM 上下スピンボタン
         bool isShift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
         int step = isShift ? 5 : 1;
 
-        if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 18.0f, r2Y + r2H * 0.5f - 1.0f), x, y)) {
+        if (PtInRectF(L.spinUp, x, y)) {
             Part* pActive = m_partManager.GetActivePart();
             if (pActive) {
                 const bool linked = (GetKeyState(VK_CONTROL) & 0x8000) == 0;
@@ -112,7 +78,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
             }
             return;
         }
-        if (PtInRectF(D2D1::RectF(curX, r2Y + r2H * 0.5f + 1.0f, curX + 18.0f, r2Y + r2H), x, y)) {
+        if (PtInRectF(L.spinDown, x, y)) {
             Part* pActive = m_partManager.GetActivePart();
             if (pActive) {
                 const bool linked = (GetKeyState(VK_CONTROL) & 0x8000) == 0;
@@ -121,100 +87,55 @@ void AppWindow::OnLButtonDown(float x, float y) {
             }
             return;
         }
-        curX += 24.0f;
 
         // TAP テンポ (モーダル起動)
-        if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 54.0f, r2Y + r2H), x, y)) {
+        if (PtInRectF(L.tap, x, y)) {
             OpenModal(ModalType::TapTempo);
             HandleTapTempo();
             return;
         }
-        curX += 62.0f + 10.0f;
 
-        // 音色 (プルダウン)
-        if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 126.0f, r2Y + r2H), x, y)) {
-            POINT btnPt = { static_cast<LONG>(curX), static_cast<LONG>(r2Y + r2H) };
-            ClientToScreen(m_hwnd, &btnPt);
-            ShowPresetMenu(static_cast<float>(btnPt.x), static_cast<float>(btnPt.y));
-            return;
-        }
-        curX += 130.0f;
-
-        // ボイシング (プルダウン)
-        if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 125.0f, r2Y + r2H), x, y)) {
-            POINT btnPt = { static_cast<LONG>(curX), static_cast<LONG>(r2Y + r2H) };
-            ClientToScreen(m_hwnd, &btnPt);
-            ShowVoicingMenu(static_cast<float>(btnPt.x), static_cast<float>(btnPt.y));
-            return;
-        }
-        curX += 129.0f;
-
-        // ベース (プルダウン)
-        if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 115.0f, r2Y + r2H), x, y)) {
-            POINT btnPt = { static_cast<LONG>(curX), static_cast<LONG>(r2Y + r2H) };
-            ClientToScreen(m_hwnd, &btnPt);
-            ShowBassMenu(static_cast<float>(btnPt.x), static_cast<float>(btnPt.y));
-            return;
-        }
-        curX += 119.0f;
-
-        // 入力グリッド (プルダウン)
-        if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 100.0f, r2Y + r2H), x, y)) {
-            POINT btnPt = { static_cast<LONG>(curX), static_cast<LONG>(r2Y + r2H) };
-            ClientToScreen(m_hwnd, &btnPt);
-            ShowInputGridMenu(static_cast<float>(btnPt.x), static_cast<float>(btnPt.y));
-            return;
-        }
-        curX += 104.0f;
-
-        // タイムライングリッド (プルダウン)
-        if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 110.0f, r2Y + r2H), x, y)) {
-            POINT btnPt = { static_cast<LONG>(curX), static_cast<LONG>(r2Y + r2H) };
-            ClientToScreen(m_hwnd, &btnPt);
-            ShowGridMenu(static_cast<float>(btnPt.x), static_cast<float>(btnPt.y));
-            return;
-        }
+        if (openMenu(L.soundLbl, L.sound, &AppWindow::ShowPresetMenu)) return;
+        if (openMenu(L.voicingLbl, L.voicing, &AppWindow::ShowVoicingMenu)) return;
+        if (openMenu(L.bassLbl, L.bass, &AppWindow::ShowBassMenu)) return;
+        if (openMenu(L.inputLbl, L.input, &AppWindow::ShowInputGridMenu)) return;
+        if (openMenu(L.gridLbl, L.grid, &AppWindow::ShowGridMenu)) return;
         return;
     }
 
     // ---------------- 2. 左ペイン ----------------
     float mainY = m_toolbarHeight;
     if (x >= 0 && x <= m_leftPaneWidth && y > mainY && y < m_height - 22.0f) {
-        float curY = mainY + 5.0f + 18.0f + 54.0f;
-        float pad = 16.0f;
-        float innerW = m_leftPaneWidth - pad * 2.0f;
+        // 描画と共通のレイアウト（上から: ダイアトニック → テキスト入力 → カスタムコードビルダー）
+        const LeftPaneLayout L = ComputeLeftPaneLayout(mainY, m_leftPaneWidth);
+        const float pad = L.pad;
+        const float innerW = L.innerW;
 
-        // 反映ボタン
-        if (PtInRectF(D2D1::RectF(pad, curY, pad + innerW, curY + 24.0f), x, y)) {
-            SyncTextToTimeline();
-            return;
-        }
-        curY += 28.0f + 4.0f + 17.0f;
-
-        // ダイアトニック 5タブ (3和音 / 7th / sus4 / add9 / 分数)
-        float tabBtnW = (innerW - 4.0f * 3.0f) / 5.0f;
-        for (int t = 0; t < 5; ++t) {
-            float tx = pad + t * (tabBtnW + 3.0f);
-            if (PtInRectF(D2D1::RectF(tx, curY, tx + tabBtnW, curY + 21.0f), x, y)) {
+        // ダイアトニック タブ (3和音 / 7th / その他▼)
+        for (int t = 0; t < 3; ++t) {
+            D2D1_RECT_F rcTab = GridCellRect(pad, innerW, 3, t, L.tabY, L.tabH, L.gap);
+            if (!PtInRectF(rcTab, x, y)) continue;
+            if (t < 2) {
                 m_diatonicChordTypeTab = t;
                 InvalidateRect(m_hwnd, nullptr, FALSE);
-                return;
+            } else {
+                POINT btnPt = { static_cast<LONG>(rcTab.left), static_cast<LONG>(rcTab.bottom) };
+                ClientToScreen(m_hwnd, &btnPt);
+                ShowDiatonicVariantMenu(static_cast<float>(btnPt.x), static_cast<float>(btnPt.y));
             }
+            return;
         }
-        curY += 24.0f;
 
         // ダイアトニックカード
         Part* pActive = m_partManager.GetActivePart();
         std::string keyRoot = pActive ? pActive->keyRoot : "C";
         MusicalMode mode = pActive ? pActive->mode : MusicalMode::Major;
-        auto diatonicChords = MusicEngine::GetDiatonicChordsByTab(keyRoot, mode, m_diatonicChordTypeTab % 5);
-        float cardW = (innerW - 3.0f * 6.0f) / 4.0f;
-        float cardH = 38.0f;
+        auto diatonicChords = MusicEngine::GetDiatonicChordsByTab(keyRoot, mode, m_diatonicChordTypeTab);
 
         for (size_t i = 0; i < 8; ++i) {
-            float cx = pad + (i % 4) * (cardW + 6.0f);
-            float cy = curY + (i / 4) * (cardH + 4.0f);
-            if (PtInRectF(D2D1::RectF(cx, cy, cx + cardW, cy + cardH), x, y)) {
+            float cy = L.cardY + static_cast<float>(i / 4) * (L.cardH + L.gap);
+            D2D1_RECT_F cardRc = GridCellRect(pad, innerW, 4, static_cast<int>(i % 4), cy, L.cardH, L.gap);
+            if (PtInRectF(cardRc, x, y)) {
                 ChordToken newChord;
                 if (i < 7 && i < diatonicChords.size()) {
                     newChord = diatonicChords[i];
@@ -238,41 +159,37 @@ void AppWindow::OnLButtonDown(float x, float y) {
                 return;
             }
         }
-        curY += (cardH * 2.0f + 4.0f) + 6.0f + 4.0f;
+        // 反映ボタン（テキスト入力 → タイムライン追記、反映後にテキストを消去）
+        if (PtInRectF(D2D1::RectF(pad, L.applyY, pad + innerW, L.applyY + L.applyH), x, y)) {
+            SyncTextToTimeline();
+            return;
+        }
 
         // カスタムコードビルダー格納・展開ヘッダー
-        if (PtInRectF(D2D1::RectF(pad, curY, pad + innerW, curY + 19.0f), x, y)) {
+        if (PtInRectF(D2D1::RectF(pad, L.builderHeaderY, pad + innerW, L.builderHeaderY + 19.0f), x, y)) {
             m_accCustomBuilderOpen = !m_accCustomBuilderOpen;
             InvalidateRect(m_hwnd, nullptr, FALSE);
             return;
         }
-        curY += 22.0f;
 
         if (!m_accCustomBuilderOpen) return;
 
-        // ルート音選択
+        // ルート音選択 (6列)
         const char* roots[] = { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
-        float rBtnW = (innerW - 5.0f * 4.0f) / 6.0f;
-        float rBtnH = 20.0f;
         for (int i = 0; i < 12; ++i) {
-            float rx = pad + (i % 6) * (rBtnW + 4.0f);
-            float ry = curY + (i / 6) * (rBtnH + 3.0f);
-            if (PtInRectF(D2D1::RectF(rx, ry, rx + rBtnW, ry + rBtnH), x, y)) {
+            float ry = L.rootsY + static_cast<float>(i / 6) * (L.btnH + L.rowGap);
+            if (PtInRectF(GridCellRect(pad, innerW, 6, i % 6, ry, L.btnH, L.gap), x, y)) {
                 m_customRoot = MusicEngine::NoteToPitch(roots[i]);
                 InvalidateRect(m_hwnd, nullptr, FALSE);
                 return;
             }
         }
-        curY += (rBtnH * 2.0f + 3.0f) + 4.0f;
 
-        // サフィックス選択 (選択中コードカードのクイック変換にも対応)
+        // サフィックス選択 (4列。選択中コードカードのクイック変換にも対応)
         const char* suffixes[] = { "", "m", "7", "Maj7", "m7", "m7b5", "dim7", "sus4" };
-        float sBtnW = (innerW - 3.0f * 4.0f) / 4.0f;
-        float sBtnH = 20.0f;
         for (int i = 0; i < 8; ++i) {
-            float sx = pad + (i % 4) * (sBtnW + 4.0f);
-            float sy = curY + (i / 4) * (sBtnH + 3.0f);
-            if (PtInRectF(D2D1::RectF(sx, sy, sx + sBtnW, sy + sBtnH), x, y)) {
+            float sy = L.suffixY + static_cast<float>(i / 4) * (L.btnH + L.rowGap);
+            if (PtInRectF(GridCellRect(pad, innerW, 4, i % 4, sy, L.btnH, L.gap), x, y)) {
                 m_customSuffix = suffixes[i];
                 if (!m_isMergedView && !m_isPlaying && pActive && m_selectedBarIndex >= 0 && m_selectedBarIndex < static_cast<int>(pActive->bars.size())) {
                     auto& bar = pActive->bars[m_selectedBarIndex];
@@ -296,30 +213,22 @@ void AppWindow::OnLButtonDown(float x, float y) {
                 return;
             }
         }
-        curY += (sBtnH * 2.0f + 3.0f) + 4.0f;
 
-        // テンション選択
+        // テンション選択 (6列)
         const int8_t tensVals[] = { 0, 9, -9, 99, 11, 13 };
-        float tBtnW = (innerW - 5.0f * 4.0f) / 6.0f;
-        float tBtnH = 20.0f;
         for (int i = 0; i < 6; ++i) {
-            float tx = pad + i * (tBtnW + 4.0f);
-            if (PtInRectF(D2D1::RectF(tx, curY, tx + tBtnW, curY + tBtnH), x, y)) {
+            if (PtInRectF(GridCellRect(pad, innerW, 6, i, L.tensionY, L.btnH, L.gap), x, y)) {
                 m_customTension = tensVals[i];
                 InvalidateRect(m_hwnd, nullptr, FALSE);
                 return;
             }
         }
-        curY += tBtnH + 4.0f;
 
-        // ベース音選択 (選択中コードカードのクイック分数コード変換にも対応)
+        // ベース音選択 (4列。選択中コードカードのクイック分数コード変換にも対応)
         const char* bassNotes[] = { "", "C", "D", "E", "F", "G", "A", "B" };
-        float bBtnW = (innerW - 3.0f * 4.0f) / 4.0f;
-        float bBtnH = 19.0f;
         for (int i = 0; i < 8; ++i) {
-            float bx = pad + (i % 4) * (bBtnW + 4.0f);
-            float by = curY + (i / 4) * (bBtnH + 3.0f);
-            if (PtInRectF(D2D1::RectF(bx, by, bx + bBtnW, by + bBtnH), x, y)) {
+            float by = L.bassY + static_cast<float>(i / 4) * (L.btnH + L.rowGap);
+            if (PtInRectF(GridCellRect(pad, innerW, 4, i % 4, by, L.btnH, L.gap), x, y)) {
                 m_customBass = (i == 0) ? PitchClass::Unknown : MusicEngine::NoteToPitch(bassNotes[i]);
                 if (!m_isMergedView && !m_isPlaying && pActive && m_selectedBarIndex >= 0 && m_selectedBarIndex < static_cast<int>(pActive->bars.size())) {
                     auto& bar = pActive->bars[m_selectedBarIndex];
@@ -345,10 +254,9 @@ void AppWindow::OnLButtonDown(float x, float y) {
                 return;
             }
         }
-        curY += (bBtnH * 2.0f + 3.0f) + 5.0f;
 
         // プレビューカードクリックで試聴
-        if (PtInRectF(D2D1::RectF(pad, curY, pad + 70.0f, curY + 26.0f), x, y)) {
+        if (PtInRectF(D2D1::RectF(pad, L.addY, pad + 70.0f, L.addY + 26.0f), x, y)) {
             std::string sym = MusicEngine::PitchToNote(m_customRoot) + m_customSuffix;
             if (m_customBass != PitchClass::Unknown) sym += "/" + MusicEngine::PitchToNote(m_customBass);
             ChordToken c = MusicEngine::ParseChordSymbol(sym, keyRoot, mode);
@@ -358,7 +266,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
         }
 
         // 追加ボタン
-        if (PtInRectF(D2D1::RectF(pad + 76.0f, curY, pad + innerW, curY + 26.0f), x, y)) {
+        if (PtInRectF(D2D1::RectF(pad + 70.0f + L.gap, L.addY, pad + innerW, L.addY + 26.0f), x, y)) {
             std::string sym = MusicEngine::PitchToNote(m_customRoot) + m_customSuffix;
             if (m_customTension != 0) {
                 if (m_customTension == 9) sym += "(9)";
@@ -669,18 +577,17 @@ void AppWindow::OnLButtonDown(float x, float y) {
     if (x >= m_width - rightW && m_showRightPane) {
         float pad = 12.0f;
         float innerW = rightW - pad * 2.0f;
-        bool use7th = ((m_diatonicChordTypeTab % 5) == 1) || (m_diatonicChordTypeTab >= 5);
+        bool use7th = MusicEngine::IsSeventhDiatonicTab(m_diatonicChordTypeTab);
 
         // 右ペイン 3和音 / 7th 切り替え ＆ 格納ボタン
         if (PtInRectF(D2D1::RectF(m_width - pad - 122.0f, mainY + 5.0f, m_width - pad - 90.0f, mainY + 25.0f), x, y)) {
-            int baseTab = m_diatonicChordTypeTab % 5;
-            m_diatonicChordTypeTab = (baseTab == 1) ? 0 : baseTab;
+            // 7th系のときだけ3和音へ戻す（sus4 等の非7thバリエーションは維持する）
+            if (use7th) m_diatonicChordTypeTab = 0;
             InvalidateRect(m_hwnd, nullptr, FALSE);
             return;
         }
         if (PtInRectF(D2D1::RectF(m_width - pad - 88.0f, mainY + 5.0f, m_width - pad - 58.0f, mainY + 25.0f), x, y)) {
-            int baseTab = m_diatonicChordTypeTab % 5;
-            m_diatonicChordTypeTab = (baseTab == 0) ? 1 : (baseTab + 5);
+            m_diatonicChordTypeTab = 1;
             InvalidateRect(m_hwnd, nullptr, FALSE);
             return;
         }
@@ -830,17 +737,13 @@ bool AppWindow::HitTestPaletteCard(float x, float y, ChordToken& outChord) {
 
     // 左ペイン: ダイアトニックコード
     if (x >= 0.0f && x <= m_leftPaneWidth && y > mainY && y < m_height - 22.0f) {
-        float curY = mainY + 5.0f + 18.0f + 54.0f + 28.0f + 4.0f + 17.0f + 24.0f;
-        float pad = 16.0f;
-        float innerW = m_leftPaneWidth - pad * 2.0f;
-        auto diatonicChords = MusicEngine::GetDiatonicChordsByTab(keyRoot, mode, m_diatonicChordTypeTab % 5);
-        float cardW = (innerW - 3.0f * 6.0f) / 4.0f;
-        float cardH = 38.0f;
+        const LeftPaneLayout L = ComputeLeftPaneLayout(mainY, m_leftPaneWidth);
+        auto diatonicChords = MusicEngine::GetDiatonicChordsByTab(keyRoot, mode, m_diatonicChordTypeTab);
 
         for (size_t i = 0; i < 8; ++i) {
-            float cx = pad + (i % 4) * (cardW + 6.0f);
-            float cy = curY + (i / 4) * (cardH + 4.0f);
-            if (PtInRectF(D2D1::RectF(cx, cy, cx + cardW, cy + cardH), x, y)) {
+            float cy = L.cardY + static_cast<float>(i / 4) * (L.cardH + L.gap);
+            D2D1_RECT_F cardRc = GridCellRect(L.pad, L.innerW, 4, static_cast<int>(i % 4), cy, L.cardH, L.gap);
+            if (PtInRectF(cardRc, x, y)) {
                 if (i < 7 && i < diatonicChords.size()) {
                     outChord = diatonicChords[i];
                 } else {
@@ -863,7 +766,7 @@ bool AppWindow::HitTestPaletteCard(float x, float y, ChordToken& outChord) {
         float curY = mainY + 6.0f + 22.0f + 24.0f;
         float pad = 12.0f;
         float innerW = rightW - pad * 2.0f;
-        bool use7th = ((m_diatonicChordTypeTab % 5) == 1) || (m_diatonicChordTypeTab >= 5);
+        bool use7th = MusicEngine::IsSeventhDiatonicTab(m_diatonicChordTypeTab);
 
         if (m_accSuggestionsOpen) {
             auto suggestions = BuildSuggestionList(use7th);
@@ -976,6 +879,22 @@ void AppWindow::OnLButtonDblClk(float x, float y) {
                 return;
             }
             curX += pTabW + 3.0f;
+        }
+    }
+
+    // ルーラーのダブルクリックで、その小節のマーカー編集モーダルを開く
+    {
+        float rulerTop = mainY + m_partTabHeight;
+        if (x >= centerX && x <= centerX + centerW && y >= rulerTop && y < rulerTop + m_rulerHeight) {
+            int tick = HitTestRulerTick(x);
+            if (tick >= 0) {
+                if (m_dragMode == DragMode::RulerSeek) {
+                    m_dragMode = DragMode::None;
+                    ReleaseCapture();
+                }
+                OpenMarkerModal(tick);
+                return;
+            }
         }
     }
 
@@ -1272,6 +1191,31 @@ void AppWindow::OnRButtonUp(float x, float y) {
         return;
     }
 
+    // ルーラー右クリックメニュー（小節マーカーの追加・編集・削除）
+    {
+        float rulerTop = mainY + m_partTabHeight;
+        if (x >= centerX && x <= centerX + centerW && y >= rulerTop && y < rulerTop + m_rulerHeight) {
+            int tick = HitTestRulerTick(x);
+            Part* pRulerPart = m_partManager.GetActivePart();
+            if (tick >= 0 && pRulerPart) {
+                const int tol = MarkerHitToleranceTicks();
+                const int hit = m_partManager.FindMarkerNear(m_partManager.GetActiveIndex(), tick, tol);
+                const bool atStart = (hit < 0 && tick <= tol);
+                m_contextMarkerTick = (hit >= 0) ? hit : tick;
+                HMENU hMenu = CreatePopupMenu();
+                AppendMenuW(hMenu, MF_STRING, IDM_CTX_MARKER_EDIT,
+                    atStart ? TR(L"パート名（先頭マーカー）を変更...", L"Rename Part (first marker)...")
+                            : (hit >= 0 ? TR(L"マーカーを編集...", L"Edit Marker...") : TR(L"ここにマーカーを追加...", L"Add Marker Here...")));
+                AppendMenuW(hMenu, (hit >= 0) ? MF_STRING : (MF_STRING | MF_GRAYED), IDM_CTX_MARKER_DEL, TR(L"マーカーを削除", L"Remove Marker"));
+                POINT pt = { static_cast<LONG>(x), static_cast<LONG>(y) };
+                ClientToScreen(m_hwnd, &pt);
+                TrackPopupMenu(hMenu, TPM_LEFTALIGN | TPM_TOPALIGN, pt.x, pt.y, 0, m_hwnd, nullptr);
+                DestroyMenu(hMenu);
+                return;
+            }
+        }
+    }
+
     // コードカード右クリックメニュー
     float cardY = mainY + m_partTabHeight + m_rulerHeight + 5.0f;
     float cardH = m_cardTrackHeight - 10.0f;
@@ -1403,11 +1347,7 @@ void AppWindow::OnKeyDown(WPARAM key) {
 
     if (m_activeModal == ModalType::RenamePart) {
         if (key == VK_RETURN) {
-            auto& parts = m_partManager.GetParts();
-            if (m_renamePartIndex >= 0 && m_renamePartIndex < static_cast<int>(parts.size()) && !m_renamePartName.empty()) {
-                PushUndo();
-                parts[m_renamePartIndex].name = ToUtf8String(m_renamePartName);
-            }
+            CommitRenameModal();
             CloseModal();
             return;
         }
@@ -1473,10 +1413,19 @@ void AppWindow::OnKeyDown(WPARAM key) {
     if (key == VK_SPACE) TogglePlayback();
     else if (key == VK_ESCAPE) StopPlayback();
     else if (key == 'B' || key == 'b') SplitSelectedChord();
+    else if (key == 'M' || key == 'm') {
+        AddMarkerAtPlayhead();
+        // 直後に届く WM_CHAR('m') が、開いたモーダルの名前欄へ入力されないよう1回だけ捨てる
+        m_swallowMarkerChar = (m_activeModal == ModalType::RenamePart);
+    }
     else if (key == VK_DELETE) DeleteSelection();
 }
 
 void AppWindow::OnChar(WCHAR ch) {
+    if (m_swallowMarkerChar) {
+        m_swallowMarkerChar = false;
+        if (ch == L'm' || ch == L'M') return;
+    }
     if (m_activeModal == ModalType::RenamePart) {
         if (ch >= 0x20 && ch != 0x7F) {
             if (m_renamePartName.size() < 30) {

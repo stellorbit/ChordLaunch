@@ -8,6 +8,7 @@
 #include <chrono>
 #include <iomanip>
 #include <algorithm>
+#include <cstdlib>
 #include <windows.h>
 #include <shlobj.h>
 
@@ -159,6 +160,131 @@ void PartManager::MovePart(int fromIndex, int toIndex) {
     m_activePartIndex = toIndex;
 }
 
+void PartManager::RenumberBars(std::vector<Bar>& bars) {
+    int n = 1;
+    for (auto& b : bars) b.barNumber = n++;
+}
+
+int PartManager::PartLengthTicks(const Part& part) {
+    int total = 0;
+    for (const auto& b : part.bars) total += b.GetTotalTicks();
+    return total;
+}
+
+// テキスト記法 [名前] を壊す文字（括弧・改行・タブ）を除去し、前後の空白を落とす。
+// "Key:" 始まり（転調記法と衝突）は ok=false。
+static std::string SanitizeMarkerName(std::string_view name, bool& ok) {
+    ok = true;
+    std::string clean;
+    for (char c : name) {
+        if (c == '[' || c == ']' || c == '\r' || c == '\n' || c == '\t') continue;
+        clean += c;
+    }
+    size_t s = clean.find_first_not_of(' ');
+    clean = (s == std::string::npos) ? std::string() : clean.substr(s, clean.find_last_not_of(' ') - s + 1);
+    if (clean.size() >= 4 && (clean.compare(0, 4, "Key:") == 0 || clean.compare(0, 4, "key:") == 0)) ok = false;
+    return clean;
+}
+
+// tick 昇順を保って挿入する。同一 tick は上書き、空名は削除。
+static void PutMarkerSorted(std::vector<PartMarker>& markers, int tick, const std::string& name) {
+    auto it = std::lower_bound(markers.begin(), markers.end(), tick,
+        [](const PartMarker& m, int t) { return m.tick < t; });
+    if (it != markers.end() && it->tick == tick) {
+        if (name.empty()) markers.erase(it);
+        else it->name = name;
+        return;
+    }
+    if (name.empty()) return;
+    markers.insert(it, PartMarker{ tick, name });
+}
+
+bool PartManager::SetMarker(int partIndex, int tick, std::string_view name) {
+    if (partIndex < 0 || partIndex >= static_cast<int>(m_parts.size())) return false;
+    Part& part = m_parts[static_cast<size_t>(partIndex)];
+
+    // tick 0 はパートタブ名そのもの。パート長が 2 tick 未満では置けない
+    const int len = PartLengthTicks(part);
+    if (tick <= 0 || len < 2) return false;
+    tick = std::min(tick, len - 1);
+
+    bool ok = true;
+    std::string clean = SanitizeMarkerName(name, ok);
+    if (!ok) return false;
+
+    PutMarkerSorted(part.markers, tick, clean);
+    return true;
+}
+
+bool PartManager::RemoveMarker(int partIndex, int tick) {
+    if (partIndex < 0 || partIndex >= static_cast<int>(m_parts.size())) return false;
+    auto& markers = m_parts[static_cast<size_t>(partIndex)].markers;
+    for (auto it = markers.begin(); it != markers.end(); ++it) {
+        if (it->tick == tick) {
+            markers.erase(it);
+            return true;
+        }
+    }
+    return false;
+}
+
+int PartManager::FindMarkerNear(int partIndex, int tick, int tolerance) const {
+    if (partIndex < 0 || partIndex >= static_cast<int>(m_parts.size())) return -1;
+    int best = -1;
+    int bestDist = tolerance + 1;
+    for (const auto& m : m_parts[static_cast<size_t>(partIndex)].markers) {
+        int d = std::abs(m.tick - tick);
+        if (d <= tolerance && d < bestDist) {
+            best = m.tick;
+            bestDist = d;
+        }
+    }
+    return best;
+}
+
+void PartManager::MigrateBarMarkers(Part& part) {
+    int tick = 0;
+    for (size_t i = 0; i < part.bars.size(); ++i) {
+        Bar& bar = part.bars[i];
+        // 先頭小節のマーカーはパートタブ名と同義のため捨てる。2小節目以降は小節先頭の自由位置マーカーへ変換する
+        if (i > 0 && !bar.sectionMarker.empty()) {
+            bool ok = true;
+            std::string clean = SanitizeMarkerName(bar.sectionMarker, ok);
+            bool exists = false;
+            for (const auto& m : part.markers) exists = exists || (m.tick == tick);
+            if (ok && !clean.empty() && !exists) PutMarkerSorted(part.markers, tick, clean);
+        }
+        bar.sectionMarker.clear();
+        tick += bar.GetTotalTicks();
+    }
+
+    // コード削除などでパート長を超えた位置のマーカーは末尾へ丸める
+    const int len = PartLengthTicks(part);
+    if (len >= 2) {
+        std::vector<PartMarker> fixed;
+        for (const auto& m : part.markers) {
+            if (m.tick <= 0 || m.name.empty()) continue;
+            PutMarkerSorted(fixed, std::min(m.tick, len - 1), m.name);
+        }
+        part.markers = std::move(fixed);
+    } else {
+        part.markers.clear();
+    }
+}
+
+std::vector<PartMarker> PartManager::GenerateMergedMarkers() const {
+    std::vector<PartMarker> out;
+    int offset = 0;
+    for (const auto& part : m_parts) {
+        if (part.bars.empty()) continue;
+        for (const auto& m : part.markers) {
+            out.push_back(PartMarker{ offset + m.tick, m.name });
+        }
+        offset += PartLengthTicks(part);
+    }
+    return out;
+}
+
 std::vector<Bar> PartManager::GenerateMergedProgression() const {
     std::vector<Bar> merged;
     int currentBarNum = 1;
@@ -175,6 +301,7 @@ std::vector<Bar> PartManager::GenerateMergedProgression() const {
             b.barNumber = currentBarNum++;
 
             if (i == 0) {
+                // パート先頭小節のマーカーは常にパートタブ名（タブ内の手動マーカーより優先）
                 b.sectionMarker = part.name;
 
                 if (isFirstPart || part.keyRoot != lastKey || part.mode != lastMode) {
@@ -299,6 +426,12 @@ std::string PartManager::SerializeProject(
         ss << "      \"timeNumerator\": " << part.timeNumerator << ",\n";
         ss << "      \"timeDenominator\": " << part.timeDenominator << ",\n";
         ss << "      \"rawProgressionText\": \"" << EscapeJsonString(part.rawProgressionText) << "\",\n";
+        ss << "      \"markers\": [";
+        for (size_t mi = 0; mi < part.markers.size(); ++mi) {
+            ss << (mi == 0 ? "\n" : ",\n");
+            ss << "        { \"tick\": " << part.markers[mi].tick << ", \"name\": \"" << EscapeJsonString(part.markers[mi].name) << "\" }";
+        }
+        ss << (part.markers.empty() ? "],\n" : "\n      ],\n");
         ss << "      \"bars\": [\n";
 
         for (size_t bi = 0; bi < part.bars.size(); ++bi) {
@@ -506,6 +639,8 @@ static bool ParseBarsJson(const std::string& partBlock, const Part& part, std::v
         bar.timeNumerator = part.timeNumerator;
         bar.timeDenominator = part.timeDenominator;
         bar.barNumber = FindJsonInt(barObj, "barNumber", static_cast<int>(bars.size()) + 1);
+        // sectionMarker キーは bar 直下（chords より前）にのみ存在するため、先頭の chords までを検索対象にする
+        bar.sectionMarker = FindJsonString(barObj.substr(0, chordsKey), "sectionMarker");
 
         for (const auto& chordObj : ExtractArrayObjects(barObj, chordsArr)) {
             bar.chords.push_back(ParseChordJson(chordObj, part));
@@ -616,6 +751,23 @@ bool PartManager::DeserializeProject(
             }
         }
 
+        // 自由位置マーカー（bars より前にある markers 配列）。旧形式のファイルには存在しない。
+        {
+            size_t barsKeyPos = partBlock.find("\"bars\"");
+            size_t mk = partBlock.find("\"markers\"");
+            if (mk != std::string::npos && (barsKeyPos == std::string::npos || mk < barsKeyPos)) {
+                size_t mArr = partBlock.find('[', mk);
+                if (mArr != std::string::npos) {
+                    for (const auto& mObj : ExtractArrayObjects(partBlock, mArr)) {
+                        PartMarker pm;
+                        pm.tick = FindJsonInt(mObj, "tick", 0);
+                        pm.name = FindJsonString(mObj, "name");
+                        p.markers.push_back(std::move(pm));
+                    }
+                }
+            }
+        }
+
         newParts.push_back(std::move(p));
         curPos = objEnd;
         size_t nextComma = data.find(',', curPos);
@@ -624,6 +776,13 @@ bool PartManager::DeserializeProject(
     }
 
     if (newParts.empty()) return false;
+
+    // 各パートの小節番号は常に1小節目から始まる連番へ正規化する
+    // 旧形式の小節マーカーを自由位置マーカーへ変換し、範囲外を丸める
+    for (auto& part : newParts) {
+        RenumberBars(part.bars);
+        MigrateBarMarkers(part);
+    }
 
     // 既存・旧形式データの救済: 全小節の全コードで rootPitch / rawText / degreeRoman の健全性を保証する
     for (auto& part : newParts) {

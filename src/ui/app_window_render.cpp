@@ -142,33 +142,19 @@ void AppWindow::RenderToolbar(float x, float y, float width, float height) {
     m_pRenderTarget->FillRectangle(tbRect, m_pBrushBg);
     m_pRenderTarget->DrawLine(D2D1::Point2F(x, y + height), D2D1::Point2F(x + width, y + height), m_pBrushBorder, 1.0f);
 
-    // ---------------- 上段 (y = 0 〜 38px): 再生系 ＆ 保存・各種モーダル ----------------
-    float r1Y = y + 4.0f;
-    float r1H = 28.0f;
+    // 描画とヒットテストで共通のレイアウト (x, y は 0 起点のため加算不要)
+    const ToolbarLayout L = ComputeToolbarLayout(width);
 
-    // 左側: 再生/停止/ループ
-    float curX = x + 12.0f;
+    // ---------------- 上段: 再生系 (アイコンのみ) ＆ 保存・各種モーダル ----------------
+    DrawButton(L.play, L"", m_isPlaying ? IconType::Pause : IconType::Play, false, false, true, m_isPlaying ? Theme::AccentStop : Theme::AccentPlay);
+    DrawButton(L.stop, L"", IconType::Stop, false, false, false);
+    DrawButton(L.loop, L"", IconType::Loop, false, false, m_isLooping, Theme::AccentAction);
 
-    D2D1_RECT_F rcPlay = D2D1::RectF(curX, r1Y, curX + 74.0f, r1Y + r1H);
-    DrawButton(rcPlay, m_isPlaying ? TR(L"一時停止", L"Pause") : TR(L"再生", L"Play"), m_isPlaying ? IconType::Pause : IconType::Play, false, false, true, m_isPlaying ? Theme::AccentStop : Theme::AccentPlay);
-    curX += 78.0f;
-
-    D2D1_RECT_F rcStop = D2D1::RectF(curX, r1Y, curX + 58.0f, r1Y + r1H);
-    DrawButton(rcStop, TR(L"停止", L"Stop"), IconType::Stop, false, false, false);
-    curX += 62.0f;
-
-    D2D1_RECT_F rcLoop = D2D1::RectF(curX, r1Y, curX + 66.0f, r1Y + r1H);
-    DrawButton(rcLoop, TR(L"ループ", L"Loop"), IconType::Loop, false, false, m_isLooping, Theme::AccentAction);
-    curX += 74.0f;
-
-    // 全体マージ (新規パート生成) — 上段の再生系の並びに配置
-    D2D1_RECT_F rcMerge = D2D1::RectF(curX + 6.0f, r1Y, curX + 116.0f, r1Y + r1H);
-    DrawButton(rcMerge, TR(L"全体マージ", L"Merge All"), IconType::None, false, false, true, Theme::AccentAction);
+    // 全体マージ (新規パート生成)
+    DrawButton(L.merge, TR(L"全体マージ", L"Merge All"), IconType::None, false, false, true, Theme::AccentAction);
 
     // 小節 / 拍カウンター (BAR 1 : 1) - ツールバー中央に配置して視認性を向上
-    float counterW = 124.0f;
-    float counterX = x + (width - counterW) * 0.5f;
-    D2D1_RECT_F rcCounter = D2D1::RectF(counterX, r1Y, counterX + counterW, r1Y + r1H);
+    const D2D1_RECT_F& rcCounter = L.counter;
     m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(rcCounter, 4.0f, 4.0f), m_pBrushCardBg);
     m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(rcCounter, 4.0f, 4.0f), m_pBrushAccent, 1.2f);
 
@@ -178,51 +164,33 @@ void AppWindow::RenderToolbar(float x, float y, float width, float height) {
     swprintf_s(counterBuf, L"BAR %d : %d", curBar, curBeat);
     DrawTextSafe(counterBuf, m_pFontCardTitle, rcCounter, m_pBrushAccent);
 
-    // 右側: テンプレート集, ヘルプ, 設定, MIDI保存, DAWへドラッグ
-    float rightCurX = x + width - 12.0f;
+    // 右側: MIDI保存, DAWへドラッグ, テンプレート集, ヘルプ, 設定
+    DrawButton(L.settings, L"", IconType::Settings);
+    DrawButton(L.help, L"", IconType::Help);
+    DrawButton(L.templates, TR(L"テンプレート集", L"Templates"), IconType::Template);
+    DrawButton(L.dawDrag, TR(L"DAWへドラッグ", L"Drag to DAW"), IconType::DawDrag, false, false, true, Theme::AccentAction);
+    DrawButton(L.midiSave, TR(L"MIDI保存", L"Save MIDI"), IconType::SaveDisk);
 
-    // 設定
-    rightCurX -= 34.0f;
-    D2D1_RECT_F rcSettings = D2D1::RectF(rightCurX, r1Y, rightCurX + 32.0f, r1Y + r1H);
-    DrawButton(rcSettings, L"", IconType::Settings);
-
-    // ヘルプ
-    rightCurX -= 34.0f;
-    D2D1_RECT_F rcHelp = D2D1::RectF(rightCurX, r1Y, rightCurX + 32.0f, r1Y + r1H);
-    DrawButton(rcHelp, L"", IconType::Help);
-
-    // テンプレート集
-    rightCurX -= 110.0f;
-    D2D1_RECT_F rcTmpl = D2D1::RectF(rightCurX, r1Y, rightCurX + 104.0f, r1Y + r1H);
-    DrawButton(rcTmpl, TR(L"テンプレート集", L"Templates"), IconType::Template);
-
-    // DAWへドラッグ
-    rightCurX -= 130.0f;
-    D2D1_RECT_F rcDawDrag = D2D1::RectF(rightCurX, r1Y, rightCurX + 124.0f, r1Y + r1H);
-    DrawButton(rcDawDrag, TR(L"DAWへドラッグ", L"Drag to DAW"), IconType::DawDrag, false, false, true, Theme::AccentAction);
-
-    // MIDI保存
-    rightCurX -= 95.0f;
-    D2D1_RECT_F rcMidiSave = D2D1::RectF(rightCurX, r1Y, rightCurX + 88.0f, r1Y + r1H);
-    DrawButton(rcMidiSave, TR(L"MIDI保存", L"Save MIDI"), IconType::SaveDisk);
-
-    // ---------------- 下段 (y = 38 〜 74px): キー, スケール, BPM, TAP, ボイシング, ベース, グリッド ----------------
-    float r2Y = y + 38.0f;
-    float r2H = 28.0f;
-    curX = x + 12.0f;
+    // ---------------- 下段: ラベル ＋ 値のみのプルダウン ----------------
+    const float r2Y = L.row2Y;
+    const float r2H = L.row2H;
 
     // 下段背景の薄い区切り線
     m_pRenderTarget->DrawLine(D2D1::Point2F(x, r2Y - 2.0f), D2D1::Point2F(x + width, r2Y - 2.0f), m_pBrushBorderLight, 0.8f);
 
     Part* pActive = m_partManager.GetActivePart();
+    const bool isEn = (m_settingLanguage == 1);
 
-    // 1. キー (プルダウンメニュー)
-    std::wstring keyText = std::wstring(TR(L"キー: ", L"Key: ")) + ToWString(pActive ? pActive->keyRoot : "C") + L" ▼";
-    D2D1_RECT_F rcKey = D2D1::RectF(curX, r2Y, curX + 78.0f, r2Y + r2H);
-    DrawButton(rcKey, keyText, IconType::None);
-    curX += 82.0f;
+    // ラベル描画（非クリック・淡色）
+    auto drawLabel = [&](const D2D1_RECT_F& rc, const wchar_t* text) {
+        DrawTextSafe(text, m_pFontButton, rc, m_pBrushTextMuted);
+    };
 
-    // 2. スケール (プルダウンメニュー)
+    // 1. キー
+    drawLabel(L.keyLbl, TR(L"キー", L"Key"));
+    DrawButton(L.key, ToWString(pActive ? pActive->keyRoot : "C") + L" ▼", IconType::None);
+
+    // 2. スケール
     const wchar_t* modeNamesJa[] = {
         L"メジャー", L"マイナー", L"ハーモニック", L"メロディック",
         L"ドリアン", L"フリジアン", L"リディアン", L"ミクソリディアン", L"ロクリアン"
@@ -232,93 +200,62 @@ void AppWindow::RenderToolbar(float x, float y, float width, float height) {
         L"Dorian", L"Phrygian", L"Lydian", L"Mixolydian", L"Locrian"
     };
     int mIdx = std::clamp(pActive ? static_cast<int>(pActive->mode) : 0, 0, 8);
-    std::wstring modeText = std::wstring(TR(L"スケール: ", L"Scale: ")) + (m_settingLanguage == 1 ? modeNamesEn[mIdx] : modeNamesJa[mIdx]) + L" ▼";
-    D2D1_RECT_F rcMode = D2D1::RectF(curX, r2Y, curX + 115.0f, r2Y + r2H);
-    DrawButton(rcMode, modeText, IconType::None);
-    curX += 120.0f;
+    drawLabel(L.scaleLbl, TR(L"スケール", L"Scale"));
+    DrawButton(L.scale, std::wstring(isEn ? modeNamesEn[mIdx] : modeNamesJa[mIdx]) + L" ▼", IconType::None);
 
-    m_pRenderTarget->DrawLine(D2D1::Point2F(curX, r2Y + 2.0f), D2D1::Point2F(curX, r2Y + r2H - 2.0f), m_pBrushBorderLight, 1.0f);
-    curX += 10.0f;
+    m_pRenderTarget->DrawLine(D2D1::Point2F(L.sepX1, r2Y + 2.0f), D2D1::Point2F(L.sepX1, r2Y + r2H - 2.0f), m_pBrushBorderLight, 1.0f);
 
     // 3. BPM (テキスト表示 ＋ 上下スピンボタン)
-    D2D1_RECT_F rcBpmLabel = D2D1::RectF(curX, r2Y, curX + 34.0f, r2Y + r2H);
-    DrawTextSafe(L"BPM:", m_pFontButton, rcBpmLabel, m_pBrushTextMuted);
-    curX += 34.0f;
+    drawLabel(L.bpmLbl, L"BPM");
 
-    // BPM 数値ボックス
-    D2D1_RECT_F rcBpmVal = D2D1::RectF(curX, r2Y, curX + 40.0f, r2Y + r2H);
-    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(rcBpmVal, 3.0f, 3.0f), m_pBrushCardBg);
-    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(rcBpmVal, 3.0f, 3.0f), m_pBrushBorder, 1.0f);
-    std::wstring bpmNumStr = std::to_wstring(pActive ? pActive->bpm : 120);
-    DrawTextSafe(bpmNumStr, m_pFontButton, rcBpmVal, m_pBrushText);
-    curX += 42.0f;
+    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(L.bpmVal, 3.0f, 3.0f), m_pBrushCardBg);
+    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(L.bpmVal, 3.0f, 3.0f), m_pBrushBorder, 1.0f);
+    DrawTextSafe(std::to_wstring(pActive ? pActive->bpm : 120), m_pFontButton, L.bpmVal, m_pBrushText);
 
-    // 上下スピンボタン
-    D2D1_RECT_F rcSpinUp = D2D1::RectF(curX, r2Y, curX + 18.0f, r2Y + r2H * 0.5f - 1.0f);
-    DrawButton(rcSpinUp, L"▲", IconType::None);
-
-    D2D1_RECT_F rcSpinDown = D2D1::RectF(curX, r2Y + r2H * 0.5f + 1.0f, curX + 18.0f, r2Y + r2H);
-    DrawButton(rcSpinDown, L"▼", IconType::None);
-    curX += 24.0f;
+    DrawButton(L.spinUp, L"▲", IconType::None);
+    DrawButton(L.spinDown, L"▼", IconType::None);
 
     // 4. TAPテンポボタン (点灯対応)
-    D2D1_RECT_F rcTap = D2D1::RectF(curX, r2Y, curX + 54.0f, r2Y + r2H);
-    DrawButton(rcTap, L"TAP", IconType::None, false, false, m_tapBlinked, Theme::AccentWarm);
-    curX += 62.0f;
+    DrawButton(L.tap, L"TAP", IconType::None, false, false, m_tapBlinked, Theme::AccentWarm);
 
-    m_pRenderTarget->DrawLine(D2D1::Point2F(curX, r2Y + 2.0f), D2D1::Point2F(curX, r2Y + r2H - 2.0f), m_pBrushBorderLight, 1.0f);
-    curX += 10.0f;
+    m_pRenderTarget->DrawLine(D2D1::Point2F(L.sepX2, r2Y + 2.0f), D2D1::Point2F(L.sepX2, r2Y + r2H - 2.0f), m_pBrushBorderLight, 1.0f);
 
-    // 5. 音色 (プルダウンメニュー)
+    // 5. 音色
     const wchar_t* presetNamesJa[] = { L"グランドピアノ", L"ウォームパッド", L"エレピ", L"ストリングス" };
     const wchar_t* presetNamesEn[] = { L"Grand Piano", L"Warm Pad", L"E.Piano", L"Strings" };
     int pIdx = std::clamp(static_cast<int>(m_synth.GetPreset()), 0, 3);
-    std::wstring presetStr = std::wstring(TR(L"音色: ", L"Sound: ")) + (m_settingLanguage == 1 ? presetNamesEn[pIdx] : presetNamesJa[pIdx]) + L" ▼";
-    D2D1_RECT_F rcPreset = D2D1::RectF(curX, r2Y, curX + 126.0f, r2Y + r2H);
-    DrawButton(rcPreset, presetStr, IconType::None);
-    curX += 130.0f;
+    drawLabel(L.soundLbl, TR(L"音色", L"Sound"));
+    DrawButton(L.sound, std::wstring(isEn ? presetNamesEn[pIdx] : presetNamesJa[pIdx]) + L" ▼", IconType::None);
 
-    // 6. ボイシング (プルダウンメニュー)
+    // 6. ボイシング
     const wchar_t* voicingNamesJa[] = { L"基本形", L"Drop2", L"Drop3", L"OpenSpread", L"Closed" };
     const wchar_t* voicingNamesEn[] = { L"Root", L"Drop2", L"Drop3", L"OpenSpread", L"Closed" };
     int vIdx = std::clamp(static_cast<int>(m_selectedVoicing), 0, 4);
-    std::wstring voicingStr = std::wstring(TR(L"ボイシング: ", L"Voicing: ")) + (m_settingLanguage == 1 ? voicingNamesEn[vIdx] : voicingNamesJa[vIdx]) + L" ▼";
-    D2D1_RECT_F rcVoicing = D2D1::RectF(curX, r2Y, curX + 125.0f, r2Y + r2H);
-    DrawButton(rcVoicing, voicingStr, IconType::None);
-    curX += 129.0f;
+    drawLabel(L.voicingLbl, TR(L"ボイシング", L"Voicing"));
+    DrawButton(L.voicing, std::wstring(isEn ? voicingNamesEn[vIdx] : voicingNamesJa[vIdx]) + L" ▼", IconType::None);
 
-    // 7. ベース (プルダウンメニュー)
-    const wchar_t* bassNamesJa[] = { L"ベース: なし", L"ベース: -1 Oct", L"ベース: -2 Oct", L"ベース: 両方" };
-    const wchar_t* bassNamesEn[] = { L"Bass: Off", L"Bass: -1 Oct", L"Bass: -2 Oct", L"Bass: Both" };
+    // 7. ベース
+    const wchar_t* bassNamesJa[] = { L"なし", L"-1 Oct", L"-2 Oct", L"両方" };
+    const wchar_t* bassNamesEn[] = { L"Off", L"-1 Oct", L"-2 Oct", L"Both" };
     int bIdx = std::clamp(m_bassOctaveMode, 0, 3);
-    std::wstring bassStr = std::wstring(m_settingLanguage == 1 ? bassNamesEn[bIdx] : bassNamesJa[bIdx]) + L" ▼";
-    D2D1_RECT_F rcBass = D2D1::RectF(curX, r2Y, curX + 115.0f, r2Y + r2H);
-    DrawButton(rcBass, bassStr, IconType::None);
-    curX += 119.0f;
+    drawLabel(L.bassLbl, TR(L"ベース", L"Bass"));
+    DrawButton(L.bass, std::wstring(isEn ? bassNamesEn[bIdx] : bassNamesJa[bIdx]) + L" ▼", IconType::None);
 
-    // 8. 入力グリッド (追加するコードの音価)
-    std::wstring inGridStr = TR(L"入力: 1拍 ▼", L"In: 1 Beat ▼");
-    if (m_inputGridTicks == TICKS_PER_BAR_4_4) inGridStr = TR(L"入力: 1小節 ▼", L"In: 1 Bar ▼");
-    else if (m_inputGridTicks == TICKS_PER_BEAT * 2) inGridStr = TR(L"入力: 2拍 ▼", L"In: 2 Beats ▼");
-    else if (m_inputGridTicks == TICKS_PER_BEAT / 2) inGridStr = TR(L"入力: 1/2拍 ▼", L"In: 1/2 Beat ▼");
-    else if (m_inputGridTicks == TICKS_PER_BEAT / 4) inGridStr = TR(L"入力: 1/4拍 ▼", L"In: 1/4 Beat ▼");
+    // 8. 入力グリッド (追加するコードの音価) / 9. タイムライングリッド (スナップ/表示)
+    auto gridValueText = [&](int ticks) -> std::wstring {
+        if (ticks == TICKS_PER_BAR_4_4) return TR(L"1小節", L"1 Bar");
+        if (ticks == TICKS_PER_BEAT * 2) return TR(L"2拍", L"2 Beats");
+        if (ticks == TICKS_PER_BEAT / 2) return TR(L"1/2拍", L"1/2 Beat");
+        if (ticks == TICKS_PER_BEAT / 4) return TR(L"1/4拍", L"1/4 Beat");
+        return TR(L"1拍", L"1 Beat");
+    };
+    drawLabel(L.inputLbl, TR(L"入力", L"Input"));
+    DrawButton(L.input, gridValueText(m_inputGridTicks) + L" ▼", IconType::None);
 
-    D2D1_RECT_F rcInputGrid = D2D1::RectF(curX, r2Y, curX + 100.0f, r2Y + r2H);
-    DrawButton(rcInputGrid, inGridStr, IconType::None);
-    curX += 104.0f;
+    drawLabel(L.gridLbl, TR(L"グリッド", L"Grid"));
+    DrawButton(L.grid, gridValueText(m_timelineGridTicks) + L" ▼", IconType::None);
 
-    // 9. タイムライングリッド (スナップ/表示)
-    std::wstring gridStr = TR(L"グリッド: 1拍 ▼", L"Grid: 1 Beat ▼");
-    if (m_timelineGridTicks == TICKS_PER_BAR_4_4) gridStr = TR(L"グリッド: 1小節 ▼", L"Grid: 1 Bar ▼");
-    else if (m_timelineGridTicks == TICKS_PER_BEAT * 2) gridStr = TR(L"グリッド: 2拍 ▼", L"Grid: 2 Beats ▼");
-    else if (m_timelineGridTicks == TICKS_PER_BEAT / 2) gridStr = TR(L"グリッド: 1/2拍 ▼", L"Grid: 1/2 Beat ▼");
-    else if (m_timelineGridTicks == TICKS_PER_BEAT / 4) gridStr = TR(L"グリッド: 1/4拍 ▼", L"Grid: 1/4 Beat ▼");
-
-    D2D1_RECT_F rcGrid = D2D1::RectF(curX, r2Y, curX + 110.0f, r2Y + r2H);
-    DrawButton(rcGrid, gridStr, IconType::None);
-    curX += 114.0f;
-
-    m_pRenderTarget->DrawLine(D2D1::Point2F(curX, r2Y + 2.0f), D2D1::Point2F(curX, r2Y + r2H - 2.0f), m_pBrushBorderLight, 1.0f);
+    m_pRenderTarget->DrawLine(D2D1::Point2F(L.sepX3, r2Y + 2.0f), D2D1::Point2F(L.sepX3, r2Y + r2H - 2.0f), m_pBrushBorderLight, 1.0f);
 }
 
 // ---------------------------------------------------------------------------
@@ -334,52 +271,38 @@ void AppWindow::RenderLeftPane(float x, float y, float width, float height) {
     D2D1_RECT_F contentClip = D2D1::RectF(x, y, x + width, std::max(y, statusTopY));
     m_pRenderTarget->PushAxisAlignedClip(contentClip, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 
-    float curY = y + 5.0f;
-    float pad = 16.0f;
-    float innerW = width - pad * 2.0f;
+    // 描画とヒットテストで共通のレイアウト（上から: ダイアトニック → テキスト入力 → カスタムコードビルダー）
+    const LeftPaneLayout L = ComputeLeftPaneLayout(y, width);
+    const float pad = L.pad;
+    const float innerW = L.innerW;
+    const float left = x + pad;
 
-    // セクション1: コード進行テキスト入力
-    D2D1_RECT_F rcTitle1 = D2D1::RectF(x + pad, curY, x + width - pad, curY + 17.0f);
-    DrawTextSafe(TR(L"コード進行テキスト入力", L"Chord Progression Input"), m_pFontInspector, rcTitle1, m_pBrushText);
-    curY += 18.0f;
+    // セクション1: ダイアトニックコード
+    D2D1_RECT_F rcTitle1 = D2D1::RectF(left, L.diaTitleY, x + width - pad, L.diaTitleY + 17.0f);
+    DrawTextSafe(TR(L"ダイアトニックコード", L"Diatonic Chords"), m_pFontInspector, rcTitle1, m_pBrushText);
 
-    curY += 54.0f; // EDIT コントロールスペース (50px + 4px)
-
-    // 反映 (Ctrl+Enter) ボタン
-    D2D1_RECT_F rcApply = D2D1::RectF(x + pad, curY, x + width - pad, curY + 24.0f);
-    DrawButton(rcApply, TR(L"反映 (Ctrl+Enter)", L"Apply (Ctrl+Enter)"), IconType::None, false, false, true, Theme::AccentAction);
-    curY += 28.0f;
-
-    m_pRenderTarget->DrawLine(D2D1::Point2F(x + pad, curY), D2D1::Point2F(x + width - pad, curY), m_pBrushBorderLight, 1.0f);
-    curY += 4.0f;
-
-    // セクション2: ダイアトニックコード
-    D2D1_RECT_F rcTitle2 = D2D1::RectF(x + pad, curY, x + width - pad, curY + 17.0f);
-    DrawTextSafe(TR(L"ダイアトニックコード", L"Diatonic Chords"), m_pFontInspector, rcTitle2, m_pBrushText);
-    curY += 17.0f;
-
-    float tabBtnW = (innerW - 4.0f * 3.0f) / 5.0f;
-    const wchar_t* diaTabsJa[] = { L"3和音", L"7th", L"sus4", L"add9", L"分数" };
-    const wchar_t* diaTabsEn[] = { L"Triad", L"7th", L"sus4", L"add9", L"Slash" };
-    for (int t = 0; t < 5; ++t) {
-        float tx = x + pad + t * (tabBtnW + 3.0f);
-        D2D1_RECT_F rcTab = D2D1::RectF(tx, curY, tx + tabBtnW, curY + 21.0f);
-        DrawButton(rcTab, (m_settingLanguage == 1) ? diaTabsEn[t] : diaTabsJa[t], IconType::None, false, false, (m_diatonicChordTypeTab % 5) == t);
-    }
-    curY += 24.0f;
+    // 3和音 / 7th / その他▼ (3列)
+    const bool isVariantTab = (m_diatonicChordTypeTab >= 2);
+    D2D1_RECT_F rcTab0 = GridCellRect(left, innerW, 3, 0, L.tabY, L.tabH, L.gap);
+    D2D1_RECT_F rcTab1 = GridCellRect(left, innerW, 3, 1, L.tabY, L.tabH, L.gap);
+    D2D1_RECT_F rcTab2 = GridCellRect(left, innerW, 3, 2, L.tabY, L.tabH, L.gap);
+    DrawButton(rcTab0, TR(L"3和音", L"Triad"), IconType::None, false, false, m_diatonicChordTypeTab == 0);
+    DrawButton(rcTab1, L"7th", IconType::None, false, false, m_diatonicChordTypeTab == 1);
+    const wchar_t* variantNames[] = { L"sus4", L"add9", TR(L"分数", L"Slash"), L"sus2", L"6/m6", L"7sus4", L"add9/m" };
+    std::wstring variantLabel = isVariantTab
+        ? (std::wstring(variantNames[std::clamp(m_diatonicChordTypeTab - 2, 0, 6)]) + L" ▼")
+        : std::wstring(TR(L"その他 ▼", L"More ▼"));
+    DrawButton(rcTab2, variantLabel, IconType::None, false, false, isVariantTab);
 
     Part* pActive = m_partManager.GetActivePart();
     std::string keyRoot = pActive ? pActive->keyRoot : "C";
     MusicalMode mode = pActive ? pActive->mode : MusicalMode::Major;
 
-    auto diatonicChords = MusicEngine::GetDiatonicChordsByTab(keyRoot, mode, m_diatonicChordTypeTab % 5);
-    float cardW = (innerW - 3.0f * 6.0f) / 4.0f;
-    float cardH = 38.0f;
+    auto diatonicChords = MusicEngine::GetDiatonicChordsByTab(keyRoot, mode, m_diatonicChordTypeTab);
 
     for (size_t i = 0; i < 8; ++i) {
-        float cx = x + pad + (i % 4) * (cardW + 6.0f);
-        float cy = curY + (i / 4) * (cardH + 4.0f);
-        D2D1_RECT_F cardRc = D2D1::RectF(cx, cy, cx + cardW, cy + cardH);
+        float cy = L.cardY + static_cast<float>(i / 4) * (L.cardH + L.gap);
+        D2D1_RECT_F cardRc = GridCellRect(left, innerW, 4, static_cast<int>(i % 4), cy, L.cardH, L.gap);
 
         if (i < 7 && i < diatonicChords.size()) {
             const auto& chord = diatonicChords[i];
@@ -390,74 +313,60 @@ void AppWindow::RenderLeftPane(float x, float y, float width, float height) {
             DrawCard(cardRc, L"Rest", L"N.C.", false, false, true);
         }
     }
-    curY += (cardH * 2.0f + 4.0f) + 6.0f;
 
-    m_pRenderTarget->DrawLine(D2D1::Point2F(x + pad, curY), D2D1::Point2F(x + width - pad, curY), m_pBrushBorderLight, 1.0f);
-    curY += 4.0f;
+    m_pRenderTarget->DrawLine(D2D1::Point2F(left, L.sep1Y), D2D1::Point2F(x + width - pad, L.sep1Y), m_pBrushBorderLight, 1.0f);
+
+    // セクション2: コード進行テキスト入力（入力専用。EDIT コントロールは L.editY に配置）
+    D2D1_RECT_F rcTitle2 = D2D1::RectF(left, L.textTitleY, x + width - pad, L.textTitleY + 17.0f);
+    DrawTextSafe(TR(L"コード進行テキスト入力", L"Chord Progression Input"), m_pFontInspector, rcTitle2, m_pBrushText);
+
+    D2D1_RECT_F rcApply = D2D1::RectF(left, L.applyY, x + width - pad, L.applyY + L.applyH);
+    DrawButton(rcApply, TR(L"反映 (Ctrl+Enter)", L"Apply (Ctrl+Enter)"), IconType::None, false, false, true, Theme::AccentAction);
+
+    m_pRenderTarget->DrawLine(D2D1::Point2F(left, L.sep2Y), D2D1::Point2F(x + width - pad, L.sep2Y), m_pBrushBorderLight, 1.0f);
 
     // セクション3: カスタムコードビルダー (クリックで格納・展開可能)
-    D2D1_RECT_F rcTitle3 = D2D1::RectF(x + pad, curY, x + width - pad, curY + 19.0f);
+    D2D1_RECT_F rcTitle3 = D2D1::RectF(left, L.builderHeaderY, x + width - pad, L.builderHeaderY + 19.0f);
     DrawSectionHeader(rcTitle3, TR(L"カスタムコードビルダー", L"Custom Chord Builder"), m_accCustomBuilderOpen);
-    curY += 22.0f;
 
     if (m_accCustomBuilderOpen) {
-        // ルート音選択
+        // ルート音選択 (6列)
         const char* roots[] = { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
-        float rBtnW = (innerW - 5.0f * 4.0f) / 6.0f;
-        float rBtnH = 20.0f;
-
         for (int i = 0; i < 12; ++i) {
-            float rx = x + pad + (i % 6) * (rBtnW + 4.0f);
-            float ry = curY + (i / 6) * (rBtnH + 3.0f);
-            D2D1_RECT_F btnRc = D2D1::RectF(rx, ry, rx + rBtnW, ry + rBtnH);
+            float ry = L.rootsY + static_cast<float>(i / 6) * (L.btnH + L.rowGap);
+            D2D1_RECT_F btnRc = GridCellRect(left, innerW, 6, i % 6, ry, L.btnH, L.gap);
             PitchClass pc = MusicEngine::NoteToPitch(roots[i]);
             DrawButton(btnRc, ToWString(roots[i]), IconType::None, false, false, pc == m_customRoot);
         }
-        curY += (rBtnH * 2.0f + 3.0f) + 4.0f;
 
-        // サフィックス選択
+        // サフィックス選択 (4列)
         const char* suffixes[] = { "", "m", "7", "Maj7", "m7", "m7b5", "dim7", "sus4" };
         const wchar_t* suffixLabels[] = { L"Maj", L"m", L"7", L"Maj7", L"m7", L"m7b5", L"dim7", L"sus4" };
-        float sBtnW = (innerW - 3.0f * 4.0f) / 4.0f;
-        float sBtnH = 20.0f;
-
         for (int i = 0; i < 8; ++i) {
-            float sx = x + pad + (i % 4) * (sBtnW + 4.0f);
-            float sy = curY + (i / 4) * (sBtnH + 3.0f);
-            D2D1_RECT_F btnRc = D2D1::RectF(sx, sy, sx + sBtnW, sy + sBtnH);
+            float sy = L.suffixY + static_cast<float>(i / 4) * (L.btnH + L.rowGap);
+            D2D1_RECT_F btnRc = GridCellRect(left, innerW, 4, i % 4, sy, L.btnH, L.gap);
             DrawButton(btnRc, suffixLabels[i], IconType::None, false, false, m_customSuffix == suffixes[i]);
         }
-        curY += (sBtnH * 2.0f + 3.0f) + 4.0f;
 
-        // テンション選択
+        // テンション選択 (6列)
         const int8_t tensVals[] = { 0, 9, -9, 99, 11, 13 };
         const wchar_t* tensLabelsJa[] = { L"なし", L"9", L"b9", L"#9", L"11", L"13" };
         const wchar_t* tensLabelsEn[] = { L"None", L"9", L"b9", L"#9", L"11", L"13" };
-        float tBtnW = (innerW - 5.0f * 4.0f) / 6.0f;
-        float tBtnH = 20.0f;
-
         for (int i = 0; i < 6; ++i) {
-            float tx = x + pad + i * (tBtnW + 4.0f);
-            D2D1_RECT_F btnRc = D2D1::RectF(tx, curY, tx + tBtnW, curY + tBtnH);
+            D2D1_RECT_F btnRc = GridCellRect(left, innerW, 6, i, L.tensionY, L.btnH, L.gap);
             DrawButton(btnRc, (m_settingLanguage == 1) ? tensLabelsEn[i] : tensLabelsJa[i], IconType::None, false, false, m_customTension == tensVals[i]);
         }
-        curY += tBtnH + 4.0f;
 
-        // オンコードベース
+        // オンコードベース (4列)
         const char* bassNotes[] = { "", "C", "D", "E", "F", "G", "A", "B" };
         const wchar_t* bassLabelsJa[] = { L"ベース無", L"/C", L"/D", L"/E", L"/F", L"/G", L"/A", L"/B" };
         const wchar_t* bassLabelsEn[] = { L"No Bass", L"/C", L"/D", L"/E", L"/F", L"/G", L"/A", L"/B" };
-        float bBtnW = (innerW - 3.0f * 4.0f) / 4.0f;
-        float bBtnH = 19.0f;
-
         for (int i = 0; i < 8; ++i) {
-            float bx = x + pad + (i % 4) * (bBtnW + 4.0f);
-            float by = curY + (i / 4) * (bBtnH + 3.0f);
-            D2D1_RECT_F btnRc = D2D1::RectF(bx, by, bx + bBtnW, by + bBtnH);
+            float by = L.bassY + static_cast<float>(i / 4) * (L.btnH + L.rowGap);
+            D2D1_RECT_F btnRc = GridCellRect(left, innerW, 4, i % 4, by, L.btnH, L.gap);
             PitchClass bpc = (i == 0) ? PitchClass::Unknown : MusicEngine::NoteToPitch(bassNotes[i]);
             DrawButton(btnRc, (m_settingLanguage == 1) ? bassLabelsEn[i] : bassLabelsJa[i], IconType::None, false, false, m_customBass == bpc);
         }
-        curY += (bBtnH * 2.0f + 3.0f) + 5.0f;
 
         // プレビュー ＆ 追加ボタン
         std::string previewName = MusicEngine::PitchToNote(m_customRoot) + m_customSuffix;
@@ -472,10 +381,10 @@ void AppWindow::RenderLeftPane(float x, float y, float width, float height) {
             previewName += "/" + MusicEngine::PitchToNote(m_customBass);
         }
 
-        D2D1_RECT_F rcPreviewCard = D2D1::RectF(x + pad, curY, x + pad + 70.0f, curY + 26.0f);
+        D2D1_RECT_F rcPreviewCard = D2D1::RectF(left, L.addY, left + 70.0f, L.addY + 26.0f);
         DrawCard(rcPreviewCard, ToWString(previewName), L"", false, false);
 
-        D2D1_RECT_F rcAddBtn = D2D1::RectF(x + pad + 76.0f, curY, x + width - pad, curY + 26.0f);
+        D2D1_RECT_F rcAddBtn = D2D1::RectF(left + 70.0f + L.gap, L.addY, x + width - pad, L.addY + 26.0f);
         DrawButton(rcAddBtn, TR(L"このコードを追加", L"Add This Chord"), IconType::Plus, false, false, true, Theme::AccentAction);
     }
 
@@ -551,6 +460,56 @@ void AppWindow::RenderCenterPane(float x, float y, float width, float height) {
                     }
                 }
             }
+        }
+    }
+
+    // マーカー（自由位置）: パート表示は「先頭=パート名（淡色）＋自由位置マーカー」、
+    // 全体表示は「各パート先頭=パート名＋自由位置マーカー」。tick から x 座標へ直接変換して描く。
+    {
+        struct RulerMarker { int tick; std::string name; bool implicitName; };
+        std::vector<RulerMarker> rulerMarkers;
+        if (m_isMergedView) {
+            int acc = 0;
+            for (const auto& bar : bars) {
+                if (!bar.sectionMarker.empty()) rulerMarkers.push_back({ acc, bar.sectionMarker, false });
+                acc += bar.GetTotalTicks();
+            }
+            for (const auto& m : m_partManager.GenerateMergedMarkers()) rulerMarkers.push_back({ m.tick, m.name, false });
+        } else if (pActive) {
+            rulerMarkers.push_back({ 0, pActive->name, true });
+            for (const auto& m : pActive->markers) rulerMarkers.push_back({ m.tick, m.name, false });
+        }
+        std::stable_sort(rulerMarkers.begin(), rulerMarkers.end(),
+            [](const RulerMarker& a, const RulerMarker& b) { return a.tick < b.tick; });
+
+        auto tickToX = [&](int tick) {
+            return x + (static_cast<float>(tick) / static_cast<float>(TICKS_PER_BAR_4_4)) * barWidth - m_timelineScrollX;
+        };
+
+        m_pFontRuler->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        for (size_t i = 0; i < rulerMarkers.size(); ++i) {
+            const auto& rm = rulerMarkers[i];
+            float mx = tickToX(rm.tick);
+            float nextX = (i + 1 < rulerMarkers.size()) ? tickToX(rulerMarkers[i + 1].tick) : (x + width);
+            if (nextX < x || mx > x + width) continue;
+
+            if (mx >= x) {
+                m_pRenderTarget->DrawLine(D2D1::Point2F(mx, rulerY), D2D1::Point2F(mx, rulerY + m_rulerHeight),
+                    rm.implicitName ? m_pBrushBorder : m_pBrushAccent, 2.5f);
+            }
+
+            // 小節番号と重ならないよう、小節先頭に近い場合はラベルを小節番号の右へずらす
+            float barStartX = x + std::floor(static_cast<float>(rm.tick) / static_cast<float>(TICKS_PER_BAR_4_4)) * barWidth - m_timelineScrollX;
+            float labelL = (mx - barStartX < 26.0f) ? (barStartX + 26.0f) : (mx + 3.0f);
+            labelL = std::max(x + 2.0f, labelL);
+            float labelR = std::min(x + width, nextX - 3.0f);
+            if (labelR - labelL < 24.0f) continue;
+
+            D2D1_RECT_F labelRc = D2D1::RectF(labelL, rulerY + 2.0f, labelR, rulerY + m_rulerHeight - 10.0f);
+            m_pRenderTarget->PushAxisAlignedClip(labelRc, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            m_pRenderTarget->FillRectangle(labelRc, m_pBrushCardBg);
+            DrawTextSafe(ToWString(rm.name), m_pFontRuler, labelRc, rm.implicitName ? m_pBrushTextMuted : m_pBrushAccent);
+            m_pRenderTarget->PopAxisAlignedClip();
         }
     }
 
@@ -1081,7 +1040,7 @@ void AppWindow::RenderRightPane(float x, float y, float width, float height) {
     float pad = 12.0f;
     float innerW = width - pad * 2.0f;
 
-    bool use7th = ((m_diatonicChordTypeTab % 5) == 1) || (m_diatonicChordTypeTab >= 5);
+    bool use7th = MusicEngine::IsSeventhDiatonicTab(m_diatonicChordTypeTab);
 
     D2D1_RECT_F titleRc = D2D1::RectF(x + pad, curY, x + width - pad - 126.0f, curY + 20.0f);
     DrawTextSafe(TR(L"コード提案", L"Chord Ideas"), m_pFontInspector, titleRc, m_pBrushText);

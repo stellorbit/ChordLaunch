@@ -15,7 +15,8 @@ public:
         VoicingStyle voicing = VoicingStyle::RootPosition,
         int baseOctave = 4,
         int velocity = 90,
-        int bassOctaveMode = 0
+        int bassOctaveMode = 0,
+        const std::vector<PartMarker>* markers = nullptr // 曲頭からの絶対 tick で位置を持つ自由位置マーカー
     );
 
     // 一時ファイルとして .mid ファイルを書き出し、ファイルパスを返却（DAWドラッグ用）
@@ -24,7 +25,8 @@ public:
         int bpm = 120,
         VoicingStyle voicing = VoicingStyle::RootPosition,
         const std::wstring& filenamePrefix = L"ChordLaunch_Progression",
-        int bassOctaveMode = 0
+        int bassOctaveMode = 0,
+        const std::vector<PartMarker>* markers = nullptr
     );
 
 private:

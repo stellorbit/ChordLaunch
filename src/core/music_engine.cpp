@@ -566,10 +566,27 @@ std::vector<ChordToken> MusicEngine::GetDiatonicChordsByTab(
 
     const int* intervals = (mode == MusicalMode::NaturalMinor) ? kMinIntervals : kMajIntervals;
     const ChordQuality* qualities = nullptr;
+    ChordQuality variantQ[7];
     if (tabIndex == 2) {
         qualities = kSus4Q;
     } else if (tabIndex == 3) {
         qualities = kAdd9Q;
+    } else if (tabIndex >= 5 && tabIndex <= 8) {
+        // 追加バリエーション: 3和音の性質（長/短/減）を保ったまま置き換える
+        // 5=sus2 / 6=6・m6 / 7=7sus4 / 8=add9・madd9（調性準拠）
+        const ChordQuality* baseQ = (mode == MusicalMode::NaturalMinor) ? kMin3rdQ : kMaj3rdQ;
+        for (int i = 0; i < 7; ++i) {
+            const ChordQuality b = baseQ[i];
+            switch (tabIndex) {
+                case 5: variantQ[i] = ChordQuality::Sus2; break;
+                case 6: variantQ[i] = (b == ChordQuality::Major) ? ChordQuality::Six
+                                    : (b == ChordQuality::Minor) ? ChordQuality::MinorSix : b; break;
+                case 7: variantQ[i] = ChordQuality::Dominant7Sus4; break;
+                default: variantQ[i] = (b == ChordQuality::Major) ? ChordQuality::Add9
+                                     : (b == ChordQuality::Minor) ? ChordQuality::MinorAdd9 : b; break;
+            }
+        }
+        qualities = variantQ;
     } else if (mode == MusicalMode::NaturalMinor) {
         qualities = (tabIndex == 1) ? kMin7thQ : kMin3rdQ;
     } else {

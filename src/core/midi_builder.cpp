@@ -41,7 +41,8 @@ std::vector<uint8_t> MidiBuilder::BuildMidi(
     VoicingStyle voicing,
     int baseOctave,
     int velocity,
-    int bassOctaveMode
+    int bassOctaveMode,
+    const std::vector<PartMarker>* markers
 ) {
     std::vector<uint8_t> midiData;
 
@@ -83,74 +84,98 @@ std::vector<uint8_t> MidiBuilder::BuildMidi(
     WriteVariableLength(trackBytes, static_cast<uint32_t>(trackName.size()));
     trackBytes.insert(trackBytes.end(), trackName.begin(), trackName.end());
 
-    // 各小節のコードをノートイベントに変換 (480 ticks = 1 beat)
-    uint32_t pendingDeltaTicks = 0;
+    // 全イベントを絶対 tick で収集し、tick 順（同 tick は メタ → Note Off → Note On）に並べてから
+    // デルタタイムへ変換する。これにより小節途中のマーカーも正確な位置に出力できる。
+    struct MidiEvent {
+        uint32_t tick = 0;
+        int priority = 0; // 0: メタ, 1: Note Off, 2: Note On
+        std::vector<uint8_t> bytes;
+    };
+    std::vector<MidiEvent> events;
 
+    auto addMeta = [&events](uint32_t tick, uint8_t type, const std::string& text) {
+        MidiEvent ev;
+        ev.tick = tick;
+        ev.priority = 0;
+        ev.bytes.push_back(0xFF);
+        ev.bytes.push_back(type);
+        // 可変長の長さは呼び出し側で後付けできないため、ここで直接エンコードする
+        uint32_t len = static_cast<uint32_t>(text.size());
+        uint8_t buf[5];
+        int n = 0;
+        buf[n++] = static_cast<uint8_t>(len & 0x7F);
+        while ((len >>= 7) > 0) buf[n++] = static_cast<uint8_t>((len & 0x7F) | 0x80);
+        while (n > 0) ev.bytes.push_back(buf[--n]);
+        ev.bytes.insert(ev.bytes.end(), text.begin(), text.end());
+        events.push_back(std::move(ev));
+    };
+
+    uint32_t curTick = 0;
     for (const auto& bar : bars) {
         // セクションマーカー / 転調マーカー
-        if (!bar.sectionMarker.empty()) {
-            WriteVariableLength(trackBytes, pendingDeltaTicks);
-            pendingDeltaTicks = 0;
-            trackBytes.push_back(0xFF);
-            trackBytes.push_back(0x06); // Marker
-            WriteVariableLength(trackBytes, static_cast<uint32_t>(bar.sectionMarker.size()));
-            trackBytes.insert(trackBytes.end(), bar.sectionMarker.begin(), bar.sectionMarker.end());
-        }
-        if (!bar.keyChange.empty()) {
-            WriteVariableLength(trackBytes, pendingDeltaTicks);
-            pendingDeltaTicks = 0;
-            trackBytes.push_back(0xFF);
-            trackBytes.push_back(0x01); // Text Meta Event
-            std::string text = "Key: " + bar.keyChange;
-            WriteVariableLength(trackBytes, static_cast<uint32_t>(text.size()));
-            trackBytes.insert(trackBytes.end(), text.begin(), text.end());
-        }
+        if (!bar.sectionMarker.empty()) addMeta(curTick, 0x06, bar.sectionMarker); // Marker
+        if (!bar.keyChange.empty()) addMeta(curTick, 0x01, "Key: " + bar.keyChange); // Text
 
         for (const auto& chord : bar.chords) {
             uint32_t durationTicks = chord.durationTicks > 0
                 ? static_cast<uint32_t>(chord.durationTicks)
                 : static_cast<uint32_t>(chord.durationBeats * TICKS_PER_BEAT);
 
-            // 休符の場合はデルタタイムを加算蓄積
             if (chord.isRest || chord.rootPitch == PitchClass::Unknown) {
-                pendingDeltaTicks += durationTicks;
+                curTick += durationTicks;
                 continue;
             }
 
             auto notes = MusicEngine::GetChordMidiNotes(chord, baseOctave, voicing, chord.inversion, bassOctaveMode);
             if (notes.empty()) {
-                pendingDeltaTicks += durationTicks;
+                curTick += durationTicks;
                 continue;
             }
 
-            // Note On (最初のノートに pendingDeltaTicks を適用)
-            for (size_t ni = 0; ni < notes.size(); ++ni) {
-                WriteVariableLength(trackBytes, (ni == 0) ? pendingDeltaTicks : 0);
-                trackBytes.push_back(0x90); // Note On Ch 1
-                trackBytes.push_back(static_cast<uint8_t>(std::clamp(notes[ni], 0, 127)));
-                trackBytes.push_back(static_cast<uint8_t>(std::clamp(velocity, 1, 127)));
-            }
-            pendingDeltaTicks = 0;
-
-            // Note Off (ゲートタイムは 95% = durationTicks * 95 / 100)
+            // ゲートタイムは 95% = durationTicks * 95 / 100
             uint32_t gateTicks = (durationTicks * 95) / 100;
             if (gateTicks == 0) gateTicks = 1;
-            uint32_t restTicks = durationTicks > gateTicks ? (durationTicks - gateTicks) : 0;
 
-            for (size_t ni = 0; ni < notes.size(); ++ni) {
-                WriteVariableLength(trackBytes, (ni == 0) ? gateTicks : 0);
-                trackBytes.push_back(0x80); // Note Off Ch 1
-                trackBytes.push_back(static_cast<uint8_t>(std::clamp(notes[ni], 0, 127)));
-                trackBytes.push_back(0);
+            for (int note : notes) {
+                MidiEvent on;
+                on.tick = curTick;
+                on.priority = 2;
+                on.bytes = { 0x90, static_cast<uint8_t>(std::clamp(note, 0, 127)), static_cast<uint8_t>(std::clamp(velocity, 1, 127)) };
+                events.push_back(std::move(on));
             }
-
-            // 残りの余白時間 (CC#123 を出さずに次のイベントへ繰り越し)
-            pendingDeltaTicks += restTicks;
+            for (int note : notes) {
+                MidiEvent off;
+                off.tick = curTick + gateTicks;
+                off.priority = 1;
+                off.bytes = { 0x80, static_cast<uint8_t>(std::clamp(note, 0, 127)), 0 };
+                events.push_back(std::move(off));
+            }
+            curTick += durationTicks;
         }
     }
 
-    // End of Track Meta Event: FF 2F 00
-    WriteVariableLength(trackBytes, pendingDeltaTicks);
+    // パート内の任意位置のマーカー（マージ後の絶対 tick）
+    if (markers) {
+        for (const auto& m : *markers) {
+            if (m.name.empty() || m.tick < 0) continue;
+            addMeta(static_cast<uint32_t>(m.tick), 0x06, m.name);
+        }
+    }
+
+    std::stable_sort(events.begin(), events.end(), [](const MidiEvent& a, const MidiEvent& b) {
+        if (a.tick != b.tick) return a.tick < b.tick;
+        return a.priority < b.priority;
+    });
+
+    uint32_t lastTick = 0;
+    for (const auto& ev : events) {
+        WriteVariableLength(trackBytes, ev.tick - lastTick);
+        lastTick = ev.tick;
+        trackBytes.insert(trackBytes.end(), ev.bytes.begin(), ev.bytes.end());
+    }
+
+    // End of Track Meta Event: FF 2F 00（最後のイベント以降の余白を含む）
+    WriteVariableLength(trackBytes, curTick > lastTick ? (curTick - lastTick) : 0);
     trackBytes.push_back(0xFF);
     trackBytes.push_back(0x2F);
     trackBytes.push_back(0x00);
@@ -168,9 +193,10 @@ std::wstring MidiBuilder::ExportToTempFile(
     int bpm,
     VoicingStyle voicing,
     const std::wstring& filenamePrefix,
-    int bassOctaveMode
+    int bassOctaveMode,
+    const std::vector<PartMarker>* markers
 ) {
-    auto midiBytes = BuildMidi(bars, bpm, voicing, 4, 90, bassOctaveMode);
+    auto midiBytes = BuildMidi(bars, bpm, voicing, 4, 90, bassOctaveMode, markers);
     if (midiBytes.empty()) return L"";
 
     wchar_t tempPath[MAX_PATH];

@@ -168,6 +168,19 @@ private:
     void ChooseDirectory(std::wstring& outDir, const wchar_t* title);
     void DoMergeAllToNewPart();
     void OpenRenamePartModal(int partIndex);
+    // 自由位置マーカー（tick 単位）。編集には RenamePart モーダルを流用する。
+    // パート先頭（tick 0 付近）はパート名変更へ振り替える。
+    void OpenMarkerModal(int tick);
+    void AddMarkerAtPlayhead();      // M キー: 再生ヘッド位置（グリッドへスナップ）にマーカーを追加/編集
+    void ClearMarker(int tick);
+    // ルーラー上の x 座標を、アクティブパート内の tick に変換する（パート外・全体表示は -1）
+    int HitTestRulerTick(float x) const;
+    // 既存マーカーを指しているとみなす tick 幅（約 8px 相当）
+    int MarkerHitToleranceTicks() const;
+    // 表示中のビュー（パート / 全体）のマーカー一覧
+    std::vector<PartMarker> CurrentViewMarkers() const;
+    // RenamePart モーダルの確定（パート名 / マーカー）。空のパート名は無視。
+    void CommitRenameModal();
     void OpenDashboardModal();
 
     // プルダウンメニュー表示・メニューバー言語更新
@@ -179,6 +192,7 @@ private:
     void ShowBassMenu(float screenX, float screenY);
     void ShowGridMenu(float screenX, float screenY);
     void ShowInputGridMenu(float screenX, float screenY);
+    void ShowDiatonicVariantMenu(float screenX, float screenY);
 
     const wchar_t* TR(const wchar_t* ja, const wchar_t* en) const {
         return (m_settingLanguage == 1) ? en : ja;
@@ -373,7 +387,7 @@ private:
     std::string m_customSuffix = "";
     int8_t m_customTension = 0;
     PitchClass m_customBass = PitchClass::Unknown;
-    int m_diatonicChordTypeTab = 0;
+    int m_diatonicChordTypeTab = 0; // 0=3和音 / 1=7th / 2以上=「その他」バリエーション (MusicEngine::GetDiatonicChordsByTab の tabIndex)
     bool m_accCustomBuilderOpen = true;
 
     // 表示切り替え
@@ -391,6 +405,9 @@ private:
     int m_helpActiveTab = 0;
     int m_contextPartIndex = -1;
     int m_renamePartIndex = -1;
+    int m_renameMarkerTick = -1;  // >0: RenamePart モーダルをマーカー編集（その tick）として使用中
+    int m_contextMarkerTick = -1; // ルーラー右クリックメニューの対象 tick
+    bool m_swallowMarkerChar = false; // M キーでモーダルを開いた直後の WM_CHAR を1回無視する
     std::wstring m_renamePartName;
     bool m_isCardResizingHover = false;
 

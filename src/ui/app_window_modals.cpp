@@ -9,11 +9,12 @@ void AppWindow::RenderModal(float width, float height) {
     m_pRenderTarget->FillRectangle(fullRc, m_pBrushModalBackdrop);
 
     float cardW = (m_activeModal == ModalType::TapTempo || m_activeModal == ModalType::RenamePart) ? 480.0f
-                : ((m_activeModal == ModalType::About) ? std::min(560.0f, width - 40.0f) : std::min(740.0f, width - 40.0f));
+                : ((m_activeModal == ModalType::About || m_activeModal == ModalType::Dashboard) ? std::min(560.0f, width - 40.0f) : std::min(740.0f, width - 40.0f));
     float cardH = (m_activeModal == ModalType::RenamePart) ? 240.0f
                 : ((m_activeModal == ModalType::TapTempo) ? 320.0f
+                : ((m_activeModal == ModalType::Dashboard) ? std::min(380.0f, height - 40.0f)
                 : ((m_activeModal == ModalType::About) ? std::min(360.0f, height - 40.0f)
-                : ((m_activeModal == ModalType::Help) ? std::min(600.0f, height - 40.0f) : std::min(520.0f, height - 40.0f))));
+                : ((m_activeModal == ModalType::Help) ? std::min(600.0f, height - 40.0f) : std::min(520.0f, height - 40.0f)))));
     float cardX = (width - cardW) * 0.5f;
     float cardY = (height - cardH) * 0.5f;
 
@@ -63,7 +64,11 @@ void AppWindow::RenderModal(float width, float height) {
         }
         case ModalType::RenamePart: {
             D2D1_RECT_F titleRc = D2D1::RectF(cardX + 20.0f, cardY + 10.0f, cardX + cardW - 50.0f, cardY + 36.0f);
-            DrawTextSafe(TR(L"パート名の変更 (Rename Part)", L"Rename Part"), m_pFontModalTitle, titleRc, m_pBrushText);
+            if (m_renameMarkerTick > 0) {
+                DrawTextSafe(TR(L"マーカーの編集 (Marker)", L"Marker"), m_pFontModalTitle, titleRc, m_pBrushText);
+            } else {
+                DrawTextSafe(TR(L"パート名の変更 (Rename Part)", L"Rename Part"), m_pFontModalTitle, titleRc, m_pBrushText);
+            }
             RenderRenamePartModal(bodyRc);
             break;
         }
@@ -114,23 +119,23 @@ void AppWindow::RenderDashboardModal(const D2D1_RECT_F& rc) {
 
     // 1. 上部ボタングループ (新規作成 / 開く)
     float btnW = (rc.right - rc.left - 16.0f) * 0.5f;
-    D2D1_RECT_F bNew = D2D1::RectF(rc.left, curY, rc.left + btnW, curY + 46.0f);
-    DrawButton(bNew, TR(L"＋ 新規プロジェクト作成", L"+ New Project"), IconType::Plus, false, false, true, Theme::AccentAction);
+    D2D1_RECT_F bNew = D2D1::RectF(rc.left, curY, rc.left + btnW, curY + 36.0f);
+    DrawButton(bNew, TR(L"新規プロジェクト作成", L"New Project"), IconType::Plus, false, false, true, Theme::AccentAction);
 
-    D2D1_RECT_F bOpen = D2D1::RectF(rc.left + btnW + 16.0f, curY, rc.right, curY + 46.0f);
-    DrawButton(bOpen, TR(L"📂 外部ファイルを開く...", L"Open File..."), IconType::None);
+    D2D1_RECT_F bOpen = D2D1::RectF(rc.left + btnW + 16.0f, curY, rc.right, curY + 36.0f);
+    DrawButton(bOpen, TR(L"外部ファイルを開く...", L"Open File..."), IconType::None);
 
-    curY += 58.0f;
+    curY += 44.0f;
 
     // 2. プロジェクト保存先フォルダ設定
-    D2D1_RECT_F pBox = D2D1::RectF(rc.left, curY, rc.right, curY + 62.0f);
+    D2D1_RECT_F pBox = D2D1::RectF(rc.left, curY, rc.right, curY + 56.0f);
     m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(pBox, 6.0f, 6.0f), m_pBrushBg);
     m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(pBox, 6.0f, 6.0f), m_pBrushBorderLight, 1.0f);
 
-    D2D1_RECT_F pTitle = D2D1::RectF(rc.left + 14.0f, curY + 8.0f, rc.left + 350.0f, curY + 26.0f);
+    D2D1_RECT_F pTitle = D2D1::RectF(rc.left + 14.0f, curY + 5.0f, rc.left + 350.0f, curY + 23.0f);
     DrawTextSafe(TR(L"プロジェクト保存先フォルダ", L"Project Save Directory"), m_pFontCardTitle, pTitle, m_pBrushText);
 
-    D2D1_RECT_F pPathBox = D2D1::RectF(rc.left + 14.0f, curY + 30.0f, rc.right - 96.0f, curY + 54.0f);
+    D2D1_RECT_F pPathBox = D2D1::RectF(rc.left + 14.0f, curY + 27.0f, rc.right - 96.0f, curY + 49.0f);
     m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(pPathBox, 4.0f, 4.0f), m_pBrushCardBg);
     m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(pPathBox, 4.0f, 4.0f), m_pBrushBorderLight, 1.0f);
 
@@ -138,18 +143,18 @@ void AppWindow::RenderDashboardModal(const D2D1_RECT_F& rc) {
     D2D1_RECT_F pPathText = D2D1::RectF(pPathBox.left + 8.0f, pPathBox.top + 3.0f, pPathBox.right - 8.0f, pPathBox.bottom);
     DrawTextSafe(displayProjDir, m_pFontInspector, pPathText, m_projectDirectory.empty() ? m_pBrushTextMuted : m_pBrushText);
 
-    D2D1_RECT_F bBrowseProj = D2D1::RectF(rc.right - 88.0f, curY + 30.0f, rc.right - 14.0f, curY + 54.0f);
+    D2D1_RECT_F bBrowseProj = D2D1::RectF(rc.right - 88.0f, curY + 27.0f, rc.right - 14.0f, curY + 49.0f);
     DrawButton(bBrowseProj, TR(L"参照...", L"Browse..."), IconType::None);
 
-    curY += 72.0f;
+    curY += 64.0f;
 
     // 3. 最近開いたファイル一覧 (Recent Projects)
     D2D1_RECT_F rTitle = D2D1::RectF(rc.left + 4.0f, curY, rc.left + 350.0f, curY + 20.0f);
     DrawTextSafe(TR(L"最近開いたファイル", L"Recent Projects"), m_pFontCardTitle, rTitle, m_pBrushText);
 
-    curY += 24.0f;
+    curY += 22.0f;
 
-    float rListH = rc.bottom - curY - 44.0f;
+    float rListH = rc.bottom - curY - 40.0f;
     D2D1_RECT_F rListBox = D2D1::RectF(rc.left, curY, rc.right, curY + rListH);
     m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(rListBox, 6.0f, 6.0f), m_pBrushBg);
     m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(rListBox, 6.0f, 6.0f), m_pBrushBorderLight, 1.0f);
@@ -186,8 +191,8 @@ void AppWindow::RenderDashboardModal(const D2D1_RECT_F& rc) {
     }
 
     // 4. フッター (起動時表示チェックボックス & 選択項目を開く & 閉じるボタン)
-    D2D1_RECT_F chkRc = D2D1::RectF(rc.left + 6.0f, rc.bottom - 32.0f, rc.left + 350.0f, rc.bottom - 4.0f);
-    DrawCheckboxUI(m_pRenderTarget, m_pFontInspector, m_pBrushText, m_pBrushBorderLight, m_pBrushAccent, chkRc, m_showDashboardOnStartup, TR(L"起動時にこのダッシュボードを表示する", L"Show this dashboard on startup"));
+    D2D1_RECT_F chkRc = D2D1::RectF(rc.left + 6.0f, rc.bottom - 32.0f, rc.left + 196.0f, rc.bottom - 4.0f); // 右の「選択したプロジェクトを開く」(rc.right-310 から) と重ならない幅
+    DrawCheckboxUI(m_pRenderTarget, m_pFontInspector, m_pBrushText, m_pBrushBorderLight, m_pBrushAccent, chkRc, m_showDashboardOnStartup, TR(L"起動時に表示", L"Show on startup"));
 
     if (m_dashboardSelectedRecentIndex >= 0 && m_dashboardSelectedRecentIndex < static_cast<int>(m_recentFiles.size())) {
         D2D1_RECT_F bOpenSel = D2D1::RectF(rc.right - 310.0f, rc.bottom - 34.0f, rc.right - 120.0f, rc.bottom);
@@ -704,7 +709,12 @@ void AppWindow::RenderRenamePartModal(const D2D1_RECT_F& rc) {
     float curY = rc.top + 10.0f;
 
     D2D1_RECT_F lTitle = D2D1::RectF(rc.left + 16.0f, curY, rc.right - 16.0f, curY + 24.0f);
-    DrawTextSafe(TR(L"パートの新しい名称を入力してください:", L"Enter new name for the part:"), m_pFontCardTitle, lTitle, m_pBrushText);
+    if (m_renameMarkerTick > 0) {
+        std::wstring prompt = TR(L"マーカー名を入力してください（空欄で解除）:", L"Enter marker name (empty to remove):");
+        DrawTextSafe(prompt, m_pFontCardTitle, lTitle, m_pBrushText);
+    } else {
+        DrawTextSafe(TR(L"パートの新しい名称を入力してください:", L"Enter new name for the part:"), m_pFontCardTitle, lTitle, m_pBrushText);
+    }
 
     curY += 34.0f;
 
@@ -894,6 +904,28 @@ void AppWindow::ShowGridMenu(float screenX, float screenY) {
     DestroyMenu(hMenu);
 }
 
+void AppWindow::ShowDiatonicVariantMenu(float screenX, float screenY) {
+    HMENU hMenu = CreatePopupMenu();
+    // ダイアトニックタブ 2〜8 に対応（順序は MusicEngine::GetDiatonicChordsByTab と一致させる）
+    const wchar_t* names[] = {
+        L"sus4",
+        L"add9",
+        TR(L"分数コード (オンコード)", L"Slash Chords"),
+        L"sus2",
+        L"6 / m6",
+        L"7sus4",
+        TR(L"add9 / madd9 (調性準拠)", L"add9 / madd9 (key-aware)")
+    };
+    for (int i = 0; i < 7; ++i) {
+        UINT flags = MF_STRING;
+        if (m_diatonicChordTypeTab == 2 + i) flags |= MF_CHECKED;
+        AppendMenuW(hMenu, flags, IDM_DIA_VARIANT_BASE + i, names[i]);
+    }
+
+    TrackPopupMenu(hMenu, TPM_LEFTALIGN | TPM_TOPALIGN, static_cast<int>(screenX), static_cast<int>(screenY), 0, m_hwnd, nullptr);
+    DestroyMenu(hMenu);
+}
+
 void AppWindow::ShowInputGridMenu(float screenX, float screenY) {
     HMENU hMenu = CreatePopupMenu();
     const wchar_t* gridNames[] = {
@@ -924,11 +956,12 @@ bool AppWindow::OnModalClick(float x, float y) {
     if (m_activeModal == ModalType::None) return false;
 
     float cardW = (m_activeModal == ModalType::TapTempo || m_activeModal == ModalType::RenamePart) ? 480.0f
-                : ((m_activeModal == ModalType::About) ? std::min(560.0f, m_width - 40.0f) : std::min(740.0f, m_width - 40.0f));
+                : ((m_activeModal == ModalType::About || m_activeModal == ModalType::Dashboard) ? std::min(560.0f, m_width - 40.0f) : std::min(740.0f, m_width - 40.0f));
     float cardH = (m_activeModal == ModalType::RenamePart) ? 240.0f
                 : ((m_activeModal == ModalType::TapTempo) ? 320.0f
+                : ((m_activeModal == ModalType::Dashboard) ? std::min(380.0f, m_height - 40.0f)
                 : ((m_activeModal == ModalType::About) ? std::min(360.0f, m_height - 40.0f)
-                : ((m_activeModal == ModalType::Help) ? std::min(600.0f, m_height - 40.0f) : std::min(520.0f, m_height - 40.0f))));
+                : ((m_activeModal == ModalType::Help) ? std::min(600.0f, m_height - 40.0f) : std::min(520.0f, m_height - 40.0f)))));
     float cardX = (m_width - cardW) * 0.5f;
     float cardY = (m_height - cardH) * 0.5f;
 
@@ -976,14 +1009,14 @@ bool AppWindow::OnModalClick(float x, float y) {
 
             // 1. 上部ボタン (新規作成 / 外部ファイルを開く)
             float btnW = (bodyRc.right - bodyRc.left - 16.0f) * 0.5f;
-            D2D1_RECT_F bNew = D2D1::RectF(bodyRc.left, curY, bodyRc.left + btnW, curY + 46.0f);
+            D2D1_RECT_F bNew = D2D1::RectF(bodyRc.left, curY, bodyRc.left + btnW, curY + 36.0f);
             if (PtInRectF(bNew, x, y)) {
                 DoFileNew();
                 CloseModal();
                 return true;
             }
 
-            D2D1_RECT_F bOpen = D2D1::RectF(bodyRc.left + btnW + 16.0f, curY, bodyRc.right, curY + 46.0f);
+            D2D1_RECT_F bOpen = D2D1::RectF(bodyRc.left + btnW + 16.0f, curY, bodyRc.right, curY + 36.0f);
             if (PtInRectF(bOpen, x, y)) {
                 DoFileOpen();
                 if (!m_currentProjectPath.empty()) {
@@ -992,10 +1025,10 @@ bool AppWindow::OnModalClick(float x, float y) {
                 return true;
             }
 
-            curY += 58.0f;
+            curY += 44.0f;
 
             // 2. プロジェクト保存先フォルダ設定の参照ボタン
-            D2D1_RECT_F bBrowseProj = D2D1::RectF(bodyRc.right - 88.0f, curY + 30.0f, bodyRc.right - 14.0f, curY + 54.0f);
+            D2D1_RECT_F bBrowseProj = D2D1::RectF(bodyRc.right - 88.0f, curY + 27.0f, bodyRc.right - 14.0f, curY + 49.0f);
             if (PtInRectF(bBrowseProj, x, y)) {
                 ChooseDirectory(m_projectDirectory, TR(L"プロジェクト保存先フォルダを選択", L"Select Project Directory"));
                 SaveAppSettings();
@@ -1003,11 +1036,11 @@ bool AppWindow::OnModalClick(float x, float y) {
                 return true;
             }
 
-            curY += 72.0f;
-            curY += 24.0f;
+            curY += 64.0f;
+            curY += 22.0f;
 
             // 3. 最近開いたファイル一覧
-            float rListH = bodyRc.bottom - curY - 44.0f;
+            float rListH = bodyRc.bottom - curY - 40.0f;
             D2D1_RECT_F rListBox = D2D1::RectF(bodyRc.left, curY, bodyRc.right, curY + rListH);
             if (!m_recentFiles.empty() && PtInRectF(rListBox, x, y)) {
                 float itemH = 32.0f;
@@ -1032,7 +1065,7 @@ bool AppWindow::OnModalClick(float x, float y) {
             }
 
             // 4. フッター
-            D2D1_RECT_F chkRc = D2D1::RectF(bodyRc.left + 6.0f, bodyRc.bottom - 32.0f, bodyRc.left + 350.0f, bodyRc.bottom - 4.0f);
+            D2D1_RECT_F chkRc = D2D1::RectF(bodyRc.left + 6.0f, bodyRc.bottom - 32.0f, bodyRc.left + 196.0f, bodyRc.bottom - 4.0f);
             if (PtInRectF(chkRc, x, y)) {
                 m_showDashboardOnStartup = !m_showDashboardOnStartup;
                 SaveAppSettings();
@@ -1339,14 +1372,7 @@ bool AppWindow::OnModalClick(float x, float y) {
         case ModalType::RenamePart: {
             D2D1_RECT_F bConfirm = D2D1::RectF(bodyRc.right - 140.0f, bodyRc.bottom - 36.0f, bodyRc.right - 10.0f, bodyRc.bottom);
             if (PtInRectF(bConfirm, x, y)) {
-                if (!m_renamePartName.empty()) {
-                    auto& parts = m_partManager.GetParts();
-                    if (m_renamePartIndex >= 0 && m_renamePartIndex < static_cast<int>(parts.size())) {
-                        parts[m_renamePartIndex].name = ToUtf8String(m_renamePartName);
-                        SyncTimelineToText();
-                        InvalidateRect(m_hwnd, nullptr, FALSE);
-                    }
-                }
+                CommitRenameModal();
                 CloseModal();
                 return true;
             }
