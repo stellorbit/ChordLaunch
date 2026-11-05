@@ -202,6 +202,38 @@ void TestPartManagerAndKeyChangeMerge() {
     TEST_ASSERT(merged[12].chords[0].degreeRoman == "IV", "Ab in Eb Major must be degree IV");
 }
 
+void TestLinkedKeyModeBpm() {
+    std::cout << "[TEST] 7b. Linked key/mode/BPM apply across parts\n";
+
+    PartManager pm; // Intro/Verse/Pre = C Major 120, Chorus = Eb Major 120
+    pm.SetActiveIndex(0);
+
+    auto ch = pm.ApplyBpm(100, true);
+    TEST_ASSERT(ch.size() == 4, "Linked BPM must reach all 4 parts sharing 120");
+    for (const auto& p : pm.GetParts()) TEST_ASSERT(p.bpm == 100, "All parts BPM 100");
+
+    pm.SetActiveIndex(1);
+    ch = pm.ApplyBpm(90, false);
+    TEST_ASSERT(ch.size() == 1 && pm.GetParts()[1].bpm == 90 && pm.GetParts()[0].bpm == 100, "Unlinked BPM changes only the active part");
+
+    pm.SetActiveIndex(0);
+    ch = pm.ApplyBpm(110, true);
+    TEST_ASSERT(ch.size() == 3 && pm.GetParts()[1].bpm == 90, "Linked BPM must skip the part with a different BPM");
+
+    pm.SetActiveIndex(0);
+    ch = pm.ApplyKey("D", true);
+    TEST_ASSERT(ch.size() == 3, "Linked key reaches the 3 C parts");
+    TEST_ASSERT(pm.GetParts()[3].keyRoot == "Eb", "Modulated chorus key stays Eb");
+    TEST_ASSERT(pm.GetParts()[0].keyRoot == "D" && pm.GetParts()[2].keyRoot == "D", "C parts become D");
+
+    pm.SetActiveIndex(0);
+    ch = pm.ApplyMode(MusicalMode::NaturalMinor, false);
+    TEST_ASSERT(ch.size() == 1 && pm.GetParts()[1].mode == MusicalMode::Major, "Unlinked mode changes only the active part");
+
+    Part& added = pm.AddPart("New Part");
+    TEST_ASSERT(added.keyRoot == "Eb" && added.mode == MusicalMode::Major && added.bpm == 110, "New part inherits last part's key/mode/BPM");
+}
+
 void TestMidiBuilder() {
     std::cout << "[TEST] 8. MIDI file builder generates valid SMF Format 0 binary\n";
 
@@ -2192,6 +2224,7 @@ int main() {
     TestBug5_HyphenPackedTokenNormalization();
     TestRestTokens();
     TestPartManagerAndKeyChangeMerge();
+    TestLinkedKeyModeBpm();
     TestMidiBuilder();
     TestDegreeInputParsing();
     TestNewAuditFixes();

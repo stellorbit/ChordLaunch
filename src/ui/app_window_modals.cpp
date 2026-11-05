@@ -12,7 +12,8 @@ void AppWindow::RenderModal(float width, float height) {
                 : ((m_activeModal == ModalType::About) ? std::min(560.0f, width - 40.0f) : std::min(740.0f, width - 40.0f));
     float cardH = (m_activeModal == ModalType::RenamePart) ? 240.0f
                 : ((m_activeModal == ModalType::TapTempo) ? 320.0f
-                : ((m_activeModal == ModalType::About) ? std::min(360.0f, height - 40.0f) : std::min(520.0f, height - 40.0f)));
+                : ((m_activeModal == ModalType::About) ? std::min(360.0f, height - 40.0f)
+                : ((m_activeModal == ModalType::Help) ? std::min(600.0f, height - 40.0f) : std::min(520.0f, height - 40.0f))));
     float cardX = (width - cardW) * 0.5f;
     float cardY = (height - cardH) * 0.5f;
 
@@ -635,7 +636,9 @@ void AppWindow::RenderHelpModal(const D2D1_RECT_F& rc) {
             { TR(L"コード左右端ドラッグ", L"Drag Card Edge"), TR(L"コードカードの音価 (Tick時間長) をマウスで伸縮変更（小節線を越える跨ぎも可）", L"Resize chord card duration in ticks (can cross bar lines)") },
             { L"Ctrl + Up / Down", TR(L"選択コードを1オクターブ上 / 下へ移動", L"Shift selected chord up / down one octave") },
             { L"Ctrl + 1..5", TR(L"タイムライングリッド切替 (1小節 / 2拍 / 1拍 / 1/2拍 / 1/4拍)", L"Timeline grid preset (1 bar / 2 beats / 1 beat / 1/2 / 1/4)") },
-            { L"Ctrl + Shift + 1..5", TR(L"入力グリッド切替 (追加位置と音価)", L"Input grid preset (placement & length of new chords)") }
+            { L"Ctrl + Shift + 1..5", TR(L"入力グリッド切替 (追加位置と音価)", L"Input grid preset (placement & length of new chords)") },
+            { TR(L"キー/スケール/BPM", L"Key/Scale/BPM"), TR(L"通常は同じ値のパートすべてに一括反映（異なる値のパートは不変）", L"Applies to every part sharing the old value (parts with other values stay)") },
+            { TR(L"Ctrl + キー/スケール/BPM", L"Ctrl + Key/Scale/BPM"), TR(L"Ctrl を押しながら変更すると選択中のパートのみ変更", L"Hold Ctrl while changing to affect only the selected part") }
         };
 
         float col1W = 190.0f;
@@ -646,7 +649,7 @@ void AppWindow::RenderHelpModal(const D2D1_RECT_F& rc) {
             }
             DrawTextSafe(sRows[ki].key, m_pFontButton, D2D1::RectF(trRc.left + 8.0f, textY + 2.0f, trRc.left + col1W, textY + 20.0f), m_pBrushAccent);
             DrawTextSafe(sRows[ki].func, m_pFontInspector, D2D1::RectF(trRc.left + col1W + 8.0f, textY + 2.0f, trRc.right - 8.0f, textY + 20.0f), m_pBrushText);
-            textY += 23.0f;
+            textY += 21.0f;
         }
     }
 
@@ -759,7 +762,8 @@ void AppWindow::HandleTapTempo() {
 void AppWindow::ConfirmTapTempo() {
     Part* pActive = m_partManager.GetActivePart();
     if (pActive) {
-        pActive->bpm = m_measuredBpm;
+        const bool linked = (GetKeyState(VK_CONTROL) & 0x8000) == 0;
+        m_partManager.ApplyBpm(m_measuredBpm, linked);
     }
     CloseModal();
 }
@@ -923,7 +927,8 @@ bool AppWindow::OnModalClick(float x, float y) {
                 : ((m_activeModal == ModalType::About) ? std::min(560.0f, m_width - 40.0f) : std::min(740.0f, m_width - 40.0f));
     float cardH = (m_activeModal == ModalType::RenamePart) ? 240.0f
                 : ((m_activeModal == ModalType::TapTempo) ? 320.0f
-                : ((m_activeModal == ModalType::About) ? std::min(360.0f, m_height - 40.0f) : std::min(520.0f, m_height - 40.0f)));
+                : ((m_activeModal == ModalType::About) ? std::min(360.0f, m_height - 40.0f)
+                : ((m_activeModal == ModalType::Help) ? std::min(600.0f, m_height - 40.0f) : std::min(520.0f, m_height - 40.0f))));
     float cardX = (m_width - cardW) * 0.5f;
     float cardY = (m_height - cardH) * 0.5f;
 

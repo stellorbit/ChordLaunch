@@ -663,21 +663,27 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             // プルダウンメニュー選択の処理
             if (wmId >= IDM_KEY_BASE && wmId < IDM_KEY_BASE + 12) {
                 const char* keys[] = { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
-                Part* pActive = m_partManager.GetActivePart();
-                if (pActive) {
-                    pActive->keyRoot = keys[wmId - IDM_KEY_BASE];
-                    RefreshPartDegrees(*pActive);
+                if (m_partManager.GetActivePart()) {
+                    const bool linked = (GetKeyState(VK_CONTROL) & 0x8000) == 0;
+                    PushUndo();
+                    auto changed = m_partManager.ApplyKey(keys[wmId - IDM_KEY_BASE], linked);
+                    for (int idx : changed) RefreshPartDegrees(m_partManager.GetParts()[static_cast<size_t>(idx)]);
                     SyncTimelineToText();
+                    SetStatusMessage(std::wstring(TR(L"キーを変更したパート数: ", L"Parts with key changed: ")) + std::to_wstring(changed.size()) +
+                                     TR(L"（Ctrl 併用でこのパートのみ）", L" (hold Ctrl for this part only)"));
                     InvalidateRect(m_hwnd, nullptr, FALSE);
                 }
                 return 0;
             }
             if (wmId >= IDM_SCALE_BASE && wmId < IDM_SCALE_BASE + 10) {
-                Part* pActive = m_partManager.GetActivePart();
-                if (pActive) {
-                    pActive->mode = static_cast<MusicalMode>(wmId - IDM_SCALE_BASE);
-                    RefreshPartDegrees(*pActive);
+                if (m_partManager.GetActivePart()) {
+                    const bool linked = (GetKeyState(VK_CONTROL) & 0x8000) == 0;
+                    PushUndo();
+                    auto changed = m_partManager.ApplyMode(static_cast<MusicalMode>(wmId - IDM_SCALE_BASE), linked);
+                    for (int idx : changed) RefreshPartDegrees(m_partManager.GetParts()[static_cast<size_t>(idx)]);
                     SyncTimelineToText();
+                    SetStatusMessage(std::wstring(TR(L"スケールを変更したパート数: ", L"Parts with scale changed: ")) + std::to_wstring(changed.size()) +
+                                     TR(L"（Ctrl 併用でこのパートのみ）", L" (hold Ctrl for this part only)"));
                     InvalidateRect(m_hwnd, nullptr, FALSE);
                 }
                 return 0;

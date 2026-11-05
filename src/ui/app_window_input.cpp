@@ -106,7 +106,8 @@ void AppWindow::OnLButtonDown(float x, float y) {
         if (PtInRectF(D2D1::RectF(curX, r2Y, curX + 18.0f, r2Y + r2H * 0.5f - 1.0f), x, y)) {
             Part* pActive = m_partManager.GetActivePart();
             if (pActive) {
-                pActive->bpm = std::min(280, pActive->bpm + step);
+                const bool linked = (GetKeyState(VK_CONTROL) & 0x8000) == 0;
+                m_partManager.ApplyBpm(std::min(280, pActive->bpm + step), linked);
                 InvalidateRect(m_hwnd, nullptr, FALSE);
             }
             return;
@@ -114,7 +115,8 @@ void AppWindow::OnLButtonDown(float x, float y) {
         if (PtInRectF(D2D1::RectF(curX, r2Y + r2H * 0.5f + 1.0f, curX + 18.0f, r2Y + r2H), x, y)) {
             Part* pActive = m_partManager.GetActivePart();
             if (pActive) {
-                pActive->bpm = std::max(40, pActive->bpm - step);
+                const bool linked = (GetKeyState(VK_CONTROL) & 0x8000) == 0;
+                m_partManager.ApplyBpm(std::max(40, pActive->bpm - step), linked);
                 InvalidateRect(m_hwnd, nullptr, FALSE);
             }
             return;

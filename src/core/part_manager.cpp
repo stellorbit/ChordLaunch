@@ -51,6 +51,55 @@ const Part* PartManager::GetActivePart() const {
     return &m_parts[m_activePartIndex];
 }
 
+std::vector<int> PartManager::ApplyKey(std::string_view newKey, bool linked) {
+    std::vector<int> changed;
+    Part* active = GetActivePart();
+    if (!active || newKey.empty()) return changed;
+    const PitchClass oldPitch = MusicEngine::NoteToPitch(active->keyRoot);
+    const int activeIdx = m_activePartIndex;
+    for (int i = 0; i < static_cast<int>(m_parts.size()); ++i) {
+        Part& p = m_parts[static_cast<size_t>(i)];
+        const bool target = (i == activeIdx) ||
+            (linked && MusicEngine::NoteToPitch(p.keyRoot) == oldPitch);
+        if (!target) continue;
+        p.keyRoot = std::string(newKey);
+        changed.push_back(i);
+    }
+    return changed;
+}
+
+std::vector<int> PartManager::ApplyMode(MusicalMode newMode, bool linked) {
+    std::vector<int> changed;
+    Part* active = GetActivePart();
+    if (!active) return changed;
+    const MusicalMode oldMode = active->mode;
+    const int activeIdx = m_activePartIndex;
+    for (int i = 0; i < static_cast<int>(m_parts.size()); ++i) {
+        Part& p = m_parts[static_cast<size_t>(i)];
+        const bool target = (i == activeIdx) || (linked && p.mode == oldMode);
+        if (!target) continue;
+        p.mode = newMode;
+        changed.push_back(i);
+    }
+    return changed;
+}
+
+std::vector<int> PartManager::ApplyBpm(int newBpm, bool linked) {
+    std::vector<int> changed;
+    Part* active = GetActivePart();
+    if (!active) return changed;
+    const int oldBpm = active->bpm;
+    const int activeIdx = m_activePartIndex;
+    for (int i = 0; i < static_cast<int>(m_parts.size()); ++i) {
+        Part& p = m_parts[static_cast<size_t>(i)];
+        const bool target = (i == activeIdx) || (linked && p.bpm == oldBpm);
+        if (!target) continue;
+        p.bpm = newBpm;
+        changed.push_back(i);
+    }
+    return changed;
+}
+
 Part& PartManager::AddPart(std::string_view name, std::string_view key, MusicalMode mode) {
     Part p;
     p.id = "part_" + std::to_string(m_nextPartId++);
@@ -58,6 +107,11 @@ Part& PartManager::AddPart(std::string_view name, std::string_view key, MusicalM
     p.keyRoot = std::string(key);
     p.mode = mode;
     p.bpm = 120;
+    if (!m_parts.empty()) {
+        p.keyRoot = m_parts.back().keyRoot;
+        p.mode = m_parts.back().mode;
+        p.bpm = m_parts.back().bpm;
+    }
     p.timeNumerator = 4;
     p.timeDenominator = 4;
     p.rawProgressionText = "| C | G | Am | F |";

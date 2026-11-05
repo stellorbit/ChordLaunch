@@ -25,6 +25,15 @@ public:
     // 範囲外の index はそのまま返す。
     int FindKeyRunStart(int index) const;
 
+    // アクティブパートのキー / モード / BPM を変更する。
+    // linked=true: 変更前にアクティブパートと同じ値だった全パートへ反映する（異なる値のパートは変更しない）。
+    // linked=false: アクティブパートのみ変更する。
+    // 戻り値は値が書き換わったパートの index 一覧（アクティブパートが先頭とは限らない）。
+    std::vector<int> ApplyKey(std::string_view newKey, bool linked);
+    std::vector<int> ApplyMode(MusicalMode newMode, bool linked);
+    std::vector<int> ApplyBpm(int newBpm, bool linked);
+
+    // 新規パートは末尾パートのキー・モード・BPM を引き継ぐ（パートが無ければ引数の既定値）。
     Part& AddPart(std::string_view name = "New Part", std::string_view key = "C", MusicalMode mode = MusicalMode::Major);
     bool RemovePart(int index);
     bool DuplicatePart(int index);
