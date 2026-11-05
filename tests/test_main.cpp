@@ -1581,6 +1581,19 @@ void TestOctaveAndGridSeparation() {
     ChordToken g = MusicEngine::ParseChordSymbol("G", "C", MusicalMode::Major);
     g.SetTicks(1920);
     g.octaveOffset = 2;
+    g.inversion = 2;
+    g.toneShift[static_cast<int>(PitchClass::B)] = -1;
+    g.toneShift[static_cast<int>(PitchClass::G)] = 1;
+    {
+        ChordToken base = MusicEngine::ParseChordSymbol("G", "C", MusicalMode::Major);
+        auto n0 = MusicEngine::GetChordMidiNotes(base, 4, VoicingStyle::RootPosition, 0, 0);
+        ChordToken sh = base;
+        sh.toneShift[static_cast<int>(PitchClass::G)] = 1;
+        auto n1 = MusicEngine::GetChordMidiNotes(sh, 4, VoicingStyle::RootPosition, 0, 0);
+        TEST_ASSERT(n0.size() == n1.size() && n1.back() == n0.front() + 12, "toneShift moves only the root tone up one octave");
+        sh.toneShift[static_cast<int>(PitchClass::G)] = 0;
+        TEST_ASSERT(MusicEngine::GetChordMidiNotes(sh, 4, VoicingStyle::RootPosition, 0, 0) == n0, "toneShift 0 keeps notes unchanged");
+    }
     bar.chords.push_back(g);
     parts[0].bars = { bar };
     parts[0].rawProgressionText = ProgressionParser::Format(parts[0].bars);
@@ -1600,6 +1613,9 @@ void TestOctaveAndGridSeparation() {
     TEST_ASSERT(inputGrid == TICKS_PER_BEAT / 4, "Input grid restored separately (120)");
     const Bar& rb = loaded.GetParts()[0].bars[0];
     TEST_ASSERT(!rb.chords.empty() && rb.chords[0].octaveOffset == 2, "Per-chord octave offset restored");
+    TEST_ASSERT(json.find("\"inversion\": 2") != std::string::npos, "Inversion is serialized");
+    TEST_ASSERT(rb.chords[0].inversion == 2, "Per-chord inversion restored");
+    TEST_ASSERT(rb.chords[0].toneShift[static_cast<int>(PitchClass::B)] == -1 && rb.chords[0].toneShift[static_cast<int>(PitchClass::G)] == 1, "Per-chord toneShift restored");
 
     // 旧形式 (inputGridTicks 無し) はタイムライングリッドへフォールバック
     std::string legacy = json;

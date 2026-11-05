@@ -163,10 +163,14 @@ HRESULT AppWindow::CreateDeviceResources() {
     m_pRenderTarget->CreateSolidColorBrush(Theme::RestBlockFill, &m_pBrushPianoRollRest);
     m_pRenderTarget->CreateSolidColorBrush(Theme::ModalBackdrop, &m_pBrushModalBackdrop);
 
+    // UIアイコン（失敗時は従来のベクター描画へフォールバック）
+    m_iconSheet.Create(m_pRenderTarget, GetModuleHandleW(nullptr));
+
     return S_OK;
 }
 
 void AppWindow::DiscardDeviceResources() {
+    m_iconSheet.Release();
     if (m_pBrushModalBackdrop) { m_pBrushModalBackdrop->Release(); m_pBrushModalBackdrop = nullptr; }
     if (m_pBrushPianoRollRest) { m_pBrushPianoRollRest->Release(); m_pBrushPianoRollRest = nullptr; }
     if (m_pBrushPianoRollNote) { m_pBrushPianoRollNote->Release(); m_pBrushPianoRollNote = nullptr; }
@@ -467,6 +471,10 @@ int AppWindow::Run() {
                     TogglePlayback();
                     continue;
                 }
+                if (msg.wParam == VK_RETURN && !isCtrl && msg.hwnd != m_hwndEdit) {
+                    RewindPlayback();
+                    continue;
+                }
                 if (msg.wParam == VK_ESCAPE) {
                     // 再生中、または選択がなければ停止。停止中に選択があれば選択解除
                     if (m_isPlaying || (m_selectedChordIndex < 0 && m_multiSelTicks.empty())) StopPlayback();
@@ -535,6 +543,10 @@ int AppWindow::Run() {
                 }
                 if ((isCtrl || isShift) && msg.wParam == VK_DOWN && msg.hwnd != m_hwndEdit) {
                     ShiftSelectedChordOctave(-1);
+                    continue;
+                }
+                if (!isCtrl && !isShift && msg.hwnd != m_hwndEdit && (msg.wParam == VK_UP || msg.wParam == VK_DOWN)) {
+                    ShiftSelectedChordInversion(msg.wParam == VK_UP ? 1 : -1);
                     continue;
                 }
                 if (!isCtrl && msg.hwnd != m_hwndEdit) {
@@ -630,7 +642,7 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         }
         case WM_GETMINMAXINFO: {
             MINMAXINFO* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
-            mmi->ptMinTrackSize.x = 1000;
+            mmi->ptMinTrackSize.x = 1160;  // 下段（キー〜グリッド）とリンクボタンが重ならない最小幅
             mmi->ptMinTrackSize.y = 580;
             return 0;
         }
@@ -667,7 +679,7 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             if (wmId >= IDM_KEY_BASE && wmId < IDM_KEY_BASE + 12) {
                 const char* keys[] = { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
                 if (m_partManager.GetActivePart()) {
-                    const bool linked = (GetKeyState(VK_CONTROL) & 0x8000) == 0;
+                    const bool linked = IsPartLinkActive();
                     PushUndo();
                     auto changed = m_partManager.ApplyKey(keys[wmId - IDM_KEY_BASE], linked);
                     for (int idx : changed) RefreshPartDegrees(m_partManager.GetParts()[static_cast<size_t>(idx)]);
@@ -680,7 +692,7 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             }
             if (wmId >= IDM_SCALE_BASE && wmId < IDM_SCALE_BASE + 10) {
                 if (m_partManager.GetActivePart()) {
-                    const bool linked = (GetKeyState(VK_CONTROL) & 0x8000) == 0;
+                    const bool linked = IsPartLinkActive();
                     PushUndo();
                     auto changed = m_partManager.ApplyMode(static_cast<MusicalMode>(wmId - IDM_SCALE_BASE), linked);
                     for (int idx : changed) RefreshPartDegrees(m_partManager.GetParts()[static_cast<size_t>(idx)]);
@@ -825,6 +837,7 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                             updated.durationBeats = selC.durationBeats;
                             updated.inversion = selC.inversion;
                             updated.octaveOffset = selC.octaveOffset;
+                            updated.toneShift = selC.toneShift;
                             selC = updated;
                             SyncTimelineToText();
                             AuditionChord(selC);
@@ -925,7 +938,18 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             OnRButtonUp(static_cast<float>(GET_X_LPARAM(lParam)), static_cast<float>(GET_Y_LPARAM(lParam)));
             return 0;
         case WM_MOUSEMOVE:
+            if (!m_mouseTracking) {
+                TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, hwnd, 0 };
+                if (TrackMouseEvent(&tme)) m_mouseTracking = true;
+            }
             OnMouseMove(static_cast<float>(GET_X_LPARAM(lParam)), static_cast<float>(GET_Y_LPARAM(lParam)));
+            return 0;
+        case WM_MOUSELEAVE:
+            m_mouseTracking = false;
+            if (!m_tipText.empty()) {
+                m_tipText.clear();
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
             return 0;
         case WM_MOUSEWHEEL: {
             short delta = GET_WHEEL_DELTA_WPARAM(wParam);
@@ -990,8 +1014,41 @@ void AppWindow::CloseModal() {
 // ---------------------------------------------------------------------------
 // ベクター図形アイコン描画ルーチン (Direct2D ジオメトリ / 絵文字フリー)
 // ---------------------------------------------------------------------------
+static UiIcon ToUiIcon(IconType type) {
+    switch (type) {
+        case IconType::Play: return UiIcon::Play;
+        case IconType::Pause: return UiIcon::Pause;
+        case IconType::Stop: return UiIcon::Stop;
+        case IconType::Loop: return UiIcon::Loop;
+        case IconType::Settings: return UiIcon::Settings;
+        case IconType::Template: return UiIcon::Template;
+        case IconType::Help: return UiIcon::Help;
+        case IconType::SaveDisk:
+        case IconType::SaveProject: return UiIcon::Save;
+        case IconType::SaveMidi: return UiIcon::Midi;
+        case IconType::DawDrag: return UiIcon::Dawdrag;
+        case IconType::Keyboard: return UiIcon::Keyboard;
+        case IconType::Zoom: return UiIcon::Zoom;
+        case IconType::New: return UiIcon::New;
+        case IconType::Open: return UiIcon::Open;
+        case IconType::Link: return UiIcon::Link;
+        default: return UiIcon::Count;
+    }
+}
+
 void AppWindow::DrawIcon(IconType type, const D2D1_RECT_F& rect, ID2D1Brush* pBrush) {
     if (!pBrush || type == IconType::None) return;
+
+    // 生成済みアイコン画像（スプライトシート）を優先。無ければ下のベクター描画へ
+    const UiIcon ui = ToUiIcon(type);
+    if (ui != UiIcon::Count && m_iconSheet.IsReady() && m_pRenderTarget) {
+        const float s = std::min(rect.right - rect.left, rect.bottom - rect.top);
+        const float side = std::round(s * (s >= 26.0f ? 0.66f : 0.80f));
+        float dpiX = 96.0f, dpiY = 96.0f;
+        m_pRenderTarget->GetDpi(&dpiX, &dpiY);
+        if (m_iconSheet.Draw(m_pRenderTarget, ui, rect, side, pBrush, dpiX / 96.0f)) return;
+    }
+
     switch (type) {
         case IconType::Play: DrawIconPlay(rect, pBrush); break;
         case IconType::Pause: DrawIconPause(rect, pBrush); break;
@@ -1260,7 +1317,8 @@ void AppWindow::DrawButton(
     bool isHovered,
     bool isPressed,
     bool isPrimary,
-    D2D1_COLOR_F primaryColor
+    D2D1_COLOR_F primaryColor,
+    bool dropdown
 ) {
     D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(rect, 4.0f, 4.0f);
 
@@ -1293,11 +1351,44 @@ void AppWindow::DrawButton(
         DrawTextSafe(text, m_pFontButton, textRect, pTextBrush);
     } else if (icon != IconType::None) {
         DrawIcon(icon, rect, pTextBrush);
+    } else if (dropdown) {
+        // 文字は矢印の分だけ左へ寄せ、右端に小型のV字を置く
+        const float arrowW = 14.0f;
+        DrawTextSafe(text, m_pFontButton, D2D1::RectF(rect.left, rect.top, rect.right - arrowW, rect.bottom), pTextBrush);
+        DrawChevronV(D2D1::RectF(rect.right - arrowW - 2.0f, rect.top, rect.right - 2.0f, rect.bottom), pTextBrush, false);
     } else {
         DrawTextSafe(text, m_pFontButton, rect, pTextBrush);
     }
 
     m_pRenderTarget->PopAxisAlignedClip();
+}
+
+void AppWindow::DrawChevronV(const D2D1_RECT_F& rect, ID2D1Brush* pBrush, bool up) {
+    if (!pBrush) return;
+    const float cx = std::round((rect.left + rect.right) * 0.5f);
+    const float cy = std::round((rect.top + rect.bottom) * 0.5f);
+    const float hw = 3.5f;   // 半幅
+    const float hh = 2.0f;   // 半高
+    const float dir = up ? -1.0f : 1.0f;
+    ID2D1PathGeometry* pPath = nullptr;
+    if (SUCCEEDED(m_pD2DFactory->CreatePathGeometry(&pPath))) {
+        ID2D1GeometrySink* pSink = nullptr;
+        if (SUCCEEDED(pPath->Open(&pSink))) {
+            pSink->BeginFigure(D2D1::Point2F(cx - hw, cy - hh * dir), D2D1_FIGURE_BEGIN_HOLLOW);
+            pSink->AddLine(D2D1::Point2F(cx, cy + hh * dir));
+            pSink->AddLine(D2D1::Point2F(cx + hw, cy - hh * dir));
+            pSink->EndFigure(D2D1_FIGURE_END_OPEN);
+            pSink->Close();
+            pSink->Release();
+            D2D1_STROKE_STYLE_PROPERTIES sp = D2D1::StrokeStyleProperties(
+                D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND);
+            ID2D1StrokeStyle* pStyle = nullptr;
+            m_pD2DFactory->CreateStrokeStyle(sp, nullptr, 0, &pStyle);
+            m_pRenderTarget->DrawGeometry(pPath, pBrush, 1.5f, pStyle);
+            if (pStyle) pStyle->Release();
+        }
+        pPath->Release();
+    }
 }
 
 void AppWindow::DrawCard(

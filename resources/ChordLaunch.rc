@@ -5,6 +5,11 @@
 // アプリケーションアイコン (タスクバー・タイトルバー・エクスプローラー)
 IDI_APPICON ICON "ChordLaunch.ico"
 
+// UIアイコンのスプライトシート (scripts\Generate-Icons.py で生成)
+IDR_UIICONS_24 RCDATA "icons/ui_icons_24.png"
+IDR_UIICONS_48 RCDATA "icons/ui_icons_48.png"
+IDR_UIICONS_96 RCDATA "icons/ui_icons_96.png"
+
 // バージョン情報: 定義元は src\version.h (プレリリース)
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION CHORDLAUNCH_VER_MAJOR,CHORDLAUNCH_VER_MINOR,0,0

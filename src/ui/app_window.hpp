@@ -13,6 +13,7 @@
 #include "part_manager.hpp"
 #include "timeline_edit.hpp"
 #include "wasapi_synth.hpp"
+#include "icon_sheet.hpp"
 
 namespace clp {
 
@@ -33,7 +34,12 @@ enum class IconType {
     SaveDisk,
     DawDrag,
     Keyboard,
-    Zoom
+    Zoom,
+    New,
+    Open,
+    SaveProject,
+    SaveMidi,
+    Link
 };
 
 enum class ModalType {
@@ -95,8 +101,11 @@ private:
         bool isHovered = false,
         bool isPressed = false,
         bool isPrimary = false,
-        D2D1_COLOR_F primaryColor = {0,0,0,0}
+        D2D1_COLOR_F primaryColor = {0,0,0,0},
+        bool dropdown = false   // 右端に小型のV字（プルダウン表示）を描く
     );
+    // 小型のV字（上向き/下向き）。プルダウン表示・スピンボタン用
+    void DrawChevronV(const D2D1_RECT_F& rect, ID2D1Brush* pBrush, bool up);
     void DrawCard(
         const D2D1_RECT_F& rect,
         const std::wstring& chordName,
@@ -160,6 +169,7 @@ private:
     void SplitSelectedChord();
     void DuplicateSelectedChord();
     void ShiftSelectedChordOctave(int delta);
+    void ShiftSelectedChordInversion(int delta);
     void ResetSelectedChordOctave();
     void AddRecentFile(const std::wstring& path);
     void LoadAppSettings();
@@ -243,6 +253,7 @@ private:
     // 再生エンジン (tick単位精密制御)
     void TogglePlayback();
     void StopPlayback();
+    void RewindPlayback();
     void AdvancePlayback(float deltaSeconds);
     void SeekToTick(double tick);
 
@@ -258,6 +269,7 @@ private:
     void StartDawDrag();
     void UpdateWindowTitle();
     void SetStatusMessage(const std::wstring& msg);
+    void UpdateToolbarTip(float x, float y);
     void TriggerAutoBackup();
 
     // テンプレート管理・試聴
@@ -313,6 +325,7 @@ private:
     ID2D1SolidColorBrush*  m_pBrushPlay = nullptr;
     ID2D1SolidColorBrush*  m_pBrushStop = nullptr;
     ID2D1SolidColorBrush*  m_pBrushPlayhead = nullptr;
+    IconSheet              m_iconSheet;
     ID2D1SolidColorBrush*  m_pBrushPianoRollNote = nullptr;
     ID2D1SolidColorBrush*  m_pBrushPianoRollRest = nullptr;
     ID2D1SolidColorBrush*  m_pBrushModalBackdrop = nullptr;
@@ -344,8 +357,26 @@ private:
     DWORD m_chordClipSeq = 0;                            // コピー時のOSクリップボード連番（変化したら無効）
 
     // リサイズ・ドラッグ＆ドロップ状態
-    enum class DragMode { None, CardMove, CardResizeLeft, CardResizeRight, ScrollBarThumb, PaletteCardDrag, CardTimelineDrag, RulerSeek };
+    enum class DragMode { None, CardMove, CardResizeLeft, CardResizeRight, ScrollBarThumb, PaletteCardDrag, CardTimelineDrag, RulerSeek, PianoNoteDrag };
     DragMode m_dragMode = DragMode::None;
+
+    // パート連動リンク（キー/モード/BPM の変更を同じ値のパートへ一括反映）。Ctrl 押下中は一時的に反転
+    bool m_linkEnabled = true;
+    bool IsPartLinkActive() const { return m_linkEnabled != ((GetKeyState(VK_CONTROL) & 0x8000) != 0); }
+
+    // ピアノロールのレイアウト（描画時に更新）とノートドラッグ状態
+    D2D1_RECT_F m_prRect = {};
+    int   m_prMinMidi = 0;
+    float m_prNoteRowH = 0.0f;
+    bool  m_prValid = false;
+    int   m_prDragPc = 0;            // ドラッグ中の音名 (0〜11)
+    int   m_prDragStartPitch = 0;    // ドラッグ開始時のノート高さ (MIDI)
+    int   m_prDragStartShift = 0;    // ドラッグ開始時のオクターブ移動量
+    bool  m_prDragUndoPushed = false;
+    int   m_prDragMin = 0;           // ドラッグ中に固定する表示音域（音域の自動調整による揺れ防止）
+    int   m_prDragMax = 0;
+    bool HitTestPianoRollNote(float x, float y, int& outBar, int& outChord, int& outPitch) const;
+    void OnPianoNoteDrag(float y);
     int   m_dragBarIndex = -1;
     int   m_dragChordIndex = -1;
     float m_dragStartX = 0.0f;
@@ -430,6 +461,8 @@ private:
     bool m_autoBackupInProjectDir = true;
     bool m_showDashboardOnStartup = true;
     int m_dashboardSelectedRecentIndex = -1;
+    std::wstring m_tipText;          // 上段Tipsエリアに表示するアイコンボタンの説明
+    bool m_mouseTracking = false;    // WM_MOUSELEAVE 追跡中
     std::wstring m_statusMessage;
     std::chrono::steady_clock::time_point m_statusMessageTime;
 

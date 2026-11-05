@@ -1013,6 +1013,14 @@ std::vector<int> MusicEngine::GetChordMidiNotes(
         std::sort(notes.begin(), notes.end());
     }
 
+    // 構成音ごとのオクターブ移動（ピアノロールのドラッグ操作）。ベース音の追加前に音名単位で適用する
+    if (chord.HasToneShift()) {
+        for (int& n : notes) {
+            n += 12 * static_cast<int>(chord.toneShift[((n % 12) + 12) % 12]);
+        }
+        std::sort(notes.begin(), notes.end());
+    }
+
     // ベース音追加処理 (bassOctaveMode: 0: なし(標準1音), 1: -1 Oct, 2: -2 Oct, 3: 両方)
     PitchClass bp = (chord.bassPitch != PitchClass::Unknown) ? chord.bassPitch : chord.rootPitch;
     if (bp != PitchClass::Unknown) {

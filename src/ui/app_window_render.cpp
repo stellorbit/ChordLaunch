@@ -145,13 +145,29 @@ void AppWindow::RenderToolbar(float x, float y, float width, float height) {
     // 描画とヒットテストで共通のレイアウト (x, y は 0 起点のため加算不要)
     const ToolbarLayout L = ComputeToolbarLayout(width);
 
-    // ---------------- 上段: 再生系 (アイコンのみ) ＆ 保存・各種モーダル ----------------
+    // ---------------- 上段: 新規・開く・保存 / 再生系 (アイコンのみ) ＆ 各種モーダル ----------------
+    DrawButton(L.fileNew, L"", IconType::New);
+    DrawButton(L.fileOpen, L"", IconType::Open);
+    DrawButton(L.fileSave, L"", IconType::SaveProject);
     DrawButton(L.play, L"", m_isPlaying ? IconType::Pause : IconType::Play, false, false, true, m_isPlaying ? Theme::AccentStop : Theme::AccentPlay);
     DrawButton(L.stop, L"", IconType::Stop, false, false, false);
     DrawButton(L.loop, L"", IconType::Loop, false, false, m_isLooping, Theme::AccentAction);
 
     // 全体マージ (新規パート生成)
     DrawButton(L.merge, TR(L"全体マージ", L"Merge All"), IconType::None, false, false, true, Theme::AccentAction);
+
+    // Tipsエリア: 全体マージと停止ボタンの間（アイコンのみのボタンの説明）
+    if (!m_tipText.empty()) {
+        const float tipL = L.merge.right + 12.0f;
+        const float tipR = L.stop.left - 12.0f;
+        if (tipR - tipL > 40.0f) {
+            D2D1_RECT_F rcTip = D2D1::RectF(tipL, L.counter.top, tipR, L.counter.bottom);
+            m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(rcTip, 4.0f, 4.0f), m_pBrushCardBg);
+            m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(rcTip, 4.0f, 4.0f), m_pBrushBorderLight, 1.0f);
+            D2D1_RECT_F rcTipText = D2D1::RectF(rcTip.left + 6.0f, rcTip.top, rcTip.right - 6.0f, rcTip.bottom);
+            DrawTextSafe(m_tipText, m_pFontButton, rcTipText, m_pBrushText);
+        }
+    }
 
     // 小節 / 拍カウンター (BAR 1 : 1) - ツールバー中央に配置して視認性を向上
     const D2D1_RECT_F& rcCounter = L.counter;
@@ -166,10 +182,10 @@ void AppWindow::RenderToolbar(float x, float y, float width, float height) {
 
     // 右側: MIDI保存, DAWへドラッグ, テンプレート集, ヘルプ, 設定
     DrawButton(L.settings, L"", IconType::Settings);
-    DrawButton(L.help, L"", IconType::Help);
+    DrawButton(L.help, TR(L"記法ヘルプ", L"Help"), IconType::Help);
     DrawButton(L.templates, TR(L"テンプレート集", L"Templates"), IconType::Template);
     DrawButton(L.dawDrag, TR(L"DAWへドラッグ", L"Drag to DAW"), IconType::DawDrag, false, false, true, Theme::AccentAction);
-    DrawButton(L.midiSave, TR(L"MIDI保存", L"Save MIDI"), IconType::SaveDisk);
+    DrawButton(L.midiSave, TR(L"MIDI保存", L"Save MIDI"), IconType::SaveMidi);
 
     // ---------------- 下段: ラベル ＋ 値のみのプルダウン ----------------
     const float r2Y = L.row2Y;
@@ -188,7 +204,7 @@ void AppWindow::RenderToolbar(float x, float y, float width, float height) {
 
     // 1. キー
     drawLabel(L.keyLbl, TR(L"キー", L"Key"));
-    DrawButton(L.key, ToWString(pActive ? pActive->keyRoot : "C") + L" ▼", IconType::None);
+    DrawButton(L.key, ToWString(pActive ? pActive->keyRoot : "C"), IconType::None, false, false, false, D2D1_COLOR_F{0, 0, 0, 0}, true);
 
     // 2. スケール
     const wchar_t* modeNamesJa[] = {
@@ -201,7 +217,7 @@ void AppWindow::RenderToolbar(float x, float y, float width, float height) {
     };
     int mIdx = std::clamp(pActive ? static_cast<int>(pActive->mode) : 0, 0, 8);
     drawLabel(L.scaleLbl, TR(L"スケール", L"Scale"));
-    DrawButton(L.scale, std::wstring(isEn ? modeNamesEn[mIdx] : modeNamesJa[mIdx]) + L" ▼", IconType::None);
+    DrawButton(L.scale, std::wstring(isEn ? modeNamesEn[mIdx] : modeNamesJa[mIdx]), IconType::None, false, false, false, D2D1_COLOR_F{0, 0, 0, 0}, true);
 
     m_pRenderTarget->DrawLine(D2D1::Point2F(L.sepX1, r2Y + 2.0f), D2D1::Point2F(L.sepX1, r2Y + r2H - 2.0f), m_pBrushBorderLight, 1.0f);
 
@@ -212,8 +228,10 @@ void AppWindow::RenderToolbar(float x, float y, float width, float height) {
     m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(L.bpmVal, 3.0f, 3.0f), m_pBrushBorder, 1.0f);
     DrawTextSafe(std::to_wstring(pActive ? pActive->bpm : 120), m_pFontButton, L.bpmVal, m_pBrushText);
 
-    DrawButton(L.spinUp, L"▲", IconType::None);
-    DrawButton(L.spinDown, L"▼", IconType::None);
+    DrawButton(L.spinUp, L"", IconType::None);
+    DrawChevronV(L.spinUp, m_pBrushText, true);
+    DrawButton(L.spinDown, L"", IconType::None);
+    DrawChevronV(L.spinDown, m_pBrushText, false);
 
     // 4. TAPテンポボタン (点灯対応)
     DrawButton(L.tap, L"TAP", IconType::None, false, false, m_tapBlinked, Theme::AccentWarm);
@@ -225,21 +243,21 @@ void AppWindow::RenderToolbar(float x, float y, float width, float height) {
     const wchar_t* presetNamesEn[] = { L"Grand Piano", L"Warm Pad", L"E.Piano", L"Strings" };
     int pIdx = std::clamp(static_cast<int>(m_synth.GetPreset()), 0, 3);
     drawLabel(L.soundLbl, TR(L"音色", L"Sound"));
-    DrawButton(L.sound, std::wstring(isEn ? presetNamesEn[pIdx] : presetNamesJa[pIdx]) + L" ▼", IconType::None);
+    DrawButton(L.sound, std::wstring(isEn ? presetNamesEn[pIdx] : presetNamesJa[pIdx]), IconType::None, false, false, false, D2D1_COLOR_F{0, 0, 0, 0}, true);
 
     // 6. ボイシング
     const wchar_t* voicingNamesJa[] = { L"基本形", L"Drop2", L"Drop3", L"OpenSpread", L"Closed" };
     const wchar_t* voicingNamesEn[] = { L"Root", L"Drop2", L"Drop3", L"OpenSpread", L"Closed" };
     int vIdx = std::clamp(static_cast<int>(m_selectedVoicing), 0, 4);
     drawLabel(L.voicingLbl, TR(L"ボイシング", L"Voicing"));
-    DrawButton(L.voicing, std::wstring(isEn ? voicingNamesEn[vIdx] : voicingNamesJa[vIdx]) + L" ▼", IconType::None);
+    DrawButton(L.voicing, std::wstring(isEn ? voicingNamesEn[vIdx] : voicingNamesJa[vIdx]), IconType::None, false, false, false, D2D1_COLOR_F{0, 0, 0, 0}, true);
 
     // 7. ベース
     const wchar_t* bassNamesJa[] = { L"なし", L"-1 Oct", L"-2 Oct", L"両方" };
     const wchar_t* bassNamesEn[] = { L"Off", L"-1 Oct", L"-2 Oct", L"Both" };
     int bIdx = std::clamp(m_bassOctaveMode, 0, 3);
     drawLabel(L.bassLbl, TR(L"ベース", L"Bass"));
-    DrawButton(L.bass, std::wstring(isEn ? bassNamesEn[bIdx] : bassNamesJa[bIdx]) + L" ▼", IconType::None);
+    DrawButton(L.bass, std::wstring(isEn ? bassNamesEn[bIdx] : bassNamesJa[bIdx]), IconType::None, false, false, false, D2D1_COLOR_F{0, 0, 0, 0}, true);
 
     // 8. 入力グリッド (追加するコードの音価) / 9. タイムライングリッド (スナップ/表示)
     auto gridValueText = [&](int ticks) -> std::wstring {
@@ -250,12 +268,15 @@ void AppWindow::RenderToolbar(float x, float y, float width, float height) {
         return TR(L"1拍", L"1 Beat");
     };
     drawLabel(L.inputLbl, TR(L"入力", L"Input"));
-    DrawButton(L.input, gridValueText(m_inputGridTicks) + L" ▼", IconType::None);
+    DrawButton(L.input, gridValueText(m_inputGridTicks), IconType::None, false, false, false, D2D1_COLOR_F{0, 0, 0, 0}, true);
 
     drawLabel(L.gridLbl, TR(L"グリッド", L"Grid"));
-    DrawButton(L.grid, gridValueText(m_timelineGridTicks) + L" ▼", IconType::None);
+    DrawButton(L.grid, gridValueText(m_timelineGridTicks), IconType::None, false, false, false, D2D1_COLOR_F{0, 0, 0, 0}, true);
 
     m_pRenderTarget->DrawLine(D2D1::Point2F(L.sepX3, r2Y + 2.0f), D2D1::Point2F(L.sepX3, r2Y + r2H - 2.0f), m_pBrushBorderLight, 1.0f);
+
+    // 下段右端: パート連動リンク（オン時は強調色）
+    DrawButton(L.link, L"", IconType::Link, false, false, m_linkEnabled, Theme::AccentAction);
 }
 
 // ---------------------------------------------------------------------------
@@ -290,9 +311,9 @@ void AppWindow::RenderLeftPane(float x, float y, float width, float height) {
     DrawButton(rcTab1, L"7th", IconType::None, false, false, m_diatonicChordTypeTab == 1);
     const wchar_t* variantNames[] = { L"sus4", L"add9", TR(L"分数", L"Slash"), L"sus2", L"6/m6", L"7sus4", L"add9/m" };
     std::wstring variantLabel = isVariantTab
-        ? (std::wstring(variantNames[std::clamp(m_diatonicChordTypeTab - 2, 0, 6)]) + L" ▼")
-        : std::wstring(TR(L"その他 ▼", L"More ▼"));
-    DrawButton(rcTab2, variantLabel, IconType::None, false, false, isVariantTab);
+        ? std::wstring(variantNames[std::clamp(m_diatonicChordTypeTab - 2, 0, 6)])
+        : std::wstring(TR(L"その他", L"More"));
+    DrawButton(rcTab2, variantLabel, IconType::None, false, false, isVariantTab, D2D1_COLOR_F{0, 0, 0, 0}, true);
 
     Part* pActive = m_partManager.GetActivePart();
     std::string keyRoot = pActive ? pActive->keyRoot : "C";
@@ -522,6 +543,7 @@ void AppWindow::RenderCenterPane(float x, float y, float width, float height) {
     // ピアノロール (グリッド線はノートバーおよび左端音名ガイドの背面に描画)
     float prY = cardY + m_cardTrackHeight;
     float prH = scrollY - prY;
+    m_prValid = false;
     if (prH > 20.0f) {
         RenderPianoRoll(x, prY, width, prH);
     }
@@ -767,7 +789,17 @@ void AppWindow::RenderPianoRoll(float x, float y, float width, float height) {
             minMidi = actualMax - 21;
         }
     }
+    if (m_dragMode == DragMode::PianoNoteDrag) {
+        minMidi = m_prDragMin;
+        maxMidi = m_prDragMax;
+    }
     float noteRowH = height / static_cast<float>(maxMidi - minMidi + 1);
+
+    // ドラッグ操作用にレイアウトを保持する
+    m_prRect = prRc;
+    m_prMinMidi = minMidi;
+    m_prNoteRowH = noteRowH;
+    m_prValid = true;
 
     // 1. 水平の黒鍵/白鍵背景帯
     for (int p = minMidi; p <= maxMidi; ++p) {

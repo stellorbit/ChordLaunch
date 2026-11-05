@@ -54,6 +54,7 @@ add_library(clp_core STATIC
     src/core/i18n.cpp
     src/audio/wasapi_synth.cpp
     src/ui/ole_dnd.cpp
+    src/ui/icon_sheet.cpp
     src/ui/app_window.cpp
     src/ui/app_window_render.cpp
     src/ui/app_window_modals.cpp
@@ -72,6 +73,7 @@ target_include_directories(clp_core PUBLIC
 target_link_libraries(clp_core PUBLIC
     d2d1.lib
     dwrite.lib
+    windowscodecs.lib
     ole32.lib
     comctl32.lib
     user32.lib
@@ -85,6 +87,9 @@ add_executable(ChordLaunch WIN32
     resources/ChordLaunch.rc
 )
 target_link_libraries(ChordLaunch PRIVATE clp_core)
+# アイコン PNG の更新でもリソースを再コンパイルさせる
+set_source_files_properties(resources/ChordLaunch.rc PROPERTIES OBJECT_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/ui_icons_24.png;${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/ui_icons_48.png;${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/ui_icons_96.png")
 
 # 自動単体テスト実行ファイル
 add_executable(clp_tests

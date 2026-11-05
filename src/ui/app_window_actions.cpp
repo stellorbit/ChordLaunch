@@ -221,6 +221,106 @@ void AppWindow::ShiftSelectedChordOctave(int delta) {
     InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
+void AppWindow::ShiftSelectedChordInversion(int delta) {
+    Part* pActive = m_partManager.GetActivePart();
+    if (!pActive || m_selectedBarIndex < 0 || m_selectedBarIndex >= static_cast<int>(pActive->bars.size())) return;
+    auto& bar = pActive->bars[m_selectedBarIndex];
+    if (m_selectedChordIndex < 0 || m_selectedChordIndex >= static_cast<int>(bar.chords.size())) return;
+
+    auto& chord = bar.chords[m_selectedChordIndex];
+    if (chord.isRest || chord.rootPitch == PitchClass::Unknown) {
+        SetStatusMessage(TR(L"休符は転回できません", L"Rests cannot be inverted"));
+        return;
+    }
+
+    // 構成音数（ベース追加なし・基本形）から、指定可能な転回の最大値を決める（最大第3転回）
+    ChordToken probe = chord;
+    probe.inversion = 0;
+    probe.bassPitch = PitchClass::Unknown;
+    const int toneCount = static_cast<int>(MusicEngine::GetChordMidiNotes(probe, m_baseOctave, VoicingStyle::RootPosition, 0, 0).size());
+    const int maxInv = std::clamp(toneCount - 1, 0, 3);
+    if (maxInv == 0) return;
+
+    // 0..maxInv を循環させる（↑で次の転回、↓で前の転回）
+    const int count = maxInv + 1;
+    const int next = (((chord.inversion + delta) % count) + count) % count;
+
+    PushUndo();
+    m_isMergedView = false;
+    chord.inversion = next;
+    std::wstring msg = TR(L"転回: ", L"Inversion: ");
+    if (next == 0) msg += TR(L"基本形", L"Root position");
+    else msg += TR(L"第", L"") + std::to_wstring(next) + TR(L"転回形", next == 1 ? L"st inversion" : (next == 2 ? L"nd inversion" : L"rd inversion"));
+    SetStatusMessage(msg);
+    AuditionChord(chord);
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+bool AppWindow::HitTestPianoRollNote(float x, float y, int& outBar, int& outChord, int& outPitch) const {
+    if (!m_prValid || m_isMergedView || m_prNoteRowH <= 0.0f) return false;
+    const float guideW = 28.0f;
+    if (x < m_prRect.left + guideW || x > m_prRect.right || y < m_prRect.top || y > m_prRect.bottom) return false;
+
+    const Part* pActive = m_partManager.GetActivePart();
+    if (!pActive) return false;
+
+    const float barWidth = m_pixelsPerBeat * 4.0f;
+    const float relX = (x - m_prRect.left) + m_timelineScrollX;
+    if (relX < 0.0f || barWidth <= 0.0f) return false;
+    const size_t b = static_cast<size_t>(relX / barWidth);
+    if (b >= pActive->bars.size()) return false;
+
+    const Bar& bar = pActive->bars[b];
+    int barTicks = bar.GetTotalTicks();
+    if (barTicks <= 0) barTicks = TICKS_PER_BAR_4_4;
+    const double tickInBar = (static_cast<double>(relX) - static_cast<double>(b) * barWidth) / barWidth * barTicks;
+
+    int offset = 0;
+    int hitChord = -1;
+    for (size_t c = 0; c < bar.chords.size(); ++c) {
+        const ChordToken& ch = bar.chords[c];
+        const int cTicks = ch.durationTicks > 0 ? ch.durationTicks : (ch.durationBeats * TICKS_PER_BEAT);
+        if (tickInBar >= offset && tickInBar < offset + cTicks) { hitChord = static_cast<int>(c); break; }
+        offset += cTicks;
+    }
+    if (hitChord < 0) return false;
+    const ChordToken& chord = bar.chords[hitChord];
+    if (chord.isRest || chord.rootPitch == PitchClass::Unknown) return false;
+
+    const int pitch = m_prMinMidi + static_cast<int>(std::floor((m_prRect.bottom - y) / m_prNoteRowH));
+    const auto notes = MusicEngine::GetChordMidiNotes(chord, m_baseOctave, m_selectedVoicing, chord.inversion, m_bassOctaveMode);
+    if (std::find(notes.begin(), notes.end(), pitch) == notes.end()) return false;
+
+    outBar = static_cast<int>(b);
+    outChord = hitChord;
+    outPitch = pitch;
+    return true;
+}
+
+void AppWindow::OnPianoNoteDrag(float y) {
+    Part* pActive = m_partManager.GetActivePart();
+    if (!pActive || m_dragBarIndex < 0 || m_dragBarIndex >= static_cast<int>(pActive->bars.size())) return;
+    auto& chords = pActive->bars[m_dragBarIndex].chords;
+    if (m_dragChordIndex < 0 || m_dragChordIndex >= static_cast<int>(chords.size())) return;
+    ChordToken& chord = chords[m_dragChordIndex];
+
+    // マウス位置の音高を、同じ音名の最寄りオクターブ位置へスナップする
+    const float rowH = (m_prNoteRowH > 0.0f) ? m_prNoteRowH : 1.0f;
+    const int row = std::clamp(m_prMinMidi + static_cast<int>(std::floor((m_prRect.bottom - y) / rowH)), m_prDragMin, m_prDragMax);
+    const int deltaOct = static_cast<int>(std::lround((row - m_prDragStartPitch) / 12.0));
+    const int next = std::clamp(m_prDragStartShift + deltaOct, -3, 3);
+    if (next == chord.toneShift[m_prDragPc]) return;
+
+    if (!m_prDragUndoPushed) {
+        PushUndo();
+        m_prDragUndoPushed = true;
+    }
+    m_isMergedView = false;
+    chord.toneShift[m_prDragPc] = static_cast<int8_t>(next);
+    AuditionChord(chord);
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
 void AppWindow::ResetSelectedChordOctave() {
     Part* pActive = m_partManager.GetActivePart();
     if (!pActive || m_selectedBarIndex < 0 || m_selectedBarIndex >= static_cast<int>(pActive->bars.size())) return;
@@ -948,6 +1048,22 @@ void AppWindow::TogglePlayback() {
             accTicks += barTicks;
         }
     }
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+// 先頭へ戻る。再生中は先頭から再生を継続、停止中は再生位置のみ先頭へ
+void AppWindow::RewindPlayback() {
+    m_playbackTick = 0.0;
+    m_lastSoundedChordUid = -1;
+    m_synth.AllNotesOff();
+    if (m_isPlaying) {
+        m_lastPlaybackTime = std::chrono::steady_clock::now();
+    } else {
+        m_selectedBarIndex = 0;
+        m_selectedChordIndex = -1;
+        EnsureVisible(0);
+    }
+    SetStatusMessage(L"先頭へ戻りました");
     InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 

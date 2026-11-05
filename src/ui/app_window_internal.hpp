@@ -127,8 +127,10 @@ inline D2D1_RECT_F GridCellRect(float left, float innerW, int cols, int col, flo
 // ツールバー（上段: 再生系・保存系 / 下段: ラベル＋プルダウン群）
 struct ToolbarLayout {
     // 上段
+    D2D1_RECT_F fileNew, fileOpen, fileSave;
     D2D1_RECT_F play, stop, loop, merge;
     D2D1_RECT_F counter;
+    D2D1_RECT_F link;   // 下段右端: キー/モード/BPM のパート連動オン・オフ
     D2D1_RECT_F midiSave, dawDrag, templates, help, settings;
     // 下段 (ラベルは非クリック領域、値側がプルダウン)
     D2D1_RECT_F keyLbl, key, scaleLbl, scale;
@@ -142,22 +144,25 @@ inline ToolbarLayout ComputeToolbarLayout(float width) {
     const float r1Y = 4.0f, r1H = 28.0f;
     const float gap = 4.0f;
 
-    // 上段 左: アイコンのみの再生・停止・ループ ＋ 全体マージ
+    // 上段 左端: 新規作成・開く・プロジェクト保存（アイコンのみ） ＋ 全体マージ
     float x = 12.0f;
-    L.play  = D2D1::RectF(x, r1Y, x + 32.0f, r1Y + r1H); x += 32.0f + gap;
-    L.stop  = D2D1::RectF(x, r1Y, x + 32.0f, r1Y + r1H); x += 32.0f + gap;
-    L.loop  = D2D1::RectF(x, r1Y, x + 32.0f, r1Y + r1H); x += 32.0f + gap + 8.0f;
-    L.merge = D2D1::RectF(x, r1Y, x + 84.0f, r1Y + r1H);
+    L.fileNew  = D2D1::RectF(x, r1Y, x + 32.0f, r1Y + r1H); x += 32.0f + gap;
+    L.fileOpen = D2D1::RectF(x, r1Y, x + 32.0f, r1Y + r1H); x += 32.0f + gap;
+    L.fileSave = D2D1::RectF(x, r1Y, x + 32.0f, r1Y + r1H); x += 32.0f + gap + 8.0f;
+    L.merge    = D2D1::RectF(x, r1Y, x + 84.0f, r1Y + r1H);
 
-    // 上段 中央: 小節/拍カウンター
+    // 上段 中央: [停止][再生] 小節/拍カウンター [ループ]（再生ボタンはカウンターの左隣）
     const float counterW = 124.0f;
     float counterX = (width - counterW) * 0.5f;
     L.counter = D2D1::RectF(counterX, r1Y, counterX + counterW, r1Y + r1H);
+    L.play = D2D1::RectF(counterX - gap - 32.0f, r1Y, counterX - gap, r1Y + r1H);
+    L.stop = D2D1::RectF(L.play.left - gap - 32.0f, r1Y, L.play.left - gap, r1Y + r1H);
+    L.loop = D2D1::RectF(counterX + counterW + gap, r1Y, counterX + counterW + gap + 32.0f, r1Y + r1H);
 
     // 上段 右（右端から順に）
     float rx = width - 12.0f;
     rx -= 32.0f; L.settings  = D2D1::RectF(rx, r1Y, rx + 32.0f,  r1Y + r1H); rx -= gap;
-    rx -= 32.0f; L.help      = D2D1::RectF(rx, r1Y, rx + 32.0f,  r1Y + r1H); rx -= gap;
+    rx -= 88.0f; L.help      = D2D1::RectF(rx, r1Y, rx + 88.0f,  r1Y + r1H); rx -= gap;
     rx -= 100.0f; L.templates = D2D1::RectF(rx, r1Y, rx + 100.0f, r1Y + r1H); rx -= gap;
     rx -= 112.0f; L.dawDrag  = D2D1::RectF(rx, r1Y, rx + 112.0f, r1Y + r1H); rx -= gap;
     rx -= 84.0f;  L.midiSave = D2D1::RectF(rx, r1Y, rx + 84.0f,  r1Y + r1H);
@@ -192,6 +197,9 @@ inline ToolbarLayout ComputeToolbarLayout(float width) {
     pair(L.inputLbl, L.input, 36.0f, 84.0f);
     pair(L.gridLbl, L.grid, 50.0f, 84.0f);
     L.sepX3 = x - groupGap * 0.5f;
+
+    // 下段 右端: パート連動リンク（アイコンのみ）
+    L.link = D2D1::RectF(width - 12.0f - 32.0f, r2Y, width - 12.0f, r2Y + r2H);
     return L;
 }
 

@@ -5,12 +5,44 @@ void AppWindow::OnLButtonDown(float x, float y) {
 
     if (OnModalClick(x, y)) return;
 
+    // ピアノロールのノートをドラッグ開始（構成音をオクターブ単位で移動）
+    {
+        int hitBar = -1, hitChord = -1, hitPitch = 0;
+        if (HitTestPianoRollNote(x, y, hitBar, hitChord, hitPitch)) {
+            const Part* pActive = m_partManager.GetActivePart();
+            m_dragMode = DragMode::PianoNoteDrag;
+            m_dragBarIndex = hitBar;
+            m_dragChordIndex = hitChord;
+            m_prDragPc = ((hitPitch % 12) + 12) % 12;
+            m_prDragStartPitch = hitPitch;
+            m_prDragStartShift = pActive->bars[hitBar].chords[hitChord].toneShift[m_prDragPc];
+            m_prDragUndoPushed = false;
+            m_prDragMin = m_prMinMidi;
+            m_prDragMax = m_prMinMidi + static_cast<int>(std::lround((m_prRect.bottom - m_prRect.top) / m_prNoteRowH)) - 1;
+            SelectChord(hitBar, hitChord);
+            SetCapture(m_hwnd);
+            return;
+        }
+    }
+
     // ---------------- 1. 上部ツールバー (2段構成。座標は描画と共通のレイアウト) ----------------
     if (y >= 0 && y <= m_toolbarHeight) {
         const ToolbarLayout L = ComputeToolbarLayout(m_width);
 
         // --- 上段 (y = 0 〜 38px) ---
         if (y <= 38.0f) {
+            if (PtInRectF(L.fileNew, x, y)) {
+                DoFileNew();
+                return;
+            }
+            if (PtInRectF(L.fileOpen, x, y)) {
+                DoFileOpen();
+                return;
+            }
+            if (PtInRectF(L.fileSave, x, y)) {
+                DoFileSave();
+                return;
+            }
             if (PtInRectF(L.play, x, y)) {
                 TogglePlayback();
                 return;
@@ -52,6 +84,16 @@ void AppWindow::OnLButtonDown(float x, float y) {
             return;
         }
 
+        // パート連動リンク（下段右端）のオン・オフ
+        if (PtInRectF(L.link, x, y)) {
+            m_linkEnabled = !m_linkEnabled;
+            SetStatusMessage(m_linkEnabled
+                ? TR(L"パート連動: オン（キー・モード・BPMの変更を同じ値のパートへ反映）", L"Part link: ON (key/mode/BPM changes apply to parts sharing the same value)")
+                : TR(L"パート連動: オフ（アクティブなパートのみ変更）", L"Part link: OFF (changes apply to the active part only)"));
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        }
+
         // --- 下段 (y = 38 〜 74px): キー, スケール, BPM, TAP, 音色, ボイシング, ベース, グリッド ---
         // ラベル／値のどちらをクリックしても同じプルダウンを開く
         auto openMenu = [&](const D2D1_RECT_F& lbl, const D2D1_RECT_F& val, void (AppWindow::*show)(float, float)) -> bool {
@@ -72,7 +114,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
         if (PtInRectF(L.spinUp, x, y)) {
             Part* pActive = m_partManager.GetActivePart();
             if (pActive) {
-                const bool linked = (GetKeyState(VK_CONTROL) & 0x8000) == 0;
+                const bool linked = IsPartLinkActive();
                 m_partManager.ApplyBpm(std::min(280, pActive->bpm + step), linked);
                 InvalidateRect(m_hwnd, nullptr, FALSE);
             }
@@ -81,7 +123,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
         if (PtInRectF(L.spinDown, x, y)) {
             Part* pActive = m_partManager.GetActivePart();
             if (pActive) {
-                const bool linked = (GetKeyState(VK_CONTROL) & 0x8000) == 0;
+                const bool linked = IsPartLinkActive();
                 m_partManager.ApplyBpm(std::max(40, pActive->bpm - step), linked);
                 InvalidateRect(m_hwnd, nullptr, FALSE);
             }
@@ -203,6 +245,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
                             updated.durationTicks = selC.durationTicks;
                             updated.durationBeats = selC.durationBeats;
                             updated.inversion = selC.inversion;
+                            updated.toneShift = selC.toneShift;
                             selC = updated;
                             SyncTimelineToText();
                             AuditionChord(selC);
@@ -244,6 +287,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
                             updated.durationTicks = selC.durationTicks;
                             updated.durationBeats = selC.durationBeats;
                             updated.inversion = selC.inversion;
+                            updated.toneShift = selC.toneShift;
                             selC = updated;
                             SyncTimelineToText();
                             AuditionChord(selC);
@@ -911,7 +955,34 @@ void AppWindow::OnLButtonDblClk(float x, float y) {
     OnLButtonDown(x, y);
 }
 
+// アイコンのみのボタン上にいる間、上段のTipsエリアへ説明を表示する
+void AppWindow::UpdateToolbarTip(float x, float y) {
+    std::wstring tip;
+    if (m_activeModal == ModalType::None && m_dragMode == DragMode::None && y >= 0.0f && y <= m_toolbarHeight) {
+        const ToolbarLayout L = ComputeToolbarLayout(m_width);
+        if (PtInRectF(L.fileNew, x, y)) tip = TR(L"新規作成 (Ctrl+N)", L"New (Ctrl+N)");
+        else if (PtInRectF(L.fileOpen, x, y)) tip = TR(L"開く (Ctrl+O)", L"Open (Ctrl+O)");
+        else if (PtInRectF(L.fileSave, x, y)) tip = TR(L"保存 (Ctrl+S)", L"Save (Ctrl+S)");
+        else if (PtInRectF(L.stop, x, y)) tip = TR(L"停止 (Esc)", L"Stop (Esc)");
+        else if (PtInRectF(L.play, x, y)) tip = m_isPlaying ? TR(L"一時停止 (Space)", L"Pause (Space)") : TR(L"再生 (Space)", L"Play (Space)");
+        else if (PtInRectF(L.loop, x, y)) tip = TR(L"ループ (L)", L"Loop (L)");
+        else if (PtInRectF(L.settings, x, y)) tip = TR(L"設定", L"Settings");
+        else if (PtInRectF(L.link, x, y)) tip = TR(L"BPM・キー一括適用 (Ctrl:反転)", L"Batch BPM/key (Ctrl: invert)");
+    }
+    if (tip != m_tipText) {
+        m_tipText = std::move(tip);
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+    }
+}
+
 void AppWindow::OnMouseMove(float x, float y) {
+    UpdateToolbarTip(x, y);
+    if (m_dragMode == DragMode::PianoNoteDrag) {
+        SetCursor(LoadCursor(nullptr, IDC_SIZENS));
+        OnPianoNoteDrag(y);
+        return;
+    }
+
     if (m_dragMode == DragMode::RulerSeek) {
         float centerX = m_leftPaneWidth;
         float relX = (x - centerX) + m_timelineScrollX;
@@ -1080,6 +1151,13 @@ void AppWindow::OnMouseMove(float x, float y) {
 }
 
 void AppWindow::OnLButtonUp(float x, float y) {
+    if (m_dragMode == DragMode::PianoNoteDrag) {
+        m_dragMode = DragMode::None;
+        ReleaseCapture();
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+        return;
+    }
+
     if (m_dragMode == DragMode::RulerSeek) {
         m_dragMode = DragMode::None;
         ReleaseCapture();

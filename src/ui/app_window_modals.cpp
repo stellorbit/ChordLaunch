@@ -514,15 +514,17 @@ void AppWindow::RenderAboutModal(const D2D1_RECT_F& rc) {
 }
 
 void AppWindow::RenderHelpModal(const D2D1_RECT_F& rc) {
-    float tabW = 140.0f;
+    float tabW = 132.0f;
     float tabH = 32.0f;
     const wchar_t* helpTabs[] = {
         TR(L"入力形式", L"Input Formats"),
         TR(L"数字接尾辞", L"Numeric Suffixes"),
-        TR(L"ショートカット", L"Shortcuts")
+        TR(L"コード記号", L"Chord Symbols"),
+        TR(L"キーボード", L"Keyboard"),
+        TR(L"マウス・操作", L"Mouse & Tools")
     };
 
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 5; ++i) {
         float tx = rc.left + i * (tabW + 8.0f);
         D2D1_RECT_F tRc = D2D1::RectF(tx, rc.top, tx + tabW, rc.top + tabH);
         DrawButton(tRc, helpTabs[i], IconType::None, false, false, m_helpActiveTab == i);
@@ -618,43 +620,125 @@ void AppWindow::RenderHelpModal(const D2D1_RECT_F& rc) {
             DrawTextSafe(suffixes[si].example, m_pFontInspector, D2D1::RectF(trRc.left + col1W + col2W + 8.0f, textY + 2.0f, trRc.right - 8.0f, textY + 20.0f), m_pBrushAccent);
             textY += 23.0f;
         }
-    } else {
-        // --- タブ2: ショートカットキー一覧 ---
+    } else if (m_helpActiveTab == 2) {
+        // --- タブ2: コード記号（通常コード名入力で使える表記） ---
+        D2D1_RECT_F gHead = D2D1::RectF(rc.left + pad, textY, rc.right - pad, textY + 22.0f);
+        DrawTextSafe(TR(L"通常コード名入力で使える表記です (ルートを C とした例)。数字接尾辞はこの上位互換として併用できます。", L"Notation usable in standard chord symbols (examples with root C). Numeric suffixes can be mixed in."), m_pFontInspector, gHead, m_pBrushTextMuted);
+        textY += 26.0f;
+
+        float col1W = 170.0f;
+        float col2W = 270.0f;
+        D2D1_RECT_F thRc = D2D1::RectF(rc.left + pad, textY, rc.right - pad, textY + 24.0f);
+        m_pRenderTarget->FillRectangle(thRc, m_pBrushBorderLight);
+        DrawTextSafe(TR(L"記号", L"Symbol"), m_pFontInspector, D2D1::RectF(thRc.left + 8.0f, textY + 2.0f, thRc.left + col1W, textY + 22.0f), m_pBrushText);
+        DrawTextSafe(TR(L"意味", L"Meaning"), m_pFontInspector, D2D1::RectF(thRc.left + col1W + 8.0f, textY + 2.0f, thRc.left + col1W + col2W, textY + 22.0f), m_pBrushText);
+        DrawTextSafe(TR(L"入力例", L"Example"), m_pFontInspector, D2D1::RectF(thRc.left + col1W + col2W + 8.0f, textY + 2.0f, thRc.right - 8.0f, textY + 22.0f), m_pBrushText);
+        textY += 26.0f;
+
+        struct SymbolItem {
+            const wchar_t* symbol;
+            const wchar_t* meaning;
+            const wchar_t* example;
+        };
+        SymbolItem symbols[] = {
+            { L"(なし) / m", TR(L"メジャー / マイナー", L"Major / Minor"), L"C   Cm" },
+            { L"7 / maj7 (M7, Δ7, ^7)", TR(L"ドミナント7th / メジャー7th", L"Dominant 7th / Major 7th"), L"C7   Cmaj7   CM7" },
+            { L"m7 / mM7", TR(L"マイナー7th / マイナーメジャー7th", L"Minor 7th / Minor-Major 7th"), L"Cm7   CmM7" },
+            { L"m7b5 (m7-5, ø, hdm)", TR(L"ハーフディミニッシュ", L"Half-Diminished"), L"Cm7b5   Cø" },
+            { L"dim7 (o7)", TR(L"ディミニッシュ7th", L"Diminished 7th"), L"Cdim7   Co7" },
+            { L"aug (+) / 7#5",TR(L"オーギュメント / オーギュメント7th", L"Augmented / Augmented 7th"), L"Caug   C+   C7#5" },
+            { L"sus2 / sus4", TR(L"サス2 / サス4", L"Suspended 2nd / 4th"), L"Csus2   Csus4" },
+            { L"7sus4 (7sus)", TR(L"ドミナント7th サス4", L"Dominant 7th sus4"), L"C7sus4" },
+            { L"add9", TR(L"アド9 (7thなし)", L"Added 9th (no 7th)"), L"Cadd9" },
+            { L"6 / m6", TR(L"シックス / マイナーシックス", L"Major 6th / Minor 6th"), L"C6   Cm6" },
+            { L"( ) テンション", TR(L"テンション追加 (9 b9 #9 11 #11 13 b13)", L"Tensions: 9 b9 #9 11 #11 13 b13"), L"C7(b9)   Fmaj7(9)   G7(#9,13)" },
+            { L"/ (スラッシュ)", TR(L"分数コード: 指定した音をベースにする", L"Slash chord: use the given note as the bass"), L"C/E   Am7/G   F/C" },
+            { L"# / b", TR(L"ルートの半音上げ / 下げ", L"Sharp / Flat root"), L"F#m7   Bbmaj7   Db" },
+            { L"R / N.C.", TR(L"休符", L"Rest"), L"| C R | N.C. |" }
+        };
+
+        for (size_t si = 0; si < sizeof(symbols) / sizeof(symbols[0]); ++si) {
+            D2D1_RECT_F trRc = D2D1::RectF(rc.left + pad, textY, rc.right - pad, textY + 22.0f);
+            if (si % 2 == 1) {
+                m_pRenderTarget->FillRectangle(trRc, m_pBrushCardBg);
+            }
+            DrawTextSafe(symbols[si].symbol, m_pFontButton, D2D1::RectF(trRc.left + 8.0f, textY + 2.0f, trRc.left + col1W, textY + 20.0f), m_pBrushText);
+            DrawTextSafe(symbols[si].meaning, m_pFontInspector, D2D1::RectF(trRc.left + col1W + 8.0f, textY + 2.0f, trRc.left + col1W + col2W, textY + 20.0f), m_pBrushText);
+            DrawTextSafe(symbols[si].example, m_pFontInspector, D2D1::RectF(trRc.left + col1W + col2W + 8.0f, textY + 2.0f, trRc.right - 8.0f, textY + 20.0f), m_pBrushAccent);
+            textY += 23.0f;
+        }
+    } else if (m_helpActiveTab == 3) {
+        // --- タブ3: キーボードショートカット一覧 ---
         struct ShortcutRow {
             const wchar_t* key;
             const wchar_t* func;
         };
         ShortcutRow sRows[] = {
-            { L"Space", TR(L"楽曲の再生 / 一時停止 (再生位置へタイムライン追従)", L"Play / Pause progression (auto-scrolls timeline)") },
-            { L"Esc", TR(L"停止 (先頭へリセット) / モーダルダイアログを閉じる", L"Stop playback (reset to start) / Close modal dialog") },
+            { L"Space", TR(L"再生 / 一時停止 (再生位置へタイムライン追従)", L"Play / Pause (timeline follows playhead)") },
+            { L"Enter", TR(L"再生位置を先頭へ戻す (再生中は先頭から再生を継続)", L"Return to start (keeps playing from the start)") },
+            { L"Esc", TR(L"停止 (先頭へリセット) / 選択解除 / ダイアログを閉じる", L"Stop (reset) / Clear selection / Close dialog") },
             { L"L", TR(L"ループ再生の ON / OFF 切替", L"Toggle loop playback ON / OFF") },
+            { TR(L"← / →", L"Left / Right"), TR(L"前 / 次のコードを選択して試聴", L"Select previous / next chord and audition") },
+            { TR(L"↑ / ↓", L"Up / Down"), TR(L"選択コードの転回形を 1 段ずつ切替 (基本形→第1→第2→第3 を巡回)", L"Cycle inversion of selected chord (Root > 1st > 2nd > 3rd)") },
+            { L"Ctrl / Shift + ↑ / ↓", TR(L"選択コードを1オクターブ上 / 下へ移動", L"Shift selected chord up / down one octave") },
             { L"Ctrl + Enter", TR(L"コード進行テキスト入力欄の内容をタイムラインへ即時反映", L"Apply chord progression text box to timeline") },
             { L"Ctrl + Z / Ctrl + Y", TR(L"元に戻す (Undo) / やり直し (Redo)", L"Undo / Redo") },
+            { L"Ctrl + C / X / V / A", TR(L"コピー / 切り取り / 貼り付け / 全選択", L"Copy / Cut / Paste / Select all") },
             { L"Ctrl + D", TR(L"選択中のコードカードを直後に複製", L"Duplicate selected chord card") },
-            { L"Delete / Backspace", TR(L"選択中のコードカードをタイムラインから削除", L"Delete selected chord card from timeline") },
-            { L"Ctrl + S", TR(L"プロジェクトを保存 (.chord)", L"Save project (.chord)") },
-            { L"Ctrl + O", TR(L"プロジェクトファイルを開く (.chord)", L"Open project file (.chord)") },
-            { L"Ctrl + T", TR(L"定番・ジャンル別コード進行テンプレート集を開く", L"Open progression templates dialog") },
+            { L"Delete / Backspace", TR(L"選択中のコードカードを削除", L"Delete selected chord card") },
+            { L"B", TR(L"選択中のコードカードを分割", L"Split selected chord card") },
+            { L"M", TR(L"再生ヘッド位置にマーカーを追加", L"Add marker at the playhead") },
+            { L"Ctrl + N / O", TR(L"新規作成 / プロジェクトを開く (.chord)", L"New / Open project (.chord)") },
+            { L"Ctrl + S / Ctrl + Shift + S", TR(L"プロジェクトを保存 / 名前を付けて保存", L"Save project / Save As") },
             { L"Ctrl + E", TR(L"標準 MIDI ファイル (.mid) をエクスポート保存", L"Export Standard MIDI File (.mid)") },
-            { TR(L"マウスホイール", L"Mouse Wheel"), TR(L"タイムラインの水平スクロール", L"Scroll timeline horizontally") },
-            { L"Ctrl + + / Ctrl + -", TR(L"タイムラインの横ズームイン / ズームアウト", L"Zoom timeline in / out horizontally") },
-            { TR(L"コード左右端ドラッグ", L"Drag Card Edge"), TR(L"コードカードの音価 (Tick時間長) をマウスで伸縮変更（小節線を越える跨ぎも可）", L"Resize chord card duration in ticks (can cross bar lines)") },
-            { L"Ctrl + Up / Down", TR(L"選択コードを1オクターブ上 / 下へ移動", L"Shift selected chord up / down one octave") },
-            { L"Ctrl + 1..5", TR(L"タイムライングリッド切替 (1小節 / 2拍 / 1拍 / 1/2拍 / 1/4拍)", L"Timeline grid preset (1 bar / 2 beats / 1 beat / 1/2 / 1/4)") },
-            { L"Ctrl + Shift + 1..5", TR(L"入力グリッド切替 (追加位置と音価)", L"Input grid preset (placement & length of new chords)") },
-            { TR(L"キー/スケール/BPM", L"Key/Scale/BPM"), TR(L"通常は同じ値のパートすべてに一括反映（異なる値のパートは不変）", L"Applies to every part sharing the old value (parts with other values stay)") },
-            { TR(L"Ctrl + キー/スケール/BPM", L"Ctrl + Key/Scale/BPM"), TR(L"Ctrl を押しながら変更すると選択中のパートのみ変更", L"Hold Ctrl while changing to affect only the selected part") }
+            { L"Ctrl + T / Ctrl + H", TR(L"テンプレート集を開く / このヘルプを開く", L"Open templates / Open this help") },
+            { L"Ctrl + + / - / 0", TR(L"タイムラインの横ズームイン / ズームアウト / 標準に戻す", L"Zoom timeline in / out / reset") },
+            { L"Ctrl (+Shift) + 1..5", TR(L"タイムライングリッド切替 (Shift併用で入力グリッド)", L"Timeline grid preset (with Shift: input grid)") }
         };
 
-        float col1W = 190.0f;
+        float col1W = 200.0f;
         for (size_t ki = 0; ki < sizeof(sRows) / sizeof(sRows[0]); ++ki) {
-            D2D1_RECT_F trRc = D2D1::RectF(rc.left + pad, textY, rc.right - pad, textY + 22.0f);
+            D2D1_RECT_F trRc = D2D1::RectF(rc.left + pad, textY, rc.right - pad, textY + 20.0f);
             if (ki % 2 == 1) {
                 m_pRenderTarget->FillRectangle(trRc, m_pBrushCardBg);
             }
-            DrawTextSafe(sRows[ki].key, m_pFontButton, D2D1::RectF(trRc.left + 8.0f, textY + 2.0f, trRc.left + col1W, textY + 20.0f), m_pBrushAccent);
-            DrawTextSafe(sRows[ki].func, m_pFontInspector, D2D1::RectF(trRc.left + col1W + 8.0f, textY + 2.0f, trRc.right - 8.0f, textY + 20.0f), m_pBrushText);
-            textY += 21.0f;
+            DrawTextSafe(sRows[ki].key, m_pFontButton, D2D1::RectF(trRc.left + 8.0f, textY + 1.0f, trRc.left + col1W, textY + 19.0f), m_pBrushAccent);
+            DrawTextSafe(sRows[ki].func, m_pFontInspector, D2D1::RectF(trRc.left + col1W + 8.0f, textY + 1.0f, trRc.right - 8.0f, textY + 19.0f), m_pBrushText);
+            textY += 20.0f;
+        }
+    } else {
+        // --- タブ4: マウス操作・画面ツール一覧 ---
+        struct MouseRow {
+            const wchar_t* key;
+            const wchar_t* func;
+        };
+        MouseRow mRows[] = {
+            { TR(L"コードカード クリック", L"Click chord card"), TR(L"コードを選択", L"Select the chord") },
+            { TR(L"カード本体ドラッグ", L"Drag card body"), TR(L"コードの移動 (小節をまたいで配置可能。グリッドにスナップ)", L"Move the chord (can cross bars, snaps to grid)") },
+            { TR(L"カード左右端ドラッグ", L"Drag card edge"), TR(L"音価(長さ)の伸縮。小節線を越える跨ぎも可能", L"Resize duration; can cross bar lines") },
+            { TR(L"提案カードをドラッグ", L"Drag palette card"), TR(L"左右ペインのコードをタイムラインへ追加", L"Add a suggested chord to the timeline") },
+            { TR(L"カード右クリック", L"Right-click card"), TR(L"転回形・ベース音・オクターブをメニューで指定", L"Menu: inversion, bass note, octave") },
+            { TR(L"ピアノロールの音符ドラッグ", L"Drag piano-roll note"), TR(L"構成音を上下ドラッグで1オクターブ単位に移動 (音名は不変)", L"Move a chord tone in whole octaves (pitch class kept)") },
+            { TR(L"ルーラー クリック/ドラッグ", L"Ruler click / drag"), TR(L"再生位置を移動 (シーク)", L"Seek the playhead") },
+            { TR(L"マーカー 右クリック", L"Right-click marker"), TR(L"マーカーの編集・削除 (追加は M キー)", L"Edit / delete marker (add with M)") },
+            { TR(L"パートタブ 右クリック", L"Right-click part tab"), TR(L"複製・削除・左右移動・名前変更", L"Duplicate, delete, move, rename part") },
+            { TR(L"マウスホイール", L"Mouse wheel"), TR(L"タイムラインを水平スクロール", L"Scroll timeline horizontally") },
+            { TR(L"上段 新規/開く/保存", L"Top-left icons"), TR(L"新規作成 / プロジェクトを開く / プロジェクト保存 (.chord)", L"New / Open / Save project (.chord)") },
+            { TR(L"MIDI保存 / DAWへドラッグ", L"Save MIDI / Drag to DAW"), TR(L"MIDIファイル出力 / DAWへMIDIを直接ドラッグ", L"Export MIDI file / drag MIDI into a DAW") },
+            { TR(L"アイコンにカーソル", L"Hover an icon"), TR(L"上段のTipsエリアにボタンの説明を表示", L"A description appears in the top tips area") },
+            { TR(L"キー/スケール/BPM", L"Key/Scale/BPM"), TR(L"リンクONなら変更前と同じ値のパートすべてに一括反映", L"With link ON, applies to every part sharing the old value") },
+            { TR(L"リンクボタン (下段右端)", L"Link button (bottom right)"), TR(L"一括反映のON/OFF。Ctrl押下中のみ一時的に反転", L"Toggle batch apply; hold Ctrl to invert temporarily") }
+        };
+
+        float col1W = 200.0f;
+        for (size_t mi = 0; mi < sizeof(mRows) / sizeof(mRows[0]); ++mi) {
+            D2D1_RECT_F trRc = D2D1::RectF(rc.left + pad, textY, rc.right - pad, textY + 20.0f);
+            if (mi % 2 == 1) {
+                m_pRenderTarget->FillRectangle(trRc, m_pBrushCardBg);
+            }
+            DrawTextSafe(mRows[mi].key, m_pFontButton, D2D1::RectF(trRc.left + 8.0f, textY + 1.0f, trRc.left + col1W, textY + 19.0f), m_pBrushAccent);
+            DrawTextSafe(mRows[mi].func, m_pFontInspector, D2D1::RectF(trRc.left + col1W + 8.0f, textY + 1.0f, trRc.right - 8.0f, textY + 19.0f), m_pBrushText);
+            textY += 20.0f;
         }
     }
 
@@ -772,7 +856,7 @@ void AppWindow::HandleTapTempo() {
 void AppWindow::ConfirmTapTempo() {
     Part* pActive = m_partManager.GetActivePart();
     if (pActive) {
-        const bool linked = (GetKeyState(VK_CONTROL) & 0x8000) == 0;
+        const bool linked = IsPartLinkActive();
         m_partManager.ApplyBpm(m_measuredBpm, linked);
     }
     CloseModal();
@@ -1331,9 +1415,9 @@ bool AppWindow::OnModalClick(float x, float y) {
             break;
         }
         case ModalType::Help: {
-            float tabW = 140.0f;
+            float tabW = 132.0f;
             float tabH = 32.0f;
-            for (int i = 0; i < 3; ++i) {
+            for (int i = 0; i < 5; ++i) {
                 float tx = bodyRc.left + i * (tabW + 8.0f);
                 if (PtInRectF(D2D1::RectF(tx, bodyRc.top, tx + tabW, bodyRc.top + tabH), x, y)) {
                     m_helpActiveTab = i;

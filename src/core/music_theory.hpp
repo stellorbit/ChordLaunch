@@ -5,6 +5,7 @@
 #include <string_view>
 #include <optional>
 #include <algorithm>
+#include <array>
 
 namespace clp {
 
@@ -83,6 +84,13 @@ struct ChordToken {
     bool isRest = false;       // 休符フラグ
     int inversion = 0;         // 転回形 (0: 基本形, 1: 第1転回, 2: 第2転回, 3: 第3転回)
     int octaveOffset = 0;      // コード単位のオクターブシフト (-3〜+3)
+    // 構成音ごとのオクターブ移動（ピアノロールのドラッグ）。添字は音名 (0=C〜11=B)、値は -3〜+3 オクターブ
+    std::array<int8_t, 12> toneShift{};
+
+    bool HasToneShift() const {
+        for (int8_t s : toneShift) { if (s != 0) return true; }
+        return false;
+    }
 
     // tick から拍数を更新するヘルパー
     void SetTicks(int ticks) {

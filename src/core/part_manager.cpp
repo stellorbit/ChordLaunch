@@ -455,6 +455,14 @@ std::string PartManager::SerializeProject(
                 ss << "              \"durationBeats\": " << c.durationBeats << ",\n";
                 ss << "              \"isRest\": " << (c.isRest ? "true" : "false") << ",\n";
                 ss << "              \"octaveOffset\": " << c.octaveOffset << ",\n";
+                ss << "              \"inversion\": " << c.inversion << ",\n";
+                if (c.HasToneShift()) {
+                    ss << "              \"toneShift\": \"";
+                    for (size_t k = 0; k < c.toneShift.size(); ++k) {
+                        ss << (k ? " " : "") << static_cast<int>(c.toneShift[k]);
+                    }
+                    ss << "\",\n";
+                }
                 ss << "              \"degreeRoman\": \"" << EscapeJsonString(c.degreeRoman) << "\"\n";
                 ss << "            }" << (ci + 1 < bar.chords.size() ? "," : "") << "\n";
             }
@@ -578,6 +586,7 @@ static ChordToken ParseChordJson(const std::string& obj, const Part& part) {
     int ticks = FindJsonInt(obj, "durationTicks", 0);
     int beats = FindJsonInt(obj, "durationBeats", 1);
     int octaveOffset = FindJsonInt(obj, "octaveOffset", 0);
+    int inversion = FindJsonInt(obj, "inversion", 0);
     bool isRest = LooksLikeJsonTrue(obj, "isRest");
 
     ChordToken tok;
@@ -616,6 +625,23 @@ static ChordToken ParseChordJson(const std::string& obj, const Part& part) {
 
     if (!degree.empty()) tok.degreeRoman = degree;
     if (!tok.isRest) tok.octaveOffset = std::clamp(octaveOffset, -3, 3);
+    if (!tok.isRest) tok.inversion = std::clamp(inversion, 0, 3);
+    if (!tok.isRest) {
+        // 空白区切りの12整数（欠落・不正値は 0 扱い、-3〜+3 にクランプ）
+        std::string shifts = FindJsonString(obj, "toneShift");
+        size_t pos = 0;
+        for (size_t k = 0; k < tok.toneShift.size() && pos < shifts.size(); ++k) {
+            while (pos < shifts.size() && shifts[pos] == ' ') ++pos;
+            size_t end = pos;
+            while (end < shifts.size() && shifts[end] != ' ') ++end;
+            if (end > pos) {
+                int v = 0;
+                try { v = std::stoi(shifts.substr(pos, end - pos)); } catch (...) { v = 0; }
+                tok.toneShift[k] = static_cast<int8_t>(std::clamp(v, -3, 3));
+            }
+            pos = end;
+        }
+    }
     if (ticks <= 0) ticks = std::max(1, beats) * TICKS_PER_BEAT;
     tok.SetTicks(ticks);
     return tok;
