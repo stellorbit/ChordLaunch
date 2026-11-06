@@ -12,7 +12,7 @@ void AppWindow::RenderModal(float width, float height) {
                 : ((m_activeModal == ModalType::About || m_activeModal == ModalType::Dashboard) ? std::min(560.0f, width - 40.0f) : std::min(740.0f, width - 40.0f));
     float cardH = (m_activeModal == ModalType::RenamePart) ? 240.0f
                 : ((m_activeModal == ModalType::TapTempo) ? 320.0f
-                : ((m_activeModal == ModalType::Dashboard) ? std::min(380.0f, height - 40.0f)
+                : ((m_activeModal == ModalType::Dashboard) ? std::min(480.0f, height - 40.0f)
                 : ((m_activeModal == ModalType::About) ? std::min(360.0f, height - 40.0f)
                 : ((m_activeModal == ModalType::Help) ? std::min(600.0f, height - 40.0f) : std::min(520.0f, height - 40.0f)))));
     float cardX = (width - cardW) * 0.5f;
@@ -114,60 +114,183 @@ void DrawCheckboxUI(
 
 } // namespace
 
-void AppWindow::RenderDashboardModal(const D2D1_RECT_F& rc) {
+AppWindow::DashboardLayout AppWindow::GetDashboardLayout(const D2D1_RECT_F& rc) const {
+    DashboardLayout L;
     float curY = rc.top;
 
-    // 1. 上部ボタングループ (新規作成 / 開く)
-    float btnW = (rc.right - rc.left - 16.0f) * 0.5f;
-    D2D1_RECT_F bNew = D2D1::RectF(rc.left, curY, rc.left + btnW, curY + 36.0f);
-    DrawButton(bNew, TR(L"新規プロジェクト作成", L"New Project"), IconType::Plus, false, false, true, Theme::AccentAction);
+    // 1. 新規プロジェクト (名前 + 保存先 + 作成)
+    // 上から 名前 → 保存先 → 作成 の順に配置
+    L.newBox = D2D1::RectF(rc.left, curY, rc.right, curY + 128.0f);
+    float fieldL = rc.left + 14.0f + 52.0f;
+    float fieldR = rc.right - 14.0f - 80.0f;
+    L.nameBox = D2D1::RectF(fieldL, curY + 28.0f, rc.right - 14.0f, curY + 52.0f);
+    L.dirBox = D2D1::RectF(fieldL, curY + 60.0f, fieldR, curY + 84.0f);
+    L.browseBtn = D2D1::RectF(rc.right - 88.0f, curY + 60.0f, rc.right - 14.0f, curY + 84.0f);
+    L.createBtn = D2D1::RectF(rc.right - 124.0f, curY + 92.0f, rc.right - 14.0f, curY + 118.0f);
+    curY += 136.0f;
 
-    D2D1_RECT_F bOpen = D2D1::RectF(rc.left + btnW + 16.0f, curY, rc.right, curY + 36.0f);
-    DrawButton(bOpen, TR(L"外部ファイルを開く...", L"Open File..."), IconType::None);
+    // 2. 最近開いたファイル見出し + ファイルを開く
+    L.recentTitle = D2D1::RectF(rc.left + 4.0f, curY + 2.0f, rc.left + 250.0f, curY + 24.0f);
+    L.openFileBtn = D2D1::RectF(rc.right - 140.0f, curY, rc.right, curY + 24.0f);
+    curY += 28.0f;
 
-    curY += 44.0f;
+    // 3. 一覧
+    float listH = std::max(60.0f, rc.bottom - curY - 44.0f);
+    L.listBox = D2D1::RectF(rc.left, curY, rc.right, curY + listH);
+    float perItem = L.itemH + L.itemGap;
+    size_t fit = static_cast<size_t>(std::max(0.0f, std::floor((listH - 8.0f) / perItem)));
+    L.maxItems = std::min<size_t>(m_recentFiles.size(), fit);
 
-    // 2. プロジェクト保存先フォルダ設定
-    D2D1_RECT_F pBox = D2D1::RectF(rc.left, curY, rc.right, curY + 56.0f);
-    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(pBox, 6.0f, 6.0f), m_pBrushBg);
-    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(pBox, 6.0f, 6.0f), m_pBrushBorderLight, 1.0f);
+    // 4. フッター
+    L.checkbox = D2D1::RectF(rc.left + 6.0f, rc.bottom - 32.0f, rc.left + 196.0f, rc.bottom - 4.0f);
+    L.openBtn = D2D1::RectF(rc.right - 222.0f, rc.bottom - 34.0f, rc.right - 120.0f, rc.bottom);
+    L.closeBtn = D2D1::RectF(rc.right - 110.0f, rc.bottom - 34.0f, rc.right, rc.bottom);
+    return L;
+}
 
-    D2D1_RECT_F pTitle = D2D1::RectF(rc.left + 14.0f, curY + 5.0f, rc.left + 350.0f, curY + 23.0f);
-    DrawTextSafe(TR(L"プロジェクト保存先フォルダ", L"Project Save Directory"), m_pFontCardTitle, pTitle, m_pBrushText);
+D2D1_RECT_F AppWindow::GetDashboardBodyRc() const {
+    float cardW = std::min(560.0f, m_width - 40.0f);
+    float cardH = std::min(480.0f, m_height - 40.0f);
+    float cardX = (m_width - cardW) * 0.5f;
+    float cardY = (m_height - cardH) * 0.5f;
+    return D2D1::RectF(cardX + 16.0f, cardY + 44.0f + 12.0f, cardX + cardW - 16.0f, cardY + cardH - 16.0f);
+}
 
-    D2D1_RECT_F pPathBox = D2D1::RectF(rc.left + 14.0f, curY + 27.0f, rc.right - 96.0f, curY + 49.0f);
-    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(pPathBox, 4.0f, 4.0f), m_pBrushCardBg);
-    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(pPathBox, 4.0f, 4.0f), m_pBrushBorderLight, 1.0f);
+int AppWindow::HitTestDashboardRecent(float x, float y) const {
+    DashboardLayout L = GetDashboardLayout(GetDashboardBodyRc());
+    if (m_recentFiles.empty() || !PtInRectF(L.listBox, x, y)) return -1;
+    for (size_t ri = 0; ri < L.maxItems; ++ri) {
+        float iy = L.listBox.top + 6.0f + ri * (L.itemH + L.itemGap);
+        D2D1_RECT_F itemRc = D2D1::RectF(L.listBox.left + 6.0f, iy, L.listBox.right - 6.0f, iy + L.itemH);
+        if (PtInRectF(itemRc, x, y)) return static_cast<int>(ri);
+    }
+    return -1;
+}
 
-    std::wstring displayProjDir = m_projectDirectory.empty() ? TR(L"(未設定 - 指定すると保存ダイアログの初期位置になります)", L"(Not set - Click browse to choose)") : m_projectDirectory;
-    D2D1_RECT_F pPathText = D2D1::RectF(pPathBox.left + 8.0f, pPathBox.top + 3.0f, pPathBox.right - 8.0f, pPathBox.bottom);
-    DrawTextSafe(displayProjDir, m_pFontInspector, pPathText, m_projectDirectory.empty() ? m_pBrushTextMuted : m_pBrushText);
+// 一時的に左揃えで描画する (フォントの既定は中央揃えのため)
+void AppWindow::DrawTextLeft(const std::wstring& text, IDWriteTextFormat* pFont, const D2D1_RECT_F& rc, ID2D1SolidColorBrush* pBrush) {
+    if (!pFont) return;
+    DWRITE_TEXT_ALIGNMENT prev = pFont->GetTextAlignment();
+    pFont->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    DrawTextSafe(text, pFont, rc, pBrush);
+    pFont->SetTextAlignment(prev);
+}
 
-    D2D1_RECT_F bBrowseProj = D2D1::RectF(rc.right - 88.0f, curY + 27.0f, rc.right - 14.0f, curY + 49.0f);
-    DrawButton(bBrowseProj, TR(L"参照...", L"Browse..."), IconType::None);
+// 入力欄の文字: 枠の高さ全体を基準に左寄せ・上下中央で描画する（フォント既定の揃え方に依存しない）
+void AppWindow::DrawTextInBox(const std::wstring& text, IDWriteTextFormat* pFont, const D2D1_RECT_F& box, ID2D1Brush* pBrush, float padX) {
+    if (!pFont || text.empty()) return;
+    const DWRITE_TEXT_ALIGNMENT prevH = pFont->GetTextAlignment();
+    const DWRITE_PARAGRAPH_ALIGNMENT prevV = pFont->GetParagraphAlignment();
+    const DWRITE_WORD_WRAPPING prevW = pFont->GetWordWrapping();
+    pFont->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    pFont->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    pFont->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    const D2D1_RECT_F rc = D2D1::RectF(box.left + padX, box.top, box.right - padX, box.bottom);
+    m_pRenderTarget->PushAxisAlignedClip(rc, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    DrawTextSafe(text, pFont, rc, pBrush);
+    m_pRenderTarget->PopAxisAlignedClip();
+    pFont->SetWordWrapping(prevW);
+    pFont->SetParagraphAlignment(prevV);
+    pFont->SetTextAlignment(prevH);
+}
 
-    curY += 64.0f;
+// DirectWrite による文字列の描画幅（測れない場合は 0）
+static float MeasureTextWidth(IDWriteFactory* pFactory, IDWriteTextFormat* pFont, const std::wstring& text) {
+    if (!pFactory || !pFont || text.empty()) return 0.0f;
+    IDWriteTextLayout* pLayout = nullptr;
+    if (FAILED(pFactory->CreateTextLayout(text.c_str(), static_cast<UINT32>(text.size()), pFont, 10000.0f, 100.0f, &pLayout)) || !pLayout) {
+        return 0.0f;
+    }
+    DWRITE_TEXT_METRICS metrics{};
+    pLayout->GetMetrics(&metrics);
+    pLayout->Release();
+    return metrics.widthIncludingTrailingWhitespace;
+}
 
-    // 3. 最近開いたファイル一覧 (Recent Projects)
-    D2D1_RECT_F rTitle = D2D1::RectF(rc.left + 4.0f, curY, rc.left + 350.0f, curY + 20.0f);
-    DrawTextSafe(TR(L"最近開いたファイル", L"Recent Projects"), m_pFontCardTitle, rTitle, m_pBrushText);
+// キーキャップ（kbd 風: 角丸の枠 + 下辺の影線）。x から描画し、右端 x を返す。maxRight を超える場合は描画しない
+float AppWindow::DrawKeyCap(const std::wstring& label, float x, float cy, float maxRight, bool large) {
+    IDWriteTextFormat* capFont = (large && m_pFontHelpKey) ? m_pFontHelpKey : m_pFontButton;
+    const float capH = large ? 22.0f : 17.0f;
+    const float textW = MeasureTextWidth(m_pDWriteFactory, capFont, label);
+    const float capW = std::max(large ? 26.0f : 20.0f, textW + (large ? 16.0f : 12.0f));
+    if (x + capW > maxRight) return maxRight;
 
-    curY += 22.0f;
+    const D2D1_RECT_F cap = D2D1::RectF(x, cy - capH * 0.5f, x + capW, cy + capH * 0.5f);
+    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(cap, 3.0f, 3.0f), m_pBrushBg);
+    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(cap, 3.0f, 3.0f), m_pBrushBorder, 1.0f);
+    // 下辺を太くして押せるキーらしく見せる
+    m_pRenderTarget->DrawLine(D2D1::Point2F(cap.left + 3.0f, cap.bottom + 0.5f), D2D1::Point2F(cap.right - 3.0f, cap.bottom + 0.5f), m_pBrushBorder, 2.0f);
+    DrawTextSafe(label, capFont, cap, m_pBrushText);
+    return cap.right;
+}
 
-    float rListH = rc.bottom - curY - 40.0f;
-    D2D1_RECT_F rListBox = D2D1::RectF(rc.left, curY, rc.right, curY + rListH);
-    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(rListBox, 6.0f, 6.0f), m_pBrushBg);
-    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(rListBox, 6.0f, 6.0f), m_pBrushBorderLight, 1.0f);
+// "[Ctrl] + [Z]  /  [Ctrl] + [Y]" のように、[ ] 内をキーキャップ、その外を通常文字として左から順に描画する
+void AppWindow::DrawKeyCombo(const std::wstring& combo, float x, float cy, float maxRight, bool large) {
+    IDWriteTextFormat* plainFont = (large && m_pFontHelp) ? m_pFontHelp : m_pFontInspector;
+    size_t i = 0;
+    float curX = x;
+    while (i < combo.size() && curX < maxRight) {
+        if (combo[i] == L'[') {
+            const size_t close = combo.find(L']', i + 1);
+            if (close == std::wstring::npos) break;
+            curX = DrawKeyCap(combo.substr(i + 1, close - i - 1), curX, cy, maxRight, large) + (large ? 4.0f : 3.0f);
+            i = close + 1;
+        } else {
+            size_t next = combo.find(L'[', i);
+            if (next == std::wstring::npos) next = combo.size();
+            const std::wstring seg = combo.substr(i, next - i);
+            const float w = MeasureTextWidth(m_pDWriteFactory, plainFont, seg);
+            const D2D1_RECT_F segRc = D2D1::RectF(curX, cy - 12.0f, std::min(maxRight, curX + w + 2.0f), cy + 12.0f);
+            DrawTextInBox(seg, plainFont, segRc, large ? m_pBrushText : m_pBrushTextMuted, 0.0f);
+            curX += w;
+            i = next;
+        }
+    }
+}
+
+void AppWindow::RenderDashboardModal(const D2D1_RECT_F& rc) {
+    DashboardLayout L = GetDashboardLayout(rc);
+
+    // 1. 新規プロジェクト項目
+    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(L.newBox, 6.0f, 6.0f), m_pBrushBg);
+    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(L.newBox, 6.0f, 6.0f), m_pBrushBorderLight, 1.0f);
+
+    D2D1_RECT_F nTitle = D2D1::RectF(rc.left + 14.0f, L.newBox.top + 5.0f, rc.left + 350.0f, L.newBox.top + 25.0f);
+    DrawTextLeft(TR(L"新規プロジェクト", L"New Project"), m_pFontCardTitle, nTitle, m_pBrushText);
+
+    D2D1_RECT_F nameLbl = D2D1::RectF(rc.left, L.nameBox.top, L.nameBox.left - 4.0f, L.nameBox.bottom);
+    DrawTextInBox(TR(L"名前", L"Name"), m_pFontInspector, nameLbl, m_pBrushText, 14.0f);
+    D2D1_RECT_F dirLbl = D2D1::RectF(rc.left, L.dirBox.top, L.dirBox.left - 4.0f, L.dirBox.bottom);
+    DrawTextInBox(TR(L"保存先", L"Folder"), m_pFontInspector, dirLbl, m_pBrushText, 14.0f);
+
+    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(L.nameBox, 4.0f, 4.0f), m_pBrushCardBg);
+    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(L.nameBox, 4.0f, 4.0f), m_dashNameFocused ? m_pBrushAccent : m_pBrushBorderLight, m_dashNameFocused ? 1.5f : 1.0f);
+    std::wstring nameText = m_dashNewName + (m_dashNameFocused ? L"|" : L"");
+    DrawTextInBox(nameText, m_pFontInspector, L.nameBox, m_pBrushText, 8.0f);
+
+    DrawButton(L.createBtn, TR(L"作成", L"Create"), IconType::None, false, false, true, Theme::AccentAction);
+
+    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(L.dirBox, 4.0f, 4.0f), m_pBrushCardBg);
+    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(L.dirBox, 4.0f, 4.0f), m_pBrushBorderLight, 1.0f);
+    std::wstring displayProjDir = m_projectDirectory.empty() ? TR(L"(未設定 - 参照...で指定)", L"(Not set - click Browse)") : m_projectDirectory;
+    DrawTextInBox(displayProjDir, m_pFontInspector, L.dirBox, m_projectDirectory.empty() ? m_pBrushTextMuted : m_pBrushText, 8.0f);
+    DrawButton(L.browseBtn, TR(L"参照...", L"Browse..."), IconType::None);
+
+    // 2. 最近開いたファイル
+    DrawTextLeft(TR(L"最近開いたファイル", L"Recent Projects"), m_pFontCardTitle, L.recentTitle, m_pBrushText);
+    DrawButton(L.openFileBtn, TR(L"ファイルを開く...", L"Open File..."), IconType::None);
+
+    float rListH = L.listBox.bottom - L.listBox.top;
+    m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(L.listBox, 6.0f, 6.0f), m_pBrushBg);
+    m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(L.listBox, 6.0f, 6.0f), m_pBrushBorderLight, 1.0f);
 
     if (m_recentFiles.empty()) {
-        D2D1_RECT_F emptyRc = D2D1::RectF(rListBox.left, rListBox.top + rListH * 0.4f, rListBox.right, rListBox.top + rListH * 0.6f);
+        D2D1_RECT_F emptyRc = D2D1::RectF(L.listBox.left, L.listBox.top + rListH * 0.4f, L.listBox.right, L.listBox.top + rListH * 0.6f);
         DrawTextSafe(TR(L"最近開いたプロジェクトはありません", L"No recent projects found"), m_pFontModalBody, emptyRc, m_pBrushTextMuted);
     } else {
-        float itemH = 32.0f;
-        size_t maxItems = std::min<size_t>(m_recentFiles.size(), static_cast<size_t>(std::floor((rListH - 8.0f) / (itemH + 2.0f))));
-        for (size_t ri = 0; ri < maxItems; ++ri) {
-            float iy = rListBox.top + 6.0f + ri * (itemH + 2.0f);
-            D2D1_RECT_F itemRc = D2D1::RectF(rListBox.left + 6.0f, iy, rListBox.right - 6.0f, iy + itemH);
+        for (size_t ri = 0; ri < L.maxItems; ++ri) {
+            float iy = L.listBox.top + 6.0f + ri * (L.itemH + L.itemGap);
+            D2D1_RECT_F itemRc = D2D1::RectF(L.listBox.left + 6.0f, iy, L.listBox.right - 6.0f, iy + L.itemH);
 
             bool isSel = (static_cast<int>(ri) == m_dashboardSelectedRecentIndex);
             if (isSel) {
@@ -179,28 +302,22 @@ void AppWindow::RenderDashboardModal(const D2D1_RECT_F& rc) {
             std::wstring fName = fp.filename().wstring();
             std::wstring fDir = NormalizePathString(fp.parent_path().wstring());
 
-            D2D1_RECT_F nameRc = D2D1::RectF(itemRc.left + 10.0f, itemRc.top + 6.0f, itemRc.left + 220.0f, itemRc.bottom - 6.0f);
-            DrawTextSafe(fName, m_pFontTab, nameRc, isSel ? m_pBrushAccent : m_pBrushText);
+            D2D1_RECT_F nameRc = D2D1::RectF(itemRc.left + 10.0f, itemRc.top + 4.0f, itemRc.right - 10.0f, itemRc.top + 24.0f);
+            DrawTextLeft(fName, m_pFontTab, nameRc, isSel ? m_pBrushAccent : m_pBrushText);
 
-            D2D1_RECT_F dirRc = D2D1::RectF(itemRc.left + 230.0f, itemRc.top + 8.0f, itemRc.right - 80.0f, itemRc.bottom - 6.0f);
+            D2D1_RECT_F dirRc = D2D1::RectF(itemRc.left + 10.0f, itemRc.top + 25.0f, itemRc.right - 10.0f, itemRc.bottom - 3.0f);
             DrawTextSafe(fDir, m_pFontInspector, dirRc, m_pBrushTextMuted);
-
-            D2D1_RECT_F bOpenItem = D2D1::RectF(itemRc.right - 72.0f, itemRc.top + 4.0f, itemRc.right - 6.0f, itemRc.bottom - 4.0f);
-            DrawButton(bOpenItem, TR(L"開く", L"Open"), IconType::None, false, false, isSel, isSel ? Theme::AccentAction : D2D1_COLOR_F{0, 0, 0, 0});
         }
     }
 
-    // 4. フッター (起動時表示チェックボックス & 選択項目を開く & 閉じるボタン)
-    D2D1_RECT_F chkRc = D2D1::RectF(rc.left + 6.0f, rc.bottom - 32.0f, rc.left + 196.0f, rc.bottom - 4.0f); // 右の「選択したプロジェクトを開く」(rc.right-310 から) と重ならない幅
-    DrawCheckboxUI(m_pRenderTarget, m_pFontInspector, m_pBrushText, m_pBrushBorderLight, m_pBrushAccent, chkRc, m_showDashboardOnStartup, TR(L"起動時に表示", L"Show on startup"));
+    // 3. フッター
+    DrawCheckboxUI(m_pRenderTarget, m_pFontInspector, m_pBrushText, m_pBrushBorderLight, m_pBrushAccent, L.checkbox, m_showDashboardOnStartup, TR(L"起動時に表示", L"Show on startup"));
 
     if (m_dashboardSelectedRecentIndex >= 0 && m_dashboardSelectedRecentIndex < static_cast<int>(m_recentFiles.size())) {
-        D2D1_RECT_F bOpenSel = D2D1::RectF(rc.right - 310.0f, rc.bottom - 34.0f, rc.right - 120.0f, rc.bottom);
-        DrawButton(bOpenSel, TR(L"選択したプロジェクトを開く", L"Open Selected Project"), IconType::None, false, false, true, Theme::AccentAction);
+        DrawButton(L.openBtn, TR(L"開く", L"Open"), IconType::None, false, false, true, Theme::AccentAction);
     }
 
-    D2D1_RECT_F bClose = D2D1::RectF(rc.right - 110.0f, rc.bottom - 34.0f, rc.right, rc.bottom);
-    DrawButton(bClose, TR(L"閉じる", L"Close"), IconType::None);
+    DrawButton(L.closeBtn, TR(L"閉じる", L"Close"), IconType::None);
 }
 
 void AppWindow::RenderSettingsModal(const D2D1_RECT_F& rc) {
@@ -266,8 +383,7 @@ void AppWindow::RenderSettingsModal(const D2D1_RECT_F& rc) {
     m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(projPathBox, 4.0f, 4.0f), m_pBrushBorderLight, 1.0f);
 
     std::wstring displayProjDir = m_projectDirectory.empty() ? TR(L"(未設定 - 指定すると保存ダイアログの初期位置になります)", L"(Not set - Click browse to choose)") : m_projectDirectory;
-    D2D1_RECT_F projPathText = D2D1::RectF(projPathBox.left + 8.0f, projPathBox.top + 3.0f, projPathBox.right - 8.0f, projPathBox.bottom);
-    DrawTextSafe(displayProjDir, m_pFontInspector, projPathText, m_projectDirectory.empty() ? m_pBrushTextMuted : m_pBrushText);
+    DrawTextInBox(displayProjDir, m_pFontInspector, projPathBox, m_projectDirectory.empty() ? m_pBrushTextMuted : m_pBrushText, 8.0f);
 
     D2D1_RECT_F bBrowseProj = D2D1::RectF(rc.right - 88.0f, curY + 30.0f, rc.right - 14.0f, curY + 54.0f);
     DrawButton(bBrowseProj, TR(L"参照...", L"Browse..."), IconType::None);
@@ -292,8 +408,7 @@ void AppWindow::RenderSettingsModal(const D2D1_RECT_F& rc) {
     m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(bakPathBox, 4.0f, 4.0f), m_pBrushBorderLight, 1.0f);
 
     std::wstring displayBakDir = isCustomBakGrayed ? TR(L"(プロジェクトフォルダ内の Project Backup に自動保存されます)", L"(Automatically stored in project's Backup folder)") : (m_autoBackupDirectory.empty() ? TR(L"(未設定 - LocalAppData/ChordLaunch/AutoBackup に保存)", L"(Not set - Uses default AppData)") : m_autoBackupDirectory);
-    D2D1_RECT_F bakPathText = D2D1::RectF(bakPathBox.left + 8.0f, bakPathBox.top + 3.0f, bakPathBox.right - 8.0f, bakPathBox.bottom);
-    DrawTextSafe(displayBakDir, m_pFontInspector, bakPathText, m_pBrushTextMuted);
+    DrawTextInBox(displayBakDir, m_pFontInspector, bakPathBox, m_pBrushTextMuted, 8.0f);
 
     D2D1_RECT_F bBrowseBak = D2D1::RectF(rc.right - 88.0f, curY + 62.0f, rc.right - 14.0f, curY + 86.0f);
     if (isCustomBakGrayed) {
@@ -445,7 +560,7 @@ void AppWindow::RenderTemplatesModal(const D2D1_RECT_F& rc) {
         D2D1_RECT_F boxName = D2D1::RectF(fx + 20.0f, fy + 70.0f, fx + formW - 20.0f, fy + 102.0f);
         m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(boxName, 4.0f, 4.0f), m_pBrushCardBg);
         m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(boxName, 4.0f, 4.0f), (m_tmplEditFocusField == 0) ? m_pBrushAccent : m_pBrushBorderLight, (m_tmplEditFocusField == 0) ? 2.0f : 1.0f);
-        DrawTextSafe(m_tmplEditName.empty() ? TR(L"(名前を入力)", L"(Enter template name)") : m_tmplEditName, m_pFontButton, D2D1::RectF(boxName.left + 8.0f, boxName.top + 6.0f, boxName.right - 8.0f, boxName.bottom), m_tmplEditName.empty() ? m_pBrushTextMuted : m_pBrushText);
+        DrawTextInBox(m_tmplEditName.empty() ? TR(L"(名前を入力)", L"(Enter template name)") : m_tmplEditName, m_pFontButton, boxName, m_tmplEditName.empty() ? m_pBrushTextMuted : m_pBrushText, 8.0f);
 
         // 2. コード進行
         D2D1_RECT_F lProg = D2D1::RectF(fx + 20.0f, fy + 112.0f, fx + formW - 20.0f, fy + 130.0f);
@@ -453,7 +568,7 @@ void AppWindow::RenderTemplatesModal(const D2D1_RECT_F& rc) {
         D2D1_RECT_F boxProg = D2D1::RectF(fx + 20.0f, fy + 132.0f, fx + formW - 20.0f, fy + 164.0f);
         m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(boxProg, 4.0f, 4.0f), m_pBrushCardBg);
         m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(boxProg, 4.0f, 4.0f), (m_tmplEditFocusField == 1) ? m_pBrushAccent : m_pBrushBorderLight, (m_tmplEditFocusField == 1) ? 2.0f : 1.0f);
-        DrawTextSafe(m_tmplEditProg.empty() ? TR(L"(コード進行を入力)", L"(Enter chord progression)") : m_tmplEditProg, m_pFontButton, D2D1::RectF(boxProg.left + 8.0f, boxProg.top + 6.0f, boxProg.right - 8.0f, boxProg.bottom), m_tmplEditProg.empty() ? m_pBrushTextMuted : m_pBrushAccent);
+        DrawTextInBox(m_tmplEditProg.empty() ? TR(L"(コード進行を入力)", L"(Enter chord progression)") : m_tmplEditProg, m_pFontButton, boxProg, m_tmplEditProg.empty() ? m_pBrushTextMuted : m_pBrushAccent, 8.0f);
 
         // 3. 説明文
         D2D1_RECT_F lDesc = D2D1::RectF(fx + 20.0f, fy + 174.0f, fx + formW - 20.0f, fy + 192.0f);
@@ -461,7 +576,7 @@ void AppWindow::RenderTemplatesModal(const D2D1_RECT_F& rc) {
         D2D1_RECT_F boxDesc = D2D1::RectF(fx + 20.0f, fy + 194.0f, fx + formW - 20.0f, fy + 226.0f);
         m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(boxDesc, 4.0f, 4.0f), m_pBrushCardBg);
         m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(boxDesc, 4.0f, 4.0f), (m_tmplEditFocusField == 2) ? m_pBrushAccent : m_pBrushBorderLight, (m_tmplEditFocusField == 2) ? 2.0f : 1.0f);
-        DrawTextSafe(m_tmplEditDesc.empty() ? TR(L"(説明文を入力)", L"(Enter description)") : m_tmplEditDesc, m_pFontButton, D2D1::RectF(boxDesc.left + 8.0f, boxDesc.top + 6.0f, boxDesc.right - 8.0f, boxDesc.bottom), m_tmplEditDesc.empty() ? m_pBrushTextMuted : m_pBrushText);
+        DrawTextInBox(m_tmplEditDesc.empty() ? TR(L"(説明文を入力)", L"(Enter description)") : m_tmplEditDesc, m_pFontButton, boxDesc, m_tmplEditDesc.empty() ? m_pBrushTextMuted : m_pBrushText, 8.0f);
 
         // フォームボタン (保存 / キャンセル)
         D2D1_RECT_F bFSave = D2D1::RectF(fx + formW - 140.0f, fy + formH - 46.0f, fx + formW - 20.0f, fy + formH - 14.0f);
@@ -505,10 +620,7 @@ void AppWindow::RenderAboutModal(const D2D1_RECT_F& rc) {
     DrawTextSafe(std::wstring(TR(L"リポジトリ: ", L"Repository: ")) + CHORDLAUNCH_REPO_URL_WSTR,
                  m_pFontInspector, D2D1::RectF(rc.left, y, rc.right, y + 20.0f), m_pBrushTextMuted);
 
-    // 下部アクションボタン (ヘルプと同じ配置)
-    D2D1_RECT_F bDoc = D2D1::RectF(rc.left, rc.bottom - 36.0f, rc.left + 260.0f, rc.bottom);
-    DrawButton(bDoc, TR(L"オンラインドキュメント (GitHub)", L"Online Documentation (GitHub)"), IconType::None);
-
+    // 下部アクションボタン
     D2D1_RECT_F bClose = D2D1::RectF(rc.right - 100.0f, rc.bottom - 36.0f, rc.right, rc.bottom);
     DrawButton(bClose, TR(L"閉じる", L"Close"), IconType::None);
 }
@@ -538,6 +650,20 @@ void AppWindow::RenderHelpModal(const D2D1_RECT_F& rc) {
     float textY = bodyY + 12.0f;
     float pad = 16.0f;
 
+    // 表の罫線: 外枠・行区切り・列区切り（colX は表左端からの各列開始位置）
+    auto drawTableGrid = [&](float left, float top, float width, float rowH, int rows, const float* colX, int cols) {
+        const float bottom = top + rowH * static_cast<float>(rows);
+        m_pRenderTarget->DrawRectangle(D2D1::RectF(left, top, left + width, bottom), m_pBrushBorder, 1.0f);
+        for (int r = 1; r < rows; ++r) {
+            const float ly = top + rowH * static_cast<float>(r);
+            m_pRenderTarget->DrawLine(D2D1::Point2F(left, ly), D2D1::Point2F(left + width, ly), m_pBrushBorderLight, 1.0f);
+        }
+        for (int c = 1; c < cols; ++c) {
+            const float lx = left + colX[c];
+            m_pRenderTarget->DrawLine(D2D1::Point2F(lx, top), D2D1::Point2F(lx, bottom), m_pBrushBorderLight, 1.0f);
+        }
+    };
+
     if (m_helpActiveTab == 0) {
         // --- タブ0: 入力形式 ---
         struct InputItem {
@@ -545,81 +671,126 @@ void AppWindow::RenderHelpModal(const D2D1_RECT_F& rc) {
             const wchar_t* example;
             const wchar_t* desc;
         };
-        InputItem items[] = {
-            { TR(L"1. 通常コード名入力", L"1. Standard Chord Symbols"),
-              TR(L"C G Am F    または    Fmaj7 E7 Am7 C7", L"C G Am F    or    Fmaj7 E7 Am7 C7"),
-              TR(L"標準的なコードシンボルを半角スペース区切りで並べて入力します。小節線 | を使用できます。", L"Enter standard chord symbols separated by spaces. Use | for bar lines.") },
-            { TR(L"2. ディグリー入力 (ローマ数字)", L"2. Roman Numeral Degrees"),
-              TR(L"IVmaj7 III7 vim7 I7    または    I V vi IV", L"IVmaj7 III7 vim7 I7    or    I V vi IV"),
-              TR(L"大文字でメジャー系、小文字でマイナー系コードを解釈します。現在キーに基づいて実音コードへ変換されます。", L"Uppercase for major, lowercase for minor. Automatically transposed to the active key.") },
-            { TR(L"3. アラビア数字短縮入力 (爆速入力)", L"3. Fast Numeric Shorthand"),
-              TR(L"4mas 3svn 6mis 1svn    または    1 5 6 4", L"4mas 3svn 6mis 1svn    or    1 5 6 4"),
-              TR(L"度数＋接尾辞（例: mas=maj7, svn=7, mis=m7）でブラインドタッチによる超高速入力が可能です。", L"Combine scale degree numbers + suffixes (mas=maj7, svn=7, mis=m7) for rapid entry.") },
-            { TR(L"4. 記号 (小節線・持続・リピート・休符)", L"4. Symbols (Bar, Tie, Repeat, Rest)"),
-              TR(L"| : 小節区切り    - : タイ持続    % / = : 直前リピート    R / N.C. : 休符", L"| : Bar line    - : Tie / Hold    % / = : Repeat previous    R / N.C. : Rest"),
-              TR(L"例: | Fmaj7 - - - | E7 - - - | Am7 - - - | C7 - - - |", L"Example: | Fmaj7 - - - | E7 - - - | Am7 - - - | C7 - - - |") }
-        };
-
-        for (const auto& it : items) {
-            D2D1_RECT_F cardRc = D2D1::RectF(rc.left + pad, textY, rc.right - pad, textY + 68.0f);
+        auto drawItemCard = [&](const InputItem& it, float cardH) -> D2D1_RECT_F {
+            D2D1_RECT_F cardRc = D2D1::RectF(rc.left + pad, textY, rc.right - pad, textY + cardH);
             m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(cardRc, 4.0f, 4.0f), m_pBrushCardBg);
             m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(cardRc, 4.0f, 4.0f), m_pBrushBorderLight, 0.8f);
-
-            D2D1_RECT_F tR = D2D1::RectF(cardRc.left + 10.0f, cardRc.top + 6.0f, cardRc.right - 10.0f, cardRc.top + 24.0f);
-            DrawTextSafe(it.title, m_pFontButton, tR, m_pBrushText);
-
-            D2D1_RECT_F eR = D2D1::RectF(cardRc.left + 10.0f, cardRc.top + 26.0f, cardRc.right - 10.0f, cardRc.top + 44.0f);
-            DrawTextSafe(it.example, m_pFontCardTitle, eR, m_pBrushAccent);
-
-            D2D1_RECT_F dR = D2D1::RectF(cardRc.left + 10.0f, cardRc.top + 46.0f, cardRc.right - 10.0f, cardRc.top + 64.0f);
-            DrawTextSafe(it.desc, m_pFontInspector, dR, m_pBrushTextMuted);
-
+            DrawTextInBox(it.title, m_pFontButton, D2D1::RectF(cardRc.left, cardRc.top + 6.0f, cardRc.right, cardRc.top + 24.0f), m_pBrushText, 10.0f);
+            return cardRc;
+        };
+        auto drawSimpleItem = [&](const InputItem& it) {
+            D2D1_RECT_F cardRc = drawItemCard(it, 68.0f);
+            DrawTextInBox(it.example, m_pFontCardTitle, D2D1::RectF(cardRc.left, cardRc.top + 26.0f, cardRc.right, cardRc.top + 44.0f), m_pBrushAccent, 10.0f);
+            DrawTextInBox(it.desc, m_pFontInspector, D2D1::RectF(cardRc.left, cardRc.top + 46.0f, cardRc.right, cardRc.top + 64.0f), m_pBrushTextMuted, 10.0f);
             textY += 74.0f;
-        }
-    } else if (m_helpActiveTab == 1) {
-        // --- タブ1: 数字接尾辞一覧 (3列表形式) ---
-        D2D1_RECT_F gHead = D2D1::RectF(rc.left + pad, textY, rc.right - pad, textY + 22.0f);
-        DrawTextSafe(TR(L"アラビア数字の直後に入力することでコード品質を瞬時に指定できます (Key: Cの場合):", L"Type immediately after an Arabic numeral to specify chord quality (Example in Key of C):"), m_pFontInspector, gHead, m_pBrushTextMuted);
-        textY += 26.0f;
+        };
 
-        // 表ヘッダー
-        float col1W = 160.0f;
-        float col2W = 240.0f;
-        D2D1_RECT_F thRc = D2D1::RectF(rc.left + pad, textY, rc.right - pad, textY + 24.0f);
-        m_pRenderTarget->FillRectangle(thRc, m_pBrushBorderLight);
-        DrawTextSafe(TR(L"短縮接尾辞", L"Shorthand"), m_pFontInspector, D2D1::RectF(thRc.left + 8.0f, textY + 2.0f, thRc.left + col1W, textY + 22.0f), m_pBrushText);
-        DrawTextSafe(TR(L"コード品質 (Quality)", L"Chord Quality"), m_pFontInspector, D2D1::RectF(thRc.left + col1W + 8.0f, textY + 2.0f, thRc.left + col1W + col2W, textY + 22.0f), m_pBrushText);
-        DrawTextSafe(TR(L"変換例 (Key: C)", L"Example (Key: C)"), m_pFontInspector, D2D1::RectF(thRc.left + col1W + col2W + 8.0f, textY + 2.0f, thRc.right - 8.0f, textY + 22.0f), m_pBrushText);
-        textY += 26.0f;
+        drawSimpleItem({ TR(L"1. 通常コード名入力", L"1. Standard Chord Symbols"),
+              TR(L"C G Am F    または    Fmaj7 E7 Am7 C7", L"C G Am F    or    Fmaj7 E7 Am7 C7"),
+              TR(L"標準的なコードシンボルを半角スペース区切りで並べて入力します。小節線 | を使用できます。", L"Enter standard chord symbols separated by spaces. Use | for bar lines.") });
+        drawSimpleItem({ TR(L"2. ディグリー入力 (ローマ数字)", L"2. Roman Numeral Degrees"),
+              TR(L"IVmaj7 III7 vim7 I7    または    I V vi IV", L"IVmaj7 III7 vim7 I7    or    I V vi IV"),
+              TR(L"大文字でメジャー系、小文字でマイナー系コードを解釈します。現在キーに基づいて実音コードへ変換されます。", L"Uppercase for major, lowercase for minor. Automatically transposed to the active key.") });
+
+        // 3. アラビア数字入力: コマンド入力・通常記号入力・複合入力・数字のみ を「入力 → 結果」の表で示す
+        {
+            const float tblRowH = 20.0f;
+            const int tblRows = 5; // 見出し + 4行
+            const float cardH = 30.0f + tblRowH * tblRows + 30.0f;
+            D2D1_RECT_F cardRc = drawItemCard({ TR(L"3. アラビア数字入力 (度数＋接尾辞)", L"3. Arabic Numeral Input (Degree + Suffix)"), L"", L"" }, cardH);
+            const float tblLeft = cardRc.left + 10.0f;
+            const float tblW = (cardRc.right - cardRc.left) - 20.0f;
+            const float tblTop = cardRc.top + 28.0f;
+            const float colX[3] = { 0.0f, tblW * 0.22f, tblW * 0.62f };
+            m_pRenderTarget->FillRectangle(D2D1::RectF(tblLeft + 1.0f, tblTop + 1.0f, tblLeft + tblW - 1.0f, tblTop + tblRowH), m_pBrushBorderLight);
+            drawTableGrid(tblLeft, tblTop, tblW, tblRowH, tblRows, colX, 3);
+
+            struct NumRow { const wchar_t* kind; const wchar_t* input; const wchar_t* result; };
+            const NumRow numRows[] = {
+                { TR(L"種類", L"Type"), TR(L"入力 (Key: C)", L"Input (Key: C)"), TR(L"変換結果", L"Result") },
+                { TR(L"コマンド入力", L"Command suffix"), L"4mas 3svn 6mis 1", L"FMaj7 E7 Am7 C" },
+                { TR(L"通常の記号", L"Standard symbols"), L"4M7 37 6m7 1", L"FMaj7 E7 Am7 C" },
+                { TR(L"複合入力", L"Mixed input"), L"4M7 E7 6m7 C", L"FMaj7 E7 Am7 C" },
+                { TR(L"数字のみ", L"Numbers only"), L"1 5 6 4", L"C G Am F" }
+            };
+            for (int r = 0; r < tblRows; ++r) {
+                const float ry = tblTop + tblRowH * static_cast<float>(r);
+                const bool head = (r == 0);
+                IDWriteTextFormat* f = head ? m_pFontInspector : m_pFontButton;
+                DrawTextInBox(numRows[r].kind, f, D2D1::RectF(tblLeft + colX[0], ry, tblLeft + colX[1], ry + tblRowH), m_pBrushText, 8.0f);
+                DrawTextInBox(numRows[r].input, f, D2D1::RectF(tblLeft + colX[1], ry, tblLeft + colX[2], ry + tblRowH), head ? m_pBrushText : m_pBrushAccent, 8.0f);
+                DrawTextInBox(numRows[r].result, f, D2D1::RectF(tblLeft + colX[2], ry, tblLeft + tblW, ry + tblRowH), head ? m_pBrushText : m_pBrushAccent, 8.0f);
+            }
+            DrawTextInBox(TR(L"度数(1〜7)の直後に接尾辞を続けます。通常コード名と同じ行に混在できます (接尾辞の一覧は「数字接尾辞」タブ)。",
+                             L"Follow the degree (1-7) with a suffix. Mixing with standard chord names on one line is fine (see the Numeric Suffixes tab)."),
+                          m_pFontInspector, D2D1::RectF(cardRc.left, tblTop + tblRowH * tblRows + 4.0f, cardRc.right, cardRc.bottom - 2.0f), m_pBrushTextMuted, 10.0f);
+            textY += cardH + 6.0f;
+        }
+
+        drawSimpleItem({ TR(L"4. 記号 (小節線・持続・リピート・休符)", L"4. Symbols (Bar, Tie, Repeat, Rest)"),
+              TR(L"| : 小節区切り    - : タイ持続    % / = : 直前リピート    R / N.C. : 休符", L"| : Bar line    - : Tie / Hold    % / = : Repeat previous    R / N.C. : Rest"),
+              TR(L"例: | Fmaj7 - - - | E7 - - - | Am7 - - - | C7 - - - |", L"Example: | Fmaj7 - - - | E7 - - - | Am7 - - - | C7 - - - |") });
+    } else if (m_helpActiveTab == 1) {
+        // --- タブ1: 数字接尾辞一覧 (罫線付きの表) ---
+        DrawTextInBox(TR(L"度数の直後に入力してコード品質を指定します (Key: C の場合)。「入力」を打つと「結果」のコードになります。",
+                         L"Type right after the degree number to set the chord quality (Key: C). The Input column becomes the Result chord."),
+                      m_pFontInspector, D2D1::RectF(rc.left + pad, textY, rc.right - pad, textY + 22.0f), m_pBrushTextMuted, 0.0f);
+        textY += 28.0f;
+
+        const float tblLeft = rc.left + pad;
+        const float tblW = (rc.right - rc.left) - pad * 2.0f;
+        const float colX[4] = { 0.0f, tblW * 0.22f, tblW * 0.60f, tblW * 0.78f };
+        const float rowH = 26.0f;
 
         struct SuffixItem {
             const wchar_t* suffix;
             const wchar_t* quality;
-            const wchar_t* example;
+            const wchar_t* input;
+            const wchar_t* result;
         };
-        SuffixItem suffixes[] = {
-            { L"mas / M7 / maj7", TR(L"メジャーセブンス (Major 7th)", L"Major 7th"), L"4mas -> Fmaj7, 1mas -> Cmaj7" },
-            { L"svn / 7", TR(L"ドミナントセブンス (Dominant 7th)", L"Dominant 7th"), L"5svn -> G7, 3svn -> E7" },
-            { L"mis / m7", TR(L"マイナーセブンス (Minor 7th)", L"Minor 7th"), L"2mis -> Dm7, 6mis -> Am7" },
-            { L"m", TR(L"マイナー (借用和音など)", L"Minor (Modal Interchange, etc.)"), L"4m -> Fm, 1m -> Cm" },
-            { L"hdm / m7b5", TR(L"ハーフディミニッシュ (m7b5)", L"Half-Diminished (m7b5)"), L"7hdm -> Bm7b5, 2hdm -> Dm7b5" },
-            { L"dim / dim7", TR(L"ディミニッシュ (Diminished)", L"Diminished 7th"), L"7dim -> Bdim7, #4dim -> F#dim7" },
-            { L"suf / sus4", TR(L"サスフォー (sus4)", L"Suspended 4th (sus4)"), L"5suf -> Gsus4, 1suf -> Csus4" },
-            { L"sut / sus2", TR(L"サスツー (sus2)", L"Suspended 2nd (sus2)"), L"1sut -> Csus2, 4sut -> Fsus2" },
-            { L"adn / add9", TR(L"アドナインス (add9)", L"Added 9th (add9)"), L"1adn -> Cadd9, 4adn -> Fadd9" },
-            { L"six / 6", TR(L"シックス (6th)", L"Major 6th (6th)"), L"1six -> C6, 4six -> F6" }
+        const SuffixItem suffixes[] = {
+            { L"mas / M7 / maj7", TR(L"メジャーセブンス (Major 7th)", L"Major 7th"), L"4mas", L"FMaj7" },
+            { L"svn / 7", TR(L"ドミナントセブンス (Dominant 7th)", L"Dominant 7th"), L"5svn", L"G7" },
+            { L"mis / m7", TR(L"マイナーセブンス (Minor 7th)", L"Minor 7th"), L"2mis", L"Dm7" },
+            { L"m", TR(L"マイナー (借用和音など)", L"Minor (Modal Interchange, etc.)"), L"4m", L"Fm" },
+            { L"hdm / m7b5", TR(L"ハーフディミニッシュ (m7b5)", L"Half-Diminished (m7b5)"), L"7hdm", L"Bm7b5" },
+            { L"dim", TR(L"ディミニッシュ (Diminished)", L"Diminished triad"), L"7dim", L"Bdim" },
+            { L"dim7", TR(L"ディミニッシュセブンス", L"Diminished 7th"), L"7dim7", L"Bdim7" },
+            { L"suf / sus4", TR(L"サスフォー (sus4)", L"Suspended 4th (sus4)"), L"5suf", L"Gsus4" },
+            { L"sut / sus2", TR(L"サスツー (sus2)", L"Suspended 2nd (sus2)"), L"1sut", L"Csus2" },
+            { L"adn / add9", TR(L"アドナインス (add9)", L"Added 9th (add9)"), L"4adn", L"Fadd9" },
+            { L"six / 6", TR(L"シックス (6th)", L"Major 6th (6th)"), L"1six", L"C6" }
         };
+        const int sufCount = static_cast<int>(sizeof(suffixes) / sizeof(suffixes[0]));
+        const int tblRows = sufCount + 1;
+        const float firstRowY = textY;
 
-        for (size_t si = 0; si < 10; ++si) {
-            D2D1_RECT_F trRc = D2D1::RectF(rc.left + pad, textY, rc.right - pad, textY + 22.0f);
+        // 見出し行の塗り → 縞模様の塗り → 罫線 → 文字 の順に描く（罫線が塗りに隠れない）
+        m_pRenderTarget->FillRectangle(D2D1::RectF(tblLeft, firstRowY, tblLeft + tblW, firstRowY + rowH), m_pBrushBorderLight);
+        for (int si = 0; si < sufCount; ++si) {
             if (si % 2 == 1) {
-                m_pRenderTarget->FillRectangle(trRc, m_pBrushCardBg);
+                const float ry = firstRowY + rowH * static_cast<float>(si + 1);
+                m_pRenderTarget->FillRectangle(D2D1::RectF(tblLeft, ry, tblLeft + tblW, ry + rowH), m_pBrushCardBg);
             }
-            DrawTextSafe(suffixes[si].suffix, m_pFontButton, D2D1::RectF(trRc.left + 8.0f, textY + 2.0f, trRc.left + col1W, textY + 20.0f), m_pBrushText);
-            DrawTextSafe(suffixes[si].quality, m_pFontInspector, D2D1::RectF(trRc.left + col1W + 8.0f, textY + 2.0f, trRc.left + col1W + col2W, textY + 20.0f), m_pBrushText);
-            DrawTextSafe(suffixes[si].example, m_pFontInspector, D2D1::RectF(trRc.left + col1W + col2W + 8.0f, textY + 2.0f, trRc.right - 8.0f, textY + 20.0f), m_pBrushAccent);
-            textY += 23.0f;
         }
+        drawTableGrid(tblLeft, firstRowY, tblW, rowH, tblRows, colX, 4);
+
+        DrawTextInBox(TR(L"短縮接尾辞", L"Suffix"), m_pFontInspector, D2D1::RectF(tblLeft + colX[0], firstRowY, tblLeft + colX[1], firstRowY + rowH), m_pBrushText, 8.0f);
+        DrawTextInBox(TR(L"コード品質 (Quality)", L"Chord Quality"), m_pFontInspector, D2D1::RectF(tblLeft + colX[1], firstRowY, tblLeft + colX[2], firstRowY + rowH), m_pBrushText, 8.0f);
+        DrawTextInBox(TR(L"入力", L"Input"), m_pFontInspector, D2D1::RectF(tblLeft + colX[2], firstRowY, tblLeft + colX[3], firstRowY + rowH), m_pBrushText, 8.0f);
+        DrawTextInBox(TR(L"結果", L"Result"), m_pFontInspector, D2D1::RectF(tblLeft + colX[3], firstRowY, tblLeft + tblW, firstRowY + rowH), m_pBrushText, 8.0f);
+
+        for (int si = 0; si < sufCount; ++si) {
+            const float ry = firstRowY + rowH * static_cast<float>(si + 1);
+            DrawTextInBox(suffixes[si].suffix, m_pFontButton, D2D1::RectF(tblLeft + colX[0], ry, tblLeft + colX[1], ry + rowH), m_pBrushText, 8.0f);
+            DrawTextInBox(suffixes[si].quality, m_pFontInspector, D2D1::RectF(tblLeft + colX[1], ry, tblLeft + colX[2], ry + rowH), m_pBrushText, 8.0f);
+            DrawTextInBox(suffixes[si].input, m_pFontButton, D2D1::RectF(tblLeft + colX[2], ry, tblLeft + colX[3], ry + rowH), m_pBrushAccent, 8.0f);
+            DrawTextInBox(suffixes[si].result, m_pFontButton, D2D1::RectF(tblLeft + colX[3], ry, tblLeft + tblW, ry + rowH), m_pBrushAccent, 8.0f);
+        }
+        textY = firstRowY + rowH * static_cast<float>(tblRows) + 6.0f;
+        DrawTextInBox(TR(L"接尾辞を省略した度数 (例: 1 5 6 4) は、キーのダイアトニックコードになります。",
+                         L"A degree without a suffix (e.g. 1 5 6 4) becomes the diatonic chord of the key."),
+                      m_pFontInspector, D2D1::RectF(tblLeft, textY, tblLeft + tblW, textY + 20.0f), m_pBrushTextMuted, 0.0f);
     } else if (m_helpActiveTab == 2) {
         // --- タブ2: コード記号（通常コード名入力で使える表記） ---
         D2D1_RECT_F gHead = D2D1::RectF(rc.left + pad, textY, rc.right - pad, textY + 22.0f);
@@ -642,9 +813,9 @@ void AppWindow::RenderHelpModal(const D2D1_RECT_F& rc) {
         };
         SymbolItem symbols[] = {
             { L"(なし) / m", TR(L"メジャー / マイナー", L"Major / Minor"), L"C   Cm" },
-            { L"7 / maj7 (M7, Δ7, ^7)", TR(L"ドミナント7th / メジャー7th", L"Dominant 7th / Major 7th"), L"C7   Cmaj7   CM7" },
+            { L"7 / maj7 (M7, ^7)", TR(L"ドミナント7th / メジャー7th", L"Dominant 7th / Major 7th"), L"C7   Cmaj7   CM7" },
             { L"m7 / mM7", TR(L"マイナー7th / マイナーメジャー7th", L"Minor 7th / Minor-Major 7th"), L"Cm7   CmM7" },
-            { L"m7b5 (m7-5, ø, hdm)", TR(L"ハーフディミニッシュ", L"Half-Diminished"), L"Cm7b5   Cø" },
+            { L"m7b5 (m7-5, hdm)", TR(L"ハーフディミニッシュ", L"Half-Diminished"), L"Cm7b5   Chdm" },
             { L"dim7 (o7)", TR(L"ディミニッシュ7th", L"Diminished 7th"), L"Cdim7   Co7" },
             { L"aug (+) / 7#5",TR(L"オーギュメント / オーギュメント7th", L"Augmented / Augmented 7th"), L"Caug   C+   C7#5" },
             { L"sus2 / sus4", TR(L"サス2 / サス4", L"Suspended 2nd / 4th"), L"Csus2   Csus4" },
@@ -668,84 +839,152 @@ void AppWindow::RenderHelpModal(const D2D1_RECT_F& rc) {
             textY += 23.0f;
         }
     } else if (m_helpActiveTab == 3) {
-        // --- タブ3: キーボードショートカット一覧 ---
+        // --- タブ3: キーボード・修飾キー操作（カテゴリ別に表示。キーは kbd 風のキーキャップ） ---
         struct ShortcutRow {
-            const wchar_t* key;
+            int category;          // 0=再生 1=選択 2=編集 3=ファイル 4=表示
+            const wchar_t* key;    // [ ] で囲んだ部分がキーキャップ
             const wchar_t* func;
         };
-        ShortcutRow sRows[] = {
-            { L"Space", TR(L"再生 / 一時停止 (再生位置へタイムライン追従)", L"Play / Pause (timeline follows playhead)") },
-            { L"Enter", TR(L"再生位置を先頭へ戻す (再生中は先頭から再生を継続)", L"Return to start (keeps playing from the start)") },
-            { L"Esc", TR(L"停止 (先頭へリセット) / 選択解除 / ダイアログを閉じる", L"Stop (reset) / Clear selection / Close dialog") },
-            { L"L", TR(L"ループ再生の ON / OFF 切替", L"Toggle loop playback ON / OFF") },
-            { TR(L"← / →", L"Left / Right"), TR(L"前 / 次のコードを選択して試聴", L"Select previous / next chord and audition") },
-            { TR(L"↑ / ↓", L"Up / Down"), TR(L"選択コードの転回形を 1 段ずつ切替 (基本形→第1→第2→第3 を巡回)", L"Cycle inversion of selected chord (Root > 1st > 2nd > 3rd)") },
-            { L"Ctrl / Shift + ↑ / ↓", TR(L"選択コードを1オクターブ上 / 下へ移動", L"Shift selected chord up / down one octave") },
-            { L"Ctrl + Enter", TR(L"コード進行テキスト入力欄の内容をタイムラインへ即時反映", L"Apply chord progression text box to timeline") },
-            { L"Ctrl + Z / Ctrl + Y", TR(L"元に戻す (Undo) / やり直し (Redo)", L"Undo / Redo") },
-            { L"Ctrl + C / X / V / A", TR(L"コピー / 切り取り / 貼り付け / 全選択", L"Copy / Cut / Paste / Select all") },
-            { L"Ctrl + D", TR(L"選択中のコードカードを直後に複製", L"Duplicate selected chord card") },
-            { L"Delete / Backspace", TR(L"選択中のコードカードを削除", L"Delete selected chord card") },
-            { L"B", TR(L"選択中のコードカードを分割", L"Split selected chord card") },
-            { L"M", TR(L"再生ヘッド位置にマーカーを追加", L"Add marker at the playhead") },
-            { L"Ctrl + N / O", TR(L"新規作成 / プロジェクトを開く (.chord)", L"New / Open project (.chord)") },
-            { L"Ctrl + S / Ctrl + Shift + S", TR(L"プロジェクトを保存 / 名前を付けて保存", L"Save project / Save As") },
-            { L"Ctrl + E", TR(L"標準 MIDI ファイル (.mid) をエクスポート保存", L"Export Standard MIDI File (.mid)") },
-            { L"Ctrl + T / Ctrl + H", TR(L"テンプレート集を開く / このヘルプを開く", L"Open templates / Open this help") },
-            { L"Ctrl + + / - / 0", TR(L"タイムラインの横ズームイン / ズームアウト / 標準に戻す", L"Zoom timeline in / out / reset") },
-            { L"Ctrl (+Shift) + 1..5", TR(L"タイムライングリッド切替 (Shift併用で入力グリッド)", L"Timeline grid preset (with Shift: input grid)") }
+        const wchar_t* kbCategories[] = {
+            TR(L"再生", L"Playback"), TR(L"選択・移動", L"Select / Move"), TR(L"編集", L"Edit"),
+            TR(L"ファイル", L"File"), TR(L"表示", L"View")
+        };
+        const int kbCategoryCount = static_cast<int>(sizeof(kbCategories) / sizeof(kbCategories[0]));
+        const ShortcutRow sRows[] = {
+            { 0, L"[Space]", TR(L"再生 / 一時停止", L"Play / Pause") },
+            { 0, L"[Enter]", TR(L"再生位置を先頭へ戻す", L"Return the playhead to the start") },
+            { 0, L"[Esc]", TR(L"停止 / 選択解除 / ダイアログを閉じる", L"Stop / Clear selection / Close dialog") },
+            { 0, L"[L]", TR(L"ループ再生の ON / OFF", L"Toggle loop playback") },
+
+            { 1, L"[←] / [→]", TR(L"前 / 次のコードを選択して試聴", L"Select previous / next chord") },
+            { 1, L"[Ctrl] + クリック", TR(L"カードを選択に追加 / 除外 (複数選択)", L"Add / remove a card to the selection") },
+            { 1, L"[Shift] + クリック", TR(L"最後に選択したカードから範囲選択", L"Select a range from the last selected card") },
+            { 1, L"[Ctrl] + [A]", TR(L"すべてのコードを選択", L"Select all chords") },
+            { 1, L"[↑] / [↓]", TR(L"転回形を切替 (基本形→第1→第2→第3)", L"Cycle inversion (Root > 1st > 2nd > 3rd)") },
+            { 1, L"[Ctrl] / [Shift] + [↑] / [↓]", TR(L"1オクターブ上 / 下へ移動", L"Move up / down one octave") },
+
+            { 2, L"[Ctrl] + [Enter]", TR(L"入力欄のコード進行をタイムラインへ反映", L"Apply the text box to the timeline") },
+            { 2, L"[Ctrl] + [Z]", TR(L"元に戻す (Undo)", L"Undo") },
+            { 2, L"[Ctrl] + [Y]", TR(L"やり直し (Redo)", L"Redo") },
+            { 2, L"[Ctrl] + [C]", TR(L"コピー", L"Copy") },
+            { 2, L"[Ctrl] + [X]", TR(L"切り取り", L"Cut") },
+            { 2, L"[Ctrl] + [V]", TR(L"貼り付け (再生ヘッド最寄りのグリッドへ)", L"Paste (at the grid nearest the playhead)") },
+            { 2, L"[Ctrl] + [D]", TR(L"選択中のコードカードを複製", L"Duplicate the selected card") },
+            { 2, L"[Delete] / [Backspace]", TR(L"選択中のコードカードを削除", L"Delete the selected card") },
+            { 2, L"[B]", TR(L"選択中のコードカードを分割", L"Split the selected card") },
+            { 2, L"[M]", TR(L"再生ヘッド位置にマーカーを追加", L"Add a marker at the playhead") },
+
+            { 3, L"[Ctrl] + [N]", TR(L"新規作成", L"New project") },
+            { 3, L"[Ctrl] + [O]", TR(L"プロジェクトを開く (.chord)", L"Open project (.chord)") },
+            { 3, L"[Ctrl] + [S]", TR(L"プロジェクトを保存", L"Save project") },
+            { 3, L"[Ctrl] + [Shift] + [S]", TR(L"名前を付けて保存", L"Save As") },
+            { 3, L"[Ctrl] + [E]", TR(L"標準 MIDI ファイル (.mid) を書き出し", L"Export Standard MIDI File (.mid)") },
+
+            { 4, L"[Ctrl] + [T]", TR(L"テンプレート集を開く", L"Open templates") },
+            { 4, L"[Ctrl] + [H]", TR(L"このヘルプを開く", L"Open this help") },
+            { 4, L"[Ctrl] + [+]", TR(L"タイムラインの横ズームイン", L"Zoom timeline in") },
+            { 4, L"[Ctrl] + [-]", TR(L"タイムラインの横ズームアウト", L"Zoom timeline out") },
+            { 4, L"[Ctrl] + [0]", TR(L"横ズームを標準に戻す", L"Reset timeline zoom") },
+            { 4, L"[Ctrl] + [1] ~ [5]", TR(L"タイムライングリッド切替", L"Timeline grid preset") },
+            { 4, L"[Ctrl] + [Shift] + [1] ~ [5]", TR(L"入力グリッド切替", L"Input grid preset") }
         };
 
-        float col1W = 200.0f;
-        for (size_t ki = 0; ki < sizeof(sRows) / sizeof(sRows[0]); ++ki) {
-            D2D1_RECT_F trRc = D2D1::RectF(rc.left + pad, textY, rc.right - pad, textY + 20.0f);
-            if (ki % 2 == 1) {
+        // カテゴリ切替チップ（1画面に出す情報量を絞る）
+        const float chipW = 118.0f;
+        const float chipH = 28.0f;
+        for (int ci = 0; ci < kbCategoryCount; ++ci) {
+            const float cx = rc.left + pad + static_cast<float>(ci) * (chipW + 6.0f);
+            DrawButton(D2D1::RectF(cx, textY, cx + chipW, textY + chipH), kbCategories[ci], IconType::None, false, false, m_helpKbCategory == ci);
+        }
+        textY += chipH + 10.0f;
+
+        const float col1W = 300.0f;
+        const float rowH = 30.0f;
+        int shown = 0;
+        for (const auto& row : sRows) {
+            if (row.category != m_helpKbCategory) continue;
+            D2D1_RECT_F trRc = D2D1::RectF(rc.left + pad, textY, rc.right - pad, textY + rowH);
+            if (shown % 2 == 1) {
                 m_pRenderTarget->FillRectangle(trRc, m_pBrushCardBg);
             }
-            DrawTextSafe(sRows[ki].key, m_pFontButton, D2D1::RectF(trRc.left + 8.0f, textY + 1.0f, trRc.left + col1W, textY + 19.0f), m_pBrushAccent);
-            DrawTextSafe(sRows[ki].func, m_pFontInspector, D2D1::RectF(trRc.left + col1W + 8.0f, textY + 1.0f, trRc.right - 8.0f, textY + 19.0f), m_pBrushText);
-            textY += 20.0f;
+            DrawKeyCombo(row.key, trRc.left + 10.0f, textY + rowH * 0.5f, trRc.left + col1W, true);
+            DrawTextInBox(row.func, m_pFontHelp, D2D1::RectF(trRc.left + col1W, textY, trRc.right, textY + rowH), m_pBrushText, 8.0f);
+            textY += rowH;
+            ++shown;
         }
     } else {
-        // --- タブ4: マウス操作・画面ツール一覧 ---
+        // --- タブ4: マウス操作・画面ツール一覧（カテゴリ別に表示。キーボードタブと同じ構成） ---
         struct MouseRow {
-            const wchar_t* key;
+            int category;         // 0=カード 1=ピアノロール 2=ホイール 3=画面ツール 4=リンク
+            const wchar_t* key;   // [ ] で囲んだ部分はキーキャップ。それ以外は操作名
             const wchar_t* func;
         };
-        MouseRow mRows[] = {
-            { TR(L"コードカード クリック", L"Click chord card"), TR(L"コードを選択", L"Select the chord") },
-            { TR(L"カード本体ドラッグ", L"Drag card body"), TR(L"コードの移動 (小節をまたいで配置可能。グリッドにスナップ)", L"Move the chord (can cross bars, snaps to grid)") },
-            { TR(L"カード左右端ドラッグ", L"Drag card edge"), TR(L"音価(長さ)の伸縮。小節線を越える跨ぎも可能", L"Resize duration; can cross bar lines") },
-            { TR(L"提案カードをドラッグ", L"Drag palette card"), TR(L"左右ペインのコードをタイムラインへ追加", L"Add a suggested chord to the timeline") },
-            { TR(L"カード右クリック", L"Right-click card"), TR(L"転回形・ベース音・オクターブをメニューで指定", L"Menu: inversion, bass note, octave") },
-            { TR(L"ピアノロールの音符ドラッグ", L"Drag piano-roll note"), TR(L"構成音を上下ドラッグで1オクターブ単位に移動 (音名は不変)", L"Move a chord tone in whole octaves (pitch class kept)") },
-            { TR(L"ルーラー クリック/ドラッグ", L"Ruler click / drag"), TR(L"再生位置を移動 (シーク)", L"Seek the playhead") },
-            { TR(L"マーカー 右クリック", L"Right-click marker"), TR(L"マーカーの編集・削除 (追加は M キー)", L"Edit / delete marker (add with M)") },
-            { TR(L"パートタブ 右クリック", L"Right-click part tab"), TR(L"複製・削除・左右移動・名前変更", L"Duplicate, delete, move, rename part") },
-            { TR(L"マウスホイール", L"Mouse wheel"), TR(L"タイムラインを水平スクロール", L"Scroll timeline horizontally") },
-            { TR(L"上段 新規/開く/保存", L"Top-left icons"), TR(L"新規作成 / プロジェクトを開く / プロジェクト保存 (.chord)", L"New / Open / Save project (.chord)") },
-            { TR(L"MIDI保存 / DAWへドラッグ", L"Save MIDI / Drag to DAW"), TR(L"MIDIファイル出力 / DAWへMIDIを直接ドラッグ", L"Export MIDI file / drag MIDI into a DAW") },
-            { TR(L"アイコンにカーソル", L"Hover an icon"), TR(L"上段のTipsエリアにボタンの説明を表示", L"A description appears in the top tips area") },
-            { TR(L"キー/スケール/BPM", L"Key/Scale/BPM"), TR(L"リンクONなら変更前と同じ値のパートすべてに一括反映", L"With link ON, applies to every part sharing the old value") },
-            { TR(L"リンクボタン (下段右端)", L"Link button (bottom right)"), TR(L"一括反映のON/OFF。Ctrl押下中のみ一時的に反転", L"Toggle batch apply; hold Ctrl to invert temporarily") }
+        const wchar_t* msCategories[] = {
+            TR(L"カード", L"Cards"), TR(L"ピアノロール", L"Piano roll"), TR(L"ホイール", L"Wheel"),
+            TR(L"画面ツール", L"Screen tools"), TR(L"リンク", L"Link")
+        };
+        const int msCategoryCount = static_cast<int>(sizeof(msCategories) / sizeof(msCategories[0]));
+        const MouseRow mRows[] = {
+            { 0, TR(L"カード クリック", L"Click card"), TR(L"コードを選択", L"Select the chord") },
+            { 0, TR(L"[Ctrl] + クリック", L"[Ctrl] + Click"), TR(L"選択に追加 / 除外 (複数選択)", L"Add / remove a card to the selection") },
+            { 0, TR(L"[Shift] + クリック", L"[Shift] + Click"), TR(L"最後に選択したカードから範囲選択", L"Select a range from the last card") },
+            { 0, TR(L"カード本体 ドラッグ", L"Drag card body"), TR(L"移動 (小節またぎ可・グリッドにスナップ)", L"Move (crosses bars, snaps to grid)") },
+            { 0, TR(L"カード左右端 ドラッグ", L"Drag card edge"), TR(L"音価(長さ)を伸縮 (小節線またぎ可)", L"Resize duration (crosses bar lines)") },
+            { 0, TR(L"カード 右クリック", L"Right-click card"), TR(L"転回形・ベース音・オクターブのメニュー", L"Menu: inversion, bass note, octave") },
+            { 0, TR(L"提案カード ドラッグ", L"Drag palette card"), TR(L"左右ペインのコードをタイムラインへ追加", L"Add a suggested chord to the timeline") },
+
+            { 1, TR(L"音符 クリック", L"Click note"), TR(L"コードカードと音符を同時に選択", L"Select the chord card and note together") },
+            { 1, TR(L"音符 ドラッグ", L"Drag note"), TR(L"構成音を1オクターブ単位で上下移動", L"Move a chord tone in whole octaves") },
+            { 1, TR(L"境界バー ドラッグ", L"Drag divider"), TR(L"カードとピアノロールの表示比率を変更", L"Resize cards vs. piano roll") },
+            { 1, TR(L"境界バー ダブルクリック", L"Double-click divider"), TR(L"表示比率を初期値に戻す", L"Reset the ratio") },
+
+            { 2, TR(L"ホイール", L"Wheel"), TR(L"タイムラインを水平スクロール", L"Scroll timeline horizontally") },
+            { 2, TR(L"[Ctrl] + ホイール", L"[Ctrl] + Wheel"), TR(L"横ズーム (カーソル位置を中心に拡大縮小)", L"Zoom horizontally (around the cursor)") },
+            { 2, TR(L"[Ctrl] + [Shift] + ホイール", L"[Ctrl] + [Shift] + Wheel"), TR(L"ピアノロールの縦ズーム (ピアノロール上)", L"Zoom piano roll vertically (over it)") },
+            { 2, TR(L"[Shift] + ホイール", L"[Shift] + Wheel"), TR(L"縦ズーム中のピアノロールを上下スクロール", L"Scroll the zoomed piano roll up / down") },
+
+            { 3, TR(L"ルーラー クリック/ドラッグ", L"Ruler click / drag"), TR(L"再生位置を移動 (シーク)", L"Seek the playhead") },
+            { 3, TR(L"マーカー 右クリック", L"Right-click marker"), TR(L"編集・削除 (追加は M キー)", L"Edit / delete (add with M)") },
+            { 3, TR(L"パートタブ 右クリック", L"Right-click part tab"), TR(L"複製・削除・左右移動・名前変更", L"Duplicate, delete, move, rename") },
+            { 3, TR(L"上段 新規/開く/保存", L"Top-left icons"), TR(L"新規作成 / 開く / 保存 (.chord)", L"New / Open / Save (.chord)") },
+            { 3, TR(L"MIDI保存 / DAWへドラッグ", L"Save MIDI / Drag to DAW"), TR(L"MIDI出力 / DAWへ直接ドラッグ", L"Export MIDI / drag into a DAW") },
+            { 3, TR(L"ボタン・カード・音符にカーソル", L"Hover buttons / cards / notes"), TR(L"上段のTipsエリアに操作を表示", L"Shows a hint in the top tips area") },
+
+            { 4, TR(L"キー/スケール/BPM 変更", L"Change Key/Scale/BPM"), TR(L"変更前と同じ値のパートへ一括反映 (リンクON時)", L"Applies to parts sharing the old value (link ON)") },
+            { 4, TR(L"リンクボタン (下段右端)", L"Link button (bottom right)"), TR(L"ON: 同じ値のパートすべて / OFF: 表示中のみ", L"ON: all parts sharing the value / OFF: active only") },
+            { 4, TR(L"[Ctrl] を押しながら変更", L"Hold [Ctrl] while changing"), TR(L"その操作だけ ON/OFF を反転 (ボタン点灯も反転)", L"Inverts link for that change (lamp inverts too)") }
         };
 
-        float col1W = 200.0f;
-        for (size_t mi = 0; mi < sizeof(mRows) / sizeof(mRows[0]); ++mi) {
-            D2D1_RECT_F trRc = D2D1::RectF(rc.left + pad, textY, rc.right - pad, textY + 20.0f);
-            if (mi % 2 == 1) {
+        // カテゴリ切替チップ（キーボードタブと同じ座標。クリック判定は OnModalClick と共通）
+        const float chipW = 118.0f;
+        const float chipH = 28.0f;
+        for (int ci = 0; ci < msCategoryCount; ++ci) {
+            const float cx = rc.left + pad + static_cast<float>(ci) * (chipW + 6.0f);
+            DrawButton(D2D1::RectF(cx, textY, cx + chipW, textY + chipH), msCategories[ci], IconType::None, false, false, m_helpMouseCategory == ci);
+        }
+        textY += chipH + 10.0f;
+
+        const float col1W = 270.0f;
+        const float rowH = 30.0f;
+        int shown = 0;
+        for (const auto& row : mRows) {
+            if (row.category != m_helpMouseCategory) continue;
+            D2D1_RECT_F trRc = D2D1::RectF(rc.left + pad, textY, rc.right - pad, textY + rowH);
+            if (shown % 2 == 1) {
                 m_pRenderTarget->FillRectangle(trRc, m_pBrushCardBg);
             }
-            DrawTextSafe(mRows[mi].key, m_pFontButton, D2D1::RectF(trRc.left + 8.0f, textY + 1.0f, trRc.left + col1W, textY + 19.0f), m_pBrushAccent);
-            DrawTextSafe(mRows[mi].func, m_pFontInspector, D2D1::RectF(trRc.left + col1W + 8.0f, textY + 1.0f, trRc.right - 8.0f, textY + 19.0f), m_pBrushText);
-            textY += 20.0f;
+            if (std::wcschr(row.key, L'[') != nullptr) {
+                DrawKeyCombo(row.key, trRc.left + 10.0f, textY + rowH * 0.5f, trRc.left + col1W, true);
+            } else {
+                DrawTextInBox(row.key, m_pFontHelp, D2D1::RectF(trRc.left, textY, trRc.left + col1W, textY + rowH), m_pBrushAccent, 10.0f);
+            }
+            DrawTextInBox(row.func, m_pFontHelp, D2D1::RectF(trRc.left + col1W, textY, trRc.right, textY + rowH), m_pBrushText, 8.0f);
+            textY += rowH;
+            ++shown;
         }
     }
 
     // 下部アクションボタン
-    D2D1_RECT_F bDoc = D2D1::RectF(rc.left, rc.bottom - 36.0f, rc.left + 260.0f, rc.bottom);
-    DrawButton(bDoc, TR(L"オンラインドキュメント (GitHub)", L"Online Documentation (GitHub)"), IconType::None);
-
     D2D1_RECT_F bClose = D2D1::RectF(rc.right - 100.0f, rc.bottom - 36.0f, rc.right, rc.bottom);
     DrawButton(bClose, TR(L"閉じる", L"Close"), IconType::None);
 }
@@ -807,8 +1046,7 @@ void AppWindow::RenderRenamePartModal(const D2D1_RECT_F& rc) {
     m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(boxRc, 4.0f, 4.0f), m_pBrushAccent, 1.5f);
 
     std::wstring displayText = m_renamePartName + L"|";
-    D2D1_RECT_F textRc = D2D1::RectF(boxRc.left + 12.0f, boxRc.top + 8.0f, boxRc.right - 12.0f, boxRc.bottom - 6.0f);
-    DrawTextSafe(displayText, m_pFontModalTitle, textRc, m_pBrushText);
+    DrawTextInBox(displayText, m_pFontModalTitle, boxRc, m_pBrushText, 12.0f);
 
     D2D1_RECT_F bConfirm = D2D1::RectF(rc.right - 140.0f, rc.bottom - 36.0f, rc.right - 10.0f, rc.bottom);
     DrawButton(bConfirm, TR(L"変更を確定", L"Confirm"), IconType::None, false, false, true, Theme::AccentAction);
@@ -1043,7 +1281,7 @@ bool AppWindow::OnModalClick(float x, float y) {
                 : ((m_activeModal == ModalType::About || m_activeModal == ModalType::Dashboard) ? std::min(560.0f, m_width - 40.0f) : std::min(740.0f, m_width - 40.0f));
     float cardH = (m_activeModal == ModalType::RenamePart) ? 240.0f
                 : ((m_activeModal == ModalType::TapTempo) ? 320.0f
-                : ((m_activeModal == ModalType::Dashboard) ? std::min(380.0f, m_height - 40.0f)
+                : ((m_activeModal == ModalType::Dashboard) ? std::min(480.0f, m_height - 40.0f)
                 : ((m_activeModal == ModalType::About) ? std::min(360.0f, m_height - 40.0f)
                 : ((m_activeModal == ModalType::Help) ? std::min(600.0f, m_height - 40.0f) : std::min(520.0f, m_height - 40.0f)))));
     float cardX = (m_width - cardW) * 0.5f;
@@ -1089,19 +1327,31 @@ bool AppWindow::OnModalClick(float x, float y) {
             break;
         }
         case ModalType::Dashboard: {
-            float curY = bodyRc.top;
+            DashboardLayout L = GetDashboardLayout(bodyRc);
 
-            // 1. 上部ボタン (新規作成 / 外部ファイルを開く)
-            float btnW = (bodyRc.right - bodyRc.left - 16.0f) * 0.5f;
-            D2D1_RECT_F bNew = D2D1::RectF(bodyRc.left, curY, bodyRc.left + btnW, curY + 36.0f);
-            if (PtInRectF(bNew, x, y)) {
-                DoFileNew();
-                CloseModal();
+            // 1. 新規プロジェクト (名前入力 / 保存先参照 / 作成)
+            if (PtInRectF(L.nameBox, x, y)) {
+                m_dashNameFocused = true;
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return true;
+            }
+            if (PtInRectF(L.createBtn, x, y)) {
+                if (CreateProjectFromDashboard()) {
+                    CloseModal();
+                } else {
+                    InvalidateRect(m_hwnd, nullptr, FALSE);
+                }
+                return true;
+            }
+            if (PtInRectF(L.browseBtn, x, y) || PtInRectF(L.dirBox, x, y)) {
+                ChooseDirectory(m_projectDirectory, TR(L"プロジェクト保存先フォルダを選択", L"Select Project Directory"));
+                SaveAppSettings();
+                InvalidateRect(m_hwnd, nullptr, FALSE);
                 return true;
             }
 
-            D2D1_RECT_F bOpen = D2D1::RectF(bodyRc.left + btnW + 16.0f, curY, bodyRc.right, curY + 36.0f);
-            if (PtInRectF(bOpen, x, y)) {
+            // 2. ファイルを開く
+            if (PtInRectF(L.openFileBtn, x, y)) {
                 DoFileOpen();
                 if (!m_currentProjectPath.empty()) {
                     CloseModal();
@@ -1109,48 +1359,17 @@ bool AppWindow::OnModalClick(float x, float y) {
                 return true;
             }
 
-            curY += 44.0f;
-
-            // 2. プロジェクト保存先フォルダ設定の参照ボタン
-            D2D1_RECT_F bBrowseProj = D2D1::RectF(bodyRc.right - 88.0f, curY + 27.0f, bodyRc.right - 14.0f, curY + 49.0f);
-            if (PtInRectF(bBrowseProj, x, y)) {
-                ChooseDirectory(m_projectDirectory, TR(L"プロジェクト保存先フォルダを選択", L"Select Project Directory"));
-                SaveAppSettings();
+            // 3. 最近開いたファイル一覧 (単クリックは選択のみ。ダブルクリックで開く)
+            m_dashNameFocused = false;
+            int hit = HitTestDashboardRecent(x, y);
+            if (hit >= 0) {
+                m_dashboardSelectedRecentIndex = hit;
                 InvalidateRect(m_hwnd, nullptr, FALSE);
                 return true;
             }
 
-            curY += 64.0f;
-            curY += 22.0f;
-
-            // 3. 最近開いたファイル一覧
-            float rListH = bodyRc.bottom - curY - 40.0f;
-            D2D1_RECT_F rListBox = D2D1::RectF(bodyRc.left, curY, bodyRc.right, curY + rListH);
-            if (!m_recentFiles.empty() && PtInRectF(rListBox, x, y)) {
-                float itemH = 32.0f;
-                size_t maxItems = std::min<size_t>(m_recentFiles.size(), static_cast<size_t>(std::floor((rListH - 8.0f) / (itemH + 2.0f))));
-                for (size_t ri = 0; ri < maxItems; ++ri) {
-                    float iy = rListBox.top + 6.0f + ri * (itemH + 2.0f);
-                    D2D1_RECT_F itemRc = D2D1::RectF(rListBox.left + 6.0f, iy, rListBox.right - 6.0f, iy + itemH);
-                    if (PtInRectF(itemRc, x, y)) {
-                        D2D1_RECT_F bOpenItem = D2D1::RectF(itemRc.right - 72.0f, itemRc.top + 4.0f, itemRc.right - 6.0f, itemRc.bottom - 4.0f);
-                        if (PtInRectF(bOpenItem, x, y)) {
-                            m_dashboardSelectedRecentIndex = static_cast<int>(ri);
-                            OpenRecentFile(static_cast<int>(ri));
-                            CloseModal();
-                            return true;
-                        } else {
-                            m_dashboardSelectedRecentIndex = static_cast<int>(ri);
-                            InvalidateRect(m_hwnd, nullptr, FALSE);
-                            return true;
-                        }
-                    }
-                }
-            }
-
             // 4. フッター
-            D2D1_RECT_F chkRc = D2D1::RectF(bodyRc.left + 6.0f, bodyRc.bottom - 32.0f, bodyRc.left + 196.0f, bodyRc.bottom - 4.0f);
-            if (PtInRectF(chkRc, x, y)) {
+            if (PtInRectF(L.checkbox, x, y)) {
                 m_showDashboardOnStartup = !m_showDashboardOnStartup;
                 SaveAppSettings();
                 InvalidateRect(m_hwnd, nullptr, FALSE);
@@ -1158,19 +1377,18 @@ bool AppWindow::OnModalClick(float x, float y) {
             }
 
             if (m_dashboardSelectedRecentIndex >= 0 && m_dashboardSelectedRecentIndex < static_cast<int>(m_recentFiles.size())) {
-                D2D1_RECT_F bOpenSel = D2D1::RectF(bodyRc.right - 310.0f, bodyRc.bottom - 34.0f, bodyRc.right - 120.0f, bodyRc.bottom);
-                if (PtInRectF(bOpenSel, x, y)) {
+                if (PtInRectF(L.openBtn, x, y)) {
                     OpenRecentFile(m_dashboardSelectedRecentIndex);
                     CloseModal();
                     return true;
                 }
             }
 
-            D2D1_RECT_F bClose = D2D1::RectF(bodyRc.right - 110.0f, bodyRc.bottom - 34.0f, bodyRc.right, bodyRc.bottom);
-            if (PtInRectF(bClose, x, y)) {
+            if (PtInRectF(L.closeBtn, x, y)) {
                 CloseModal();
                 return true;
             }
+            InvalidateRect(m_hwnd, nullptr, FALSE);
             break;
         }
         case ModalType::Settings: {
@@ -1426,10 +1644,17 @@ bool AppWindow::OnModalClick(float x, float y) {
                 }
             }
 
-            D2D1_RECT_F bDoc = D2D1::RectF(bodyRc.left, bodyRc.bottom - 36.0f, bodyRc.left + 260.0f, bodyRc.bottom);
-            if (PtInRectF(bDoc, x, y)) {
-                OpenOnlineDocumentation();
-                return true;
+            // キーボードタブのカテゴリ切替チップ（描画側 RenderHelpModal と同じ座標）
+            if (m_helpActiveTab == 3 || m_helpActiveTab == 4) {
+                const float chipY = bodyRc.top + tabH + 10.0f + 12.0f;
+                for (int ci = 0; ci < 5; ++ci) {
+                    const float cx = bodyRc.left + 16.0f + static_cast<float>(ci) * (118.0f + 6.0f);
+                    if (PtInRectF(D2D1::RectF(cx, chipY, cx + 118.0f, chipY + 28.0f), x, y)) {
+                        (m_helpActiveTab == 3 ? m_helpKbCategory : m_helpMouseCategory) = ci;
+                        InvalidateRect(m_hwnd, nullptr, FALSE);
+                        return true;
+                    }
+                }
             }
 
             D2D1_RECT_F bClose = D2D1::RectF(bodyRc.right - 100.0f, bodyRc.bottom - 36.0f, bodyRc.right, bodyRc.bottom);
@@ -1440,12 +1665,6 @@ bool AppWindow::OnModalClick(float x, float y) {
             break;
         }
         case ModalType::About: {
-            D2D1_RECT_F bDoc = D2D1::RectF(bodyRc.left, bodyRc.bottom - 36.0f, bodyRc.left + 260.0f, bodyRc.bottom);
-            if (PtInRectF(bDoc, x, y)) {
-                OpenOnlineDocumentation();
-                return true;
-            }
-
             D2D1_RECT_F bClose = D2D1::RectF(bodyRc.right - 100.0f, bodyRc.bottom - 36.0f, bodyRc.right, bodyRc.bottom);
             if (PtInRectF(bClose, x, y)) {
                 CloseModal();

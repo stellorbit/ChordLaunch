@@ -86,6 +86,19 @@ private:
     // モーダルダイアログ描画ルーチン
     void RenderModal(float width, float height);
     void RenderDashboardModal(const D2D1_RECT_F& rc);
+    // ダッシュボード各要素の矩形（描画・クリック・ダブルクリックで共通使用）
+    struct DashboardLayout {
+        D2D1_RECT_F newBox, nameBox, dirBox, browseBtn, createBtn;
+        D2D1_RECT_F recentTitle, openFileBtn, listBox;
+        D2D1_RECT_F checkbox, openBtn, closeBtn;
+        float itemH = 48.0f;
+        float itemGap = 2.0f;
+        size_t maxItems = 0;
+    };
+    DashboardLayout GetDashboardLayout(const D2D1_RECT_F& bodyRc) const;
+    D2D1_RECT_F GetDashboardBodyRc() const;
+    int HitTestDashboardRecent(float x, float y) const;
+    bool CreateProjectFromDashboard();
     void RenderSettingsModal(const D2D1_RECT_F& rc);
     void RenderTemplatesModal(const D2D1_RECT_F& rc);
     void RenderHelpModal(const D2D1_RECT_F& rc);
@@ -128,6 +141,13 @@ private:
         const D2D1_RECT_F& rect,
         ID2D1Brush* pBrush
     );
+    void DrawTextLeft(const std::wstring& text, IDWriteTextFormat* pFont, const D2D1_RECT_F& rc, ID2D1SolidColorBrush* pBrush);
+    // 入力欄の文字（左寄せ・上下中央・枠内クリップ）
+    void DrawTextInBox(const std::wstring& text, IDWriteTextFormat* pFont, const D2D1_RECT_F& box, ID2D1Brush* pBrush, float padX);
+    // ヘルプ用: キーキャップ（kbd 風）。左端 x から描画し、描画後の右端 x を返す
+    float DrawKeyCap(const std::wstring& label, float x, float cy, float maxRight, bool large = false);
+    // ヘルプ用: "Ctrl + Shift + ホイール" のようなキー列を kbd 風に描画する（large: 大きめの文字・キーキャップ）
+    void DrawKeyCombo(const std::wstring& combo, float x, float cy, float maxRight, bool large = false);
 
     // ベクター図形アイコン描画ルーチン (絵文字不使用)
     void DrawIcon(IconType type, const D2D1_RECT_F& rect, ID2D1Brush* pBrush);
@@ -261,7 +281,7 @@ private:
     void CopyProgressionToClipboard();
     void PasteProgressionFromClipboard();
     bool ConfirmDiscardChanges();
-    void DoFileNew();
+    bool DoFileNew();
     void DoFileOpen();
     void DoFileSave();
     void DoFileSaveAs();
@@ -279,8 +299,18 @@ private:
     void DeleteSelectedUserTemplate();
     void AuditionTemplate(const ProgressionTemplate& tmpl);
 
-    // ヘルプ・ドキュメント
-    void OpenOnlineDocumentation();
+    // タイムライン横ズーム（anchorX の下の拍位置を保つ）/ ピアノロール縦ズーム・縦スクロール
+    void ZoomTimelineAt(int steps, float anchorX);
+    void ZoomPianoRollV(int steps);
+    void ScrollPianoRollV(int rows);
+    // コードカード領域とピアノロールの境界（分割バー）
+    float TimelineAvailHeight() const;
+    float SplitBarY() const;
+    bool HitTestSplitBar(float x, float y) const;
+    // マウス位置の説明（上段Tipsエリアに表示）。該当なしは空
+    std::wstring BuildHoverTip(float x, float y);
+    // タイムラインのカード（休符を除く）の位置判定。outEdge は左右端の掴み範囲
+    bool HitTestTimelineCard(float x, float y, bool& outEdge);
 
     // モーダル開閉
     void OpenModal(ModalType modal);
@@ -310,6 +340,8 @@ private:
     IDWriteTextFormat*     m_pFontTab = nullptr;
     IDWriteTextFormat*     m_pFontModalTitle = nullptr;
     IDWriteTextFormat*     m_pFontModalBody = nullptr;
+    IDWriteTextFormat*     m_pFontHelp = nullptr;      // ヘルプ（キーボードタブ）の説明文 13px
+    IDWriteTextFormat*     m_pFontHelpKey = nullptr;   // ヘルプのキーキャップ内文字 12px（中央揃え）
     IDWriteTextFormat*     m_pFontBigNumber = nullptr;
 
     // ソリッドブラシ
@@ -357,7 +389,7 @@ private:
     DWORD m_chordClipSeq = 0;                            // コピー時のOSクリップボード連番（変化したら無効）
 
     // リサイズ・ドラッグ＆ドロップ状態
-    enum class DragMode { None, CardMove, CardResizeLeft, CardResizeRight, ScrollBarThumb, PaletteCardDrag, CardTimelineDrag, RulerSeek, PianoNoteDrag };
+    enum class DragMode { None, CardMove, CardResizeLeft, CardResizeRight, ScrollBarThumb, PaletteCardDrag, CardTimelineDrag, RulerSeek, PianoNoteDrag, SplitDrag };
     DragMode m_dragMode = DragMode::None;
 
     // パート連動リンク（キー/モード/BPM の変更を同じ値のパートへ一括反映）。Ctrl 押下中は一時的に反転
@@ -369,6 +401,11 @@ private:
     int   m_prMinMidi = 0;
     float m_prNoteRowH = 0.0f;
     bool  m_prValid = false;
+    float m_prZoomV = 1.0f;          // ピアノロール縦ズーム倍率 (1.0〜4.0)
+    int   m_prScrollRows = 0;        // 縦ズーム時の縦スクロール量（行。正で上方向）
+    int   m_selNotePc = -1;          // フォーカス中のノートの音名 (0〜11)。-1 は未選択
+    float m_cardSplitRatio = 0.0f;   // コードカード領域の高さ比率。0 以下は自動
+    bool  m_splitHover = false;      // 分割バー上にカーソルがある
     int   m_prDragPc = 0;            // ドラッグ中の音名 (0〜11)
     int   m_prDragStartPitch = 0;    // ドラッグ開始時のノート高さ (MIDI)
     int   m_prDragStartShift = 0;    // ドラッグ開始時のオクターブ移動量
@@ -434,6 +471,8 @@ private:
     int m_selectedTmplIndex = 0;
     int m_tmplListScroll = 0;
     int m_helpActiveTab = 0;
+    int m_helpKbCategory = 0;   // キーボードタブの表示カテゴリ（再生/選択/編集/ファイル/表示）
+    int m_helpMouseCategory = 0; // マウスタブの表示カテゴリ（カード/ピアノロール/ホイール/画面ツール/リンク）
     int m_contextPartIndex = -1;
     int m_renamePartIndex = -1;
     int m_renameMarkerTick = -1;  // >0: RenamePart モーダルをマーカー編集（その tick）として使用中
@@ -461,6 +500,8 @@ private:
     bool m_autoBackupInProjectDir = true;
     bool m_showDashboardOnStartup = true;
     int m_dashboardSelectedRecentIndex = -1;
+    std::wstring m_dashNewName = L"MyProgression"; // ダッシュボード: 新規プロジェクト名
+    bool m_dashNameFocused = false;                // 名前欄の入力フォーカス
     std::wstring m_tipText;          // 上段Tipsエリアに表示するアイコンボタンの説明
     bool m_mouseTracking = false;    // WM_MOUSELEAVE 追跡中
     std::wstring m_statusMessage;

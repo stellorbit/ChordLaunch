@@ -6,6 +6,7 @@ namespace clp {
 // ---------------------------------------------------------------------------
 void AppWindow::SelectChord(int barIndex, int chordIndex) {
     m_multiSelTicks.clear();
+    m_selNotePc = -1; // ノートのフォーカスは、ノートをクリックした直後にだけ設定される
     m_selectedBarIndex = barIndex;
     m_selectedChordIndex = chordIndex;
     m_selAnchorTick = PrimaryChordStartTick();
@@ -295,6 +296,129 @@ bool AppWindow::HitTestPianoRollNote(float x, float y, int& outBar, int& outChor
     outChord = hitChord;
     outPitch = pitch;
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// ズーム・分割バー・ホバー説明
+// ---------------------------------------------------------------------------
+void AppWindow::ZoomTimelineAt(int steps, float anchorX) {
+    if (steps == 0 || m_pixelsPerBeat <= 0.0f) return;
+    const float oldPpb = m_pixelsPerBeat;
+    const float newPpb = std::clamp(oldPpb + 8.0f * static_cast<float>(steps), 24.0f, 140.0f);
+    if (newPpb == oldPpb) return;
+
+    // アンカー位置の拍が画面上で動かないようにスクロール量を再計算する
+    const float rel = anchorX - m_leftPaneWidth;
+    const float anchorBeat = (rel + m_timelineScrollX) / oldPpb;
+    m_pixelsPerBeat = newPpb;
+
+    const Part* pActive = m_partManager.GetActivePart();
+    const size_t numBars = m_isMergedView ? m_partManager.GenerateMergedProgression().size() : (pActive ? pActive->bars.size() : 8);
+    const float totalContentWidth = std::max<size_t>(numBars + 16, 64) * (newPpb * 4.0f);
+    const float rightW = m_showRightPane ? m_rightPaneWidth : 0.0f;
+    const float viewWidth = m_width - m_leftPaneWidth - rightW;
+    const float maxScroll = std::max(0.0f, totalContentWidth - viewWidth);
+    m_timelineScrollX = std::clamp(anchorBeat * newPpb - rel, 0.0f, maxScroll);
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::ZoomPianoRollV(int steps) {
+    if (steps == 0) return;
+    const float next = std::clamp(m_prZoomV * std::pow(1.25f, static_cast<float>(steps)), 1.0f, 4.0f);
+    m_prZoomV = (next < 1.05f) ? 1.0f : next;
+    if (m_prZoomV <= 1.0f) m_prScrollRows = 0;
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void AppWindow::ScrollPianoRollV(int rows) {
+    if (m_prZoomV <= 1.0f || rows == 0) return;
+    m_prScrollRows += rows; // 範囲外の値は描画時に有効範囲へ丸められる
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+// コードカード領域＋ピアノロールに使える高さ（ルーラー下端 〜 スクロールバー上端）
+float AppWindow::TimelineAvailHeight() const {
+    const float dockH = m_showKeyboard ? m_bottomDockHeight : 28.0f;
+    const float scrollY = m_height - dockH - m_scrollBarHeight;
+    const float cardY = m_toolbarHeight + m_partTabHeight + m_rulerHeight;
+    return std::max(120.0f, scrollY - cardY);
+}
+
+float AppWindow::SplitBarY() const {
+    return m_toolbarHeight + m_partTabHeight + m_rulerHeight + m_cardTrackHeight;
+}
+
+bool AppWindow::HitTestSplitBar(float x, float y) const {
+    if (m_activeModal != ModalType::None || !m_prValid) return false;
+    const float rightW = m_showRightPane ? m_rightPaneWidth : 0.0f;
+    if (x < m_leftPaneWidth || x > m_width - rightW) return false;
+    return std::fabs(y - SplitBarY()) <= 4.0f;
+}
+
+bool AppWindow::HitTestTimelineCard(float x, float y, bool& outEdge) {
+    outEdge = false;
+    if (m_isMergedView) return false;
+    const Part* pActive = m_partManager.GetActivePart();
+    if (!pActive) return false;
+
+    const float cardY = m_toolbarHeight + m_partTabHeight + m_rulerHeight + 5.0f;
+    const float cardH = m_cardTrackHeight - 10.0f;
+    const float rightW = m_showRightPane ? m_rightPaneWidth : 0.0f;
+    const float centerX = m_leftPaneWidth;
+    const float centerW = m_width - rightW - centerX;
+    if (x < centerX || x > centerX + centerW || y < cardY || y > cardY + cardH) return false;
+
+    const float barWidth = m_pixelsPerBeat * 4.0f;
+    for (size_t b = 0; b < pActive->bars.size(); ++b) {
+        const float bx = centerX + b * barWidth - m_timelineScrollX;
+        const int barTicks = std::max(1, pActive->bars[b].GetTotalTicks());
+        float offsetTicks = 0.0f;
+        for (const auto& chord : pActive->bars[b].chords) {
+            const int cTicks = chord.durationTicks > 0 ? chord.durationTicks : (chord.durationBeats * TICKS_PER_BEAT);
+            const float cx = bx + (offsetTicks / barTicks) * barWidth;
+            const float cw = (static_cast<float>(cTicks) / barTicks) * barWidth;
+            offsetTicks += cTicks;
+            if (chord.isRest) continue;
+            const D2D1_RECT_F cardRc = D2D1::RectF(cx + 2.0f, cardY, cx + cw - 2.0f, cardY + cardH);
+            if (!PtInRectF(cardRc, x, y)) continue;
+            const float edgeMargin = std::min(8.0f, cw * 0.20f);
+            outEdge = (x <= cardRc.left + edgeMargin || x >= cardRc.right - edgeMargin);
+            return true;
+        }
+    }
+    return false;
+}
+
+std::wstring AppWindow::BuildHoverTip(float x, float y) {
+    if (HitTestSplitBar(x, y)) {
+        return TR(L"ドラッグで表示比率を変更", L"Drag to resize panes");
+    }
+
+    // 左右ペインのコードボタン
+    ChordToken chord;
+    if (HitTestPaletteCard(x, y, chord)) {
+        std::wstring name = chord.isRest ? std::wstring(TR(L"休符", L"Rest")) : ToWString(chord.rootName + chord.qualitySuffix);
+        if (!chord.isRest && !chord.bassName.empty()) name += L"/" + ToWString(chord.bassName);
+        return name + TR(L": ダブルクリックで追加", L": double-click to add");
+    }
+
+    // タイムラインのコードカード（左右端 = 長さ変更 / 本体 = 移動）
+    bool edge = false;
+    if (HitTestTimelineCard(x, y, edge)) {
+        return edge ? std::wstring(TR(L"ドラッグで長さ変更", L"Drag to resize"))
+                    : std::wstring(TR(L"ドラッグ:移動 右クリック:編集", L"Drag: move  Right-click: edit"));
+    }
+
+    // ピアノロールのノート
+    int hitBar = -1, hitChord = -1, hitPitch = 0;
+    if (HitTestPianoRollNote(x, y, hitBar, hitChord, hitPitch)) {
+        const Part* pActive = m_partManager.GetActivePart();
+        const std::string keyRoot = pActive ? pActive->keyRoot : "C";
+        const MusicalMode mode = pActive ? pActive->mode : MusicalMode::Major;
+        const std::string nName = MusicEngine::PitchToNoteForKey(static_cast<PitchClass>(((hitPitch % 12) + 12) % 12), keyRoot, mode) + std::to_string(hitPitch / 12 - 1);
+        return ToWString(nName) + TR(L": 上下ドラッグで移動", L": drag up/down");
+    }
+    return L"";
 }
 
 void AppWindow::OnPianoNoteDrag(float y) {
@@ -665,6 +789,7 @@ void AppWindow::RefreshPartDegrees(Part& part) {
 
 void AppWindow::ClearSelection() {
     m_multiSelTicks.clear();
+    m_selNotePc = -1;
     m_selectedBarIndex = -1;
     m_selectedChordIndex = -1;
     m_selAnchorTick = -1;
@@ -1341,13 +1466,6 @@ void AppWindow::AuditionTemplate(const ProgressionTemplate& tmpl) {
 }
 
 // ---------------------------------------------------------------------------
-// ヘルプ・オンラインドキュメント
-// ---------------------------------------------------------------------------
-void AppWindow::OpenOnlineDocumentation() {
-    ShellExecuteW(nullptr, L"open", L"https://github.com/stellorbit/ChordLaunch#readme", nullptr, nullptr, SW_SHOWNORMAL);
-}
-
-// ---------------------------------------------------------------------------
 // ファイル操作・MIDIドラッグ
 // ---------------------------------------------------------------------------
 bool AppWindow::ConfirmDiscardChanges() {
@@ -1368,8 +1486,58 @@ bool AppWindow::ConfirmDiscardChanges() {
     return true;
 }
 
-void AppWindow::DoFileNew() {
-    if (!ConfirmDiscardChanges()) return;
+bool AppWindow::CreateProjectFromDashboard() {
+    std::wstring name = m_dashNewName;
+    size_t lead = 0;
+    while (lead < name.size() && name[lead] == L' ') ++lead;
+    name.erase(0, lead);
+    while (!name.empty() && (name.back() == L'.' || name.back() == L' ')) name.pop_back();
+
+    if (name.empty()) {
+        MessageBoxW(m_hwnd, TR(L"プロジェクト名を入力してください。", L"Enter a project name."), TR(L"新規プロジェクト", L"New Project"), MB_OK | MB_ICONWARNING);
+        return false;
+    }
+    if (m_projectDirectory.empty()) {
+        MessageBoxW(m_hwnd, TR(L"保存先フォルダを指定してください。", L"Choose a save folder."), TR(L"新規プロジェクト", L"New Project"), MB_OK | MB_ICONWARNING);
+        return false;
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(m_projectDirectory, ec);
+    if (ec || !std::filesystem::is_directory(m_projectDirectory)) {
+        MessageBoxW(m_hwnd, TR(L"保存先フォルダを作成できません。", L"Cannot create the save folder."), TR(L"エラー", L"Error"), MB_OK | MB_ICONERROR);
+        return false;
+    }
+
+    std::filesystem::path target = std::filesystem::path(m_projectDirectory) / (name + L".chord");
+    if (std::filesystem::exists(target)) {
+        int ret = MessageBoxW(m_hwnd, TR(L"同名のファイルが既に存在します。上書きしますか？", L"A file with the same name already exists. Overwrite?"),
+                              TR(L"新規プロジェクト", L"New Project"), MB_YESNO | MB_ICONQUESTION);
+        if (ret != IDYES) return false;
+    }
+
+    if (!DoFileNew()) return false;
+
+    m_currentProjectPath = target.wstring();
+    m_projectTitle = ToUtf8String(name);
+    if (m_partManager.SaveToFile(
+        m_currentProjectPath, m_projectTitle,
+        m_selectedVoicing, m_bassOctaveMode, m_timelineGridTicks, m_inputGridTicks
+    )) {
+        m_isDirty = false;
+        UpdateWindowTitle();
+        AddRecentFile(m_currentProjectPath);
+        SetStatusMessage(TR(L"新規プロジェクトを作成しました", L"New project created"));
+        return true;
+    }
+    m_currentProjectPath.clear();
+    UpdateWindowTitle();
+    MessageBoxW(m_hwnd, TR(L"プロジェクトの保存に失敗しました。", L"Failed to save project."), TR(L"エラー", L"Error"), MB_OK | MB_ICONERROR);
+    return false;
+}
+
+bool AppWindow::DoFileNew() {
+    if (!ConfirmDiscardChanges()) return false;
     PushUndo();
     m_partManager.GetParts().clear();
     Part emptyPart;
@@ -1389,6 +1557,7 @@ void AppWindow::DoFileNew() {
     UpdateWindowTitle();
     SetStatusMessage(TR(L"新規プロジェクトを開始しました", L"Started new project"));
     InvalidateRect(m_hwnd, nullptr, FALSE);
+    return true;
 }
 
 void AppWindow::DoFileSave() {
@@ -2015,6 +2184,8 @@ void AppWindow::CommitRenameModal() {
 
 void AppWindow::OpenDashboardModal() {
     m_dashboardSelectedRecentIndex = -1;
+    m_dashNameFocused = false;
+    m_dashNewName = L"MyProgression";
     OpenModal(ModalType::Dashboard);
 }
 

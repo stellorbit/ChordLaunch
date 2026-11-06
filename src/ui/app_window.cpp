@@ -26,6 +26,8 @@ AppWindow::~AppWindow() {
     if (m_pFontTab) { m_pFontTab->Release(); m_pFontTab = nullptr; }
     if (m_pFontModalTitle) { m_pFontModalTitle->Release(); m_pFontModalTitle = nullptr; }
     if (m_pFontModalBody) { m_pFontModalBody->Release(); m_pFontModalBody = nullptr; }
+    if (m_pFontHelp) { m_pFontHelp->Release(); m_pFontHelp = nullptr; }
+    if (m_pFontHelpKey) { m_pFontHelpKey->Release(); m_pFontHelpKey = nullptr; }
     if (m_pFontBigNumber) { m_pFontBigNumber->Release(); m_pFontBigNumber = nullptr; }
 
     if (m_hFontEdit) { DeleteObject(m_hFontEdit); m_hFontEdit = nullptr; }
@@ -119,6 +121,23 @@ HRESULT AppWindow::CreateDeviceIndependentResources() {
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         11.0f, L"ja-jp", &m_pFontModalBody
     );
+
+    m_pDWriteFactory->CreateTextFormat(
+        chosenFamily, nullptr,
+        DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        13.0f, L"ja-jp", &m_pFontHelp
+    );
+
+    m_pDWriteFactory->CreateTextFormat(
+        chosenFamily, nullptr,
+        DWRITE_FONT_WEIGHT_MEDIUM, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        12.0f, L"ja-jp", &m_pFontHelpKey
+    );
+    if (m_pFontHelpKey) {
+        m_pFontHelpKey->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        m_pFontHelpKey->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        m_pFontHelpKey->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    }
 
     m_pDWriteFactory->CreateTextFormat(
         chosenFamily, nullptr,
@@ -340,6 +359,8 @@ bool AppWindow::Create(HINSTANCE hInstance, int nCmdShow) {
         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, Theme::FontName
     );
     SendMessageW(m_hwndEdit, WM_SETFONT, reinterpret_cast<WPARAM>(m_hFontEdit), TRUE);
+    // 入力欄の左右に余白を付け、枠線に文字が貼り付かないようにする
+    SendMessageW(m_hwndEdit, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(6, 6));
 
     m_synth.Initialize();
     LoadAppSettings();
@@ -920,7 +941,12 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             return 0;
         }
         case WM_KEYDOWN:
+            // Ctrl の押下・離上で、リンクボタンの点灯（Ctrl 押下中は反転）を更新する
+            if (wParam == VK_CONTROL && (lParam & (1 << 30)) == 0) InvalidateRect(hwnd, nullptr, FALSE);
             OnKeyDown(wParam);
+            return 0;
+        case WM_KEYUP:
+            if (wParam == VK_CONTROL) InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
         case WM_CHAR:
             OnChar(static_cast<WCHAR>(wParam));

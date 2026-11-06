@@ -5,6 +5,13 @@ void AppWindow::OnLButtonDown(float x, float y) {
 
     if (OnModalClick(x, y)) return;
 
+    // コードカード領域とピアノロールの境界（分割バー）のドラッグ開始
+    if (HitTestSplitBar(x, y)) {
+        m_dragMode = DragMode::SplitDrag;
+        SetCapture(m_hwnd);
+        return;
+    }
+
     // ピアノロールのノートをドラッグ開始（構成音をオクターブ単位で移動）
     {
         int hitBar = -1, hitChord = -1, hitPitch = 0;
@@ -20,6 +27,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
             m_prDragMin = m_prMinMidi;
             m_prDragMax = m_prMinMidi + static_cast<int>(std::lround((m_prRect.bottom - m_prRect.top) / m_prNoteRowH)) - 1;
             SelectChord(hitBar, hitChord);
+            m_selNotePc = m_prDragPc; // コードカードに加え、クリックしたノートもフォーカスする
             SetCapture(m_hwnd);
             return;
         }
@@ -871,33 +879,27 @@ bool AppWindow::HitTestPaletteCard(float x, float y, ChordToken& outChord) {
 
 void AppWindow::OnLButtonDblClk(float x, float y) {
     if (m_activeModal == ModalType::Dashboard) {
-        float cardW = std::min(740.0f, m_width - 40.0f);
-        float cardH = std::min(520.0f, m_height - 40.0f);
-        float cardX = (m_width - cardW) * 0.5f;
-        float cardY = (m_height - cardH) * 0.5f;
-        D2D1_RECT_F bodyRc = D2D1::RectF(cardX + 16.0f, cardY + 44.0f + 12.0f, cardX + cardW - 16.0f, cardY + cardH - 16.0f);
-
-        float curY = bodyRc.top + 58.0f + 72.0f + 24.0f;
-        float rListH = bodyRc.bottom - curY - 44.0f;
-        D2D1_RECT_F rListBox = D2D1::RectF(bodyRc.left, curY, bodyRc.right, curY + rListH);
-        if (!m_recentFiles.empty() && PtInRectF(rListBox, x, y)) {
-            float itemH = 32.0f;
-            size_t maxItems = std::min<size_t>(m_recentFiles.size(), static_cast<size_t>(std::floor((rListH - 8.0f) / (itemH + 2.0f))));
-            for (size_t ri = 0; ri < maxItems; ++ri) {
-                float iy = rListBox.top + 6.0f + ri * (itemH + 2.0f);
-                D2D1_RECT_F itemRc = D2D1::RectF(rListBox.left + 6.0f, iy, rListBox.right - 6.0f, iy + itemH);
-                if (PtInRectF(itemRc, x, y)) {
-                    m_dashboardSelectedRecentIndex = static_cast<int>(ri);
-                    OpenRecentFile(static_cast<int>(ri));
-                    CloseModal();
-                    return;
-                }
-            }
+        int hit = HitTestDashboardRecent(x, y);
+        if (hit >= 0) {
+            m_dashboardSelectedRecentIndex = hit;
+            OpenRecentFile(hit);
+            CloseModal();
         }
         return;
     }
 
     if (m_activeModal != ModalType::None) return;
+
+    // 分割バーのダブルクリックで表示比率を初期状態（自動）へ戻す
+    if (HitTestSplitBar(x, y)) {
+        if (m_dragMode == DragMode::SplitDrag) {
+            m_dragMode = DragMode::None;
+            ReleaseCapture();
+        }
+        m_cardSplitRatio = 0.0f;
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+        return;
+    }
 
     // パートタブのダブルクリックで名前変更モーダルを開く
     float mainY = m_toolbarHeight;
@@ -958,6 +960,9 @@ void AppWindow::OnLButtonDblClk(float x, float y) {
 // アイコンのみのボタン上にいる間、上段のTipsエリアへ説明を表示する
 void AppWindow::UpdateToolbarTip(float x, float y) {
     std::wstring tip;
+    if (m_activeModal == ModalType::None && m_dragMode == DragMode::None && y > m_toolbarHeight) {
+        tip = BuildHoverTip(x, y);
+    }
     if (m_activeModal == ModalType::None && m_dragMode == DragMode::None && y >= 0.0f && y <= m_toolbarHeight) {
         const ToolbarLayout L = ComputeToolbarLayout(m_width);
         if (PtInRectF(L.fileNew, x, y)) tip = TR(L"新規作成 (Ctrl+N)", L"New (Ctrl+N)");
@@ -977,6 +982,24 @@ void AppWindow::UpdateToolbarTip(float x, float y) {
 
 void AppWindow::OnMouseMove(float x, float y) {
     UpdateToolbarTip(x, y);
+
+    // 分割バーのドラッグ: カード領域の高さをマウス位置に追従させる
+    if (m_dragMode == DragMode::SplitDrag) {
+        SetCursor(LoadCursor(nullptr, IDC_SIZENS));
+        const float cardTop = m_toolbarHeight + m_partTabHeight + m_rulerHeight;
+        m_cardSplitRatio = CardSplitRatioFromHeight(y - cardTop, TimelineAvailHeight());
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+        return;
+    }
+    {
+        const bool hov = (m_dragMode == DragMode::None) && HitTestSplitBar(x, y);
+        if (hov != m_splitHover) {
+            m_splitHover = hov;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+        }
+        if (hov) SetCursor(LoadCursor(nullptr, IDC_SIZENS));
+    }
+
     if (m_dragMode == DragMode::PianoNoteDrag) {
         SetCursor(LoadCursor(nullptr, IDC_SIZENS));
         OnPianoNoteDrag(y);
@@ -1151,6 +1174,13 @@ void AppWindow::OnMouseMove(float x, float y) {
 }
 
 void AppWindow::OnLButtonUp(float x, float y) {
+    if (m_dragMode == DragMode::SplitDrag) {
+        m_dragMode = DragMode::None;
+        ReleaseCapture();
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+        return;
+    }
+
     if (m_dragMode == DragMode::PianoNoteDrag) {
         m_dragMode = DragMode::None;
         ReleaseCapture();
@@ -1359,7 +1389,7 @@ void AppWindow::OnRButtonUp(float x, float y) {
     }
 }
 
-void AppWindow::OnMouseWheel(short delta, float /*x*/, float /*y*/) {
+void AppWindow::OnMouseWheel(short delta, float x, float y) {
     if (m_activeModal == ModalType::Templates && !m_tmplEditorOpen) {
         auto categories = MusicEngine::GetTemplateMajorCategories();
         std::string curCat = (m_selectedTmplCategoryIndex < static_cast<int>(categories.size())) ? categories[m_selectedTmplCategoryIndex] : "👤 ユーザー定義";
@@ -1370,6 +1400,25 @@ void AppWindow::OnMouseWheel(short delta, float /*x*/, float /*y*/) {
         return;
     }
     if (m_activeModal != ModalType::None) return;
+
+    // 修飾キー付きホイール: Ctrl = 横ズーム / Ctrl+Shift = ピアノロール縦ズーム / Shift = 縦スクロール（ピアノロール上）
+    const bool ctrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    const bool shiftDown = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    const bool overRoll = m_prValid && PtInRectF(m_prRect, x, y);
+    int wheelSteps = delta / WHEEL_DELTA;
+    if (wheelSteps == 0) wheelSteps = (delta > 0) ? 1 : -1;
+    if (ctrlDown && shiftDown) {
+        if (overRoll) ZoomPianoRollV(wheelSteps);
+        return;
+    }
+    if (ctrlDown) {
+        ZoomTimelineAt(wheelSteps, x);
+        return;
+    }
+    if (shiftDown && overRoll) {
+        ScrollPianoRollV(wheelSteps);
+        return;
+    }
 
     m_timelineScrollX -= (delta / 120.0f) * (m_pixelsPerBeat * 2.0f);
 
@@ -1387,6 +1436,24 @@ void AppWindow::OnMouseWheel(short delta, float /*x*/, float /*y*/) {
 
 void AppWindow::OnKeyDown(WPARAM key) {
     if (m_activeModal == ModalType::Dashboard) {
+        if (m_dashNameFocused) {
+            if (key == VK_RETURN) {
+                if (CreateProjectFromDashboard()) {
+                    CloseModal();
+                } else {
+                    InvalidateRect(m_hwnd, nullptr, FALSE);
+                }
+            } else if (key == VK_ESCAPE) {
+                m_dashNameFocused = false;
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+            } else if (key == VK_BACK) {
+                if (!m_dashNewName.empty()) {
+                    m_dashNewName.pop_back();
+                    InvalidateRect(m_hwnd, nullptr, FALSE);
+                }
+            }
+            return;
+        }
         if (key == VK_RETURN) {
             if (m_dashboardSelectedRecentIndex >= 0 && m_dashboardSelectedRecentIndex < static_cast<int>(m_recentFiles.size())) {
                 OpenRecentFile(m_dashboardSelectedRecentIndex);
@@ -1503,6 +1570,16 @@ void AppWindow::OnChar(WCHAR ch) {
     if (m_swallowMarkerChar) {
         m_swallowMarkerChar = false;
         if (ch == L'm' || ch == L'M') return;
+    }
+    if (m_activeModal == ModalType::Dashboard) {
+        if (m_dashNameFocused && ch >= 0x20 && ch != 0x7F && m_dashNewName.size() < 60) {
+            // ファイル名に使えない文字は受け付けない
+            if (std::wstring(L"\\/:*?\"<>|").find(ch) == std::wstring::npos) {
+                m_dashNewName += ch;
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+            }
+        }
+        return;
     }
     if (m_activeModal == ModalType::RenamePart) {
         if (ch >= 0x20 && ch != 0x7F) {

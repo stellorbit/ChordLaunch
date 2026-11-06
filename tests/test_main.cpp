@@ -2363,6 +2363,78 @@ void TestPartBarNumberingAndMarkers() {
     }
 }
 
+// ヘルプに載せている入力例・数字接尾辞表・分割バー・縦ズーム窓の計算が、実装と一致することを確認する
+void TestHelpExamplesAndLayoutHelpers() {
+    std::cout << "[TEST] Help examples, card split, piano-roll vertical zoom window\n";
+
+    auto render = [](const std::string& text) {
+        std::string out;
+        auto bars = ProgressionParser::Parse(text, "C", MusicalMode::Major);
+        for (const auto& bar : bars) {
+            for (const auto& chord : bar.chords) {
+                if (!out.empty()) out += " ";
+                out += chord.rootName + chord.qualitySuffix;
+            }
+        }
+        return out;
+    };
+
+    // 入力形式タブ 項目3 の表（コマンド入力 / 通常の記号 / 複合入力 / 数字のみ）
+    TEST_ASSERT(render("4mas 3svn 6mis 1") == "FMaj7 E7 Am7 C", "command suffix example: " + render("4mas 3svn 6mis 1"));
+    TEST_ASSERT(render("4M7 37 6m7 1") == "FMaj7 E7 Am7 C", "standard symbol example: " + render("4M7 37 6m7 1"));
+    TEST_ASSERT(render("4M7 E7 6m7 C") == "FMaj7 E7 Am7 C", "mixed example: " + render("4M7 E7 6m7 C"));
+    TEST_ASSERT(render("1 5 6 4") == "C G Am F", "numbers only example: " + render("1 5 6 4"));
+
+    // コード記号表: ^ は残し、Δ7 と ø は入力記号から外した。M7 / maj7 / hdm / m7b5 は従来どおり
+    {
+        auto q = [](const char* sym) { return MusicEngine::ParseChordSymbol(sym, "C", MusicalMode::Major).quality; };
+        TEST_ASSERT(q("C^7") == ChordQuality::Major7, "C^7 stays Major7");
+        TEST_ASSERT(q("CM7") == ChordQuality::Major7 && q("Cmaj7") == ChordQuality::Major7, "CM7 / Cmaj7 stay Major7");
+        TEST_ASSERT(q("Chdm") == ChordQuality::HalfDiminished7 && q("Cm7b5") == ChordQuality::HalfDiminished7, "Chdm / Cm7b5 stay half-diminished");
+        TEST_ASSERT(q("C\xCE\x94" "7") != ChordQuality::Major7, "C(delta)7 is no longer a Major7 alias");
+        TEST_ASSERT(q("C\xC3\xB8") != ChordQuality::HalfDiminished7, "C(o-slash) is no longer a half-diminished alias");
+    }
+
+    // 数字接尾辞タブの表（入力 → 結果）
+    const std::pair<const char*, const char*> suffixRows[] = {
+        { "4mas", "FMaj7" }, { "5svn", "G7" }, { "2mis", "Dm7" }, { "4m", "Fm" },
+        { "7hdm", "Bm7b5" }, { "7dim", "Bdim" }, { "7dim7", "Bdim7" }, { "5suf", "Gsus4" },
+        { "1sut", "Csus2" }, { "4adn", "Fadd9" }, { "1six", "C6" }
+    };
+    for (const auto& row : suffixRows) {
+        TEST_ASSERT(render(row.first) == row.second, std::string("suffix table: ") + row.first + " -> " + render(row.first) + " (expected " + row.second + ")");
+    }
+
+    // カード領域の高さ: 自動 / 比率指定 / 極端値
+    TEST_ASSERT(ComputeCardTrackHeight(300.0f, 0.0f) == 80.0f, "auto height is clamped to 80");
+    TEST_ASSERT(ComputeCardTrackHeight(150.0f, 0.0f) == 58.0f, "auto height keeps the 58px minimum");
+    TEST_ASSERT(ComputeCardTrackHeight(400.0f, 0.5f) == 200.0f, "ratio 0.5 of 400 is 200");
+    TEST_ASSERT(ComputeCardTrackHeight(400.0f, 0.99f) == 340.0f, "piano roll keeps at least 60px");
+    TEST_ASSERT(ComputeCardTrackHeight(400.0f, 0.01f) == 58.0f, "card keeps at least 58px");
+    TEST_ASSERT(ComputeCardTrackHeight(100.0f, 0.9f) == 58.0f, "tiny area never goes below the card minimum");
+    TEST_ASSERT(ComputeCardTrackHeight(0.0f, 0.5f) >= 58.0f, "zero area falls back to the minimum");
+    TEST_ASSERT(CardSplitRatioFromHeight(200.0f, 400.0f) == 0.5f, "ratio from height");
+    TEST_ASSERT(std::fabs(CardSplitRatioFromHeight(9999.0f, 400.0f) - 340.0f / 400.0f) < 1e-4f, "ratio from huge height is clamped");
+    TEST_ASSERT(std::fabs(CardSplitRatioFromHeight(-50.0f, 400.0f) - 58.0f / 400.0f) < 1e-4f, "ratio from negative height is clamped");
+    TEST_ASSERT(CardSplitRatioFromHeight(100.0f, 0.0f) == 0.0f, "ratio with no area is auto (0)");
+
+    // ピアノロール縦ズーム窓: 等倍 / ズーム / スクロール範囲 / 行数が少ない場合
+    PianoRollWindow w1 = ComputePianoRollWindow(55, 75, 1.0f, 5);
+    TEST_ASSERT(w1.minMidi == 55 && w1.maxMidi == 75 && w1.scrollRows == 0, "zoom 1.0 shows the whole range and drops scroll");
+    PianoRollWindow w2 = ComputePianoRollWindow(55, 75, 2.0f, 0);   // 21行 -> 10行（中央寄せ）
+    TEST_ASSERT(w2.maxMidi - w2.minMidi + 1 == 11, "zoom 2.0 shows round(21 / 2) = 11 rows");
+    TEST_ASSERT(w2.minMidi >= 55 && w2.maxMidi <= 75, "zoomed window stays inside the range");
+    PianoRollWindow w3 = ComputePianoRollWindow(55, 75, 2.0f, 100);  // 上へ過剰スクロール
+    TEST_ASSERT(w3.maxMidi == 75, "over-scroll up clamps to the top of the range");
+    PianoRollWindow w4 = ComputePianoRollWindow(55, 75, 2.0f, -100); // 下へ過剰スクロール
+    TEST_ASSERT(w4.minMidi == 55, "over-scroll down clamps to the bottom of the range");
+    TEST_ASSERT(ComputePianoRollWindow(55, 75, 2.0f, w3.scrollRows).maxMidi == 75, "returned scroll value is stable");
+    PianoRollWindow w5 = ComputePianoRollWindow(60, 64, 4.0f, 0);    // 5行しかない音域
+    TEST_ASSERT(w5.minMidi == 60 && w5.maxMidi == 64, "range smaller than the 6-row floor is not shrunk");
+    PianoRollWindow w6 = ComputePianoRollWindow(40, 62, 4.0f, 0);
+    TEST_ASSERT(w6.maxMidi - w6.minMidi + 1 >= 6, "max zoom keeps at least 6 rows");
+}
+
 int main() {
     std::cout << "========================================\n";
     std::cout << "ChordLaunch C++20 Core Test Suite\n";
@@ -2404,6 +2476,7 @@ int main() {
     TestKeyRunAndKeyLabel();
     TestBridgeSuggestions();
     TestPartBarNumberingAndMarkers();
+    TestHelpExamplesAndLayoutHelpers();
 
     std::cout << "========================================\n";
     std::cout << "Tests Passed: " << g_passCount << ", Failed: " << g_failCount << "\n";

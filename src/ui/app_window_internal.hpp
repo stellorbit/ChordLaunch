@@ -149,7 +149,7 @@ inline ToolbarLayout ComputeToolbarLayout(float width) {
     L.fileNew  = D2D1::RectF(x, r1Y, x + 32.0f, r1Y + r1H); x += 32.0f + gap;
     L.fileOpen = D2D1::RectF(x, r1Y, x + 32.0f, r1Y + r1H); x += 32.0f + gap;
     L.fileSave = D2D1::RectF(x, r1Y, x + 32.0f, r1Y + r1H); x += 32.0f + gap + 8.0f;
-    L.merge    = D2D1::RectF(x, r1Y, x + 84.0f, r1Y + r1H);
+    L.merge    = D2D1::RectF(x, r1Y, x + 92.0f, r1Y + r1H); // 英語表記 "Merge All" が窮屈にならない幅
 
     // 上段 中央: [停止][再生] 小節/拍カウンター [ループ]（再生ボタンはカウンターの左隣）
     const float counterW = 124.0f;
@@ -163,9 +163,10 @@ inline ToolbarLayout ComputeToolbarLayout(float width) {
     float rx = width - 12.0f;
     rx -= 32.0f; L.settings  = D2D1::RectF(rx, r1Y, rx + 32.0f,  r1Y + r1H); rx -= gap;
     rx -= 88.0f; L.help      = D2D1::RectF(rx, r1Y, rx + 88.0f,  r1Y + r1H); rx -= gap;
-    rx -= 100.0f; L.templates = D2D1::RectF(rx, r1Y, rx + 100.0f, r1Y + r1H); rx -= gap;
-    rx -= 112.0f; L.dawDrag  = D2D1::RectF(rx, r1Y, rx + 112.0f, r1Y + r1H); rx -= gap;
-    rx -= 84.0f;  L.midiSave = D2D1::RectF(rx, r1Y, rx + 84.0f,  r1Y + r1H);
+    // アイコン付きボタンは英語表記でも文字が詰まらないよう、アイコン分の余白を含めた幅にする
+    rx -= 104.0f; L.templates = D2D1::RectF(rx, r1Y, rx + 104.0f, r1Y + r1H); rx -= gap;
+    rx -= 120.0f; L.dawDrag  = D2D1::RectF(rx, r1Y, rx + 120.0f, r1Y + r1H); rx -= gap;
+    rx -= 92.0f;  L.midiSave = D2D1::RectF(rx, r1Y, rx + 92.0f,  r1Y + r1H);
 
     // 下段
     const float r2Y = 38.0f, r2H = 28.0f;
@@ -241,6 +242,44 @@ inline LeftPaneLayout ComputeLeftPaneLayout(float top, float paneW) {
     L.bassY    = y;                          y += rowPair + 5.0f;
     L.addY     = y;
     return L;
+}
+
+// コードカード領域の高さ。ratio が 0 以下なら自動（利用可能高の28%、58〜80px）。
+// 指定時は比率に従うが、カードは最低 58px、ピアノロールには最低 60px を残す。
+inline float ComputeCardTrackHeight(float avail, float ratio) {
+    constexpr float kMinCard = 58.0f;
+    constexpr float kMinRoll = 60.0f;
+    if (!(ratio > 0.0f) || !(avail > 0.0f)) {
+        return std::clamp(std::floor(avail * 0.28f), kMinCard, 80.0f);
+    }
+    return std::clamp(std::floor(avail * ratio), kMinCard, std::max(kMinCard, avail - kMinRoll));
+}
+
+// ドラッグで得たカード領域の高さ（px）を、保存用の比率へ変換する（描画側と同じ範囲に丸める）
+inline float CardSplitRatioFromHeight(float desiredH, float avail) {
+    constexpr float kMinCard = 58.0f;
+    constexpr float kMinRoll = 60.0f;
+    if (!(avail > 0.0f)) return 0.0f;
+    return std::clamp(desiredH, kMinCard, std::max(kMinCard, avail - kMinRoll)) / avail;
+}
+
+// ピアノロールの表示窓（縦ズーム・縦スクロール適用後）。baseMin〜baseMax が自動算出した全音域。
+struct PianoRollWindow {
+    int minMidi;
+    int maxMidi;
+    int scrollRows; // 有効範囲へ丸めた縦スクロール量（正で上方向）
+};
+
+inline PianoRollWindow ComputePianoRollWindow(int baseMin, int baseMax, float zoom, int scrollRows) {
+    const int baseRows = std::max(1, baseMax - baseMin + 1);
+    int visRows = baseRows;
+    if (zoom > 1.0f) {
+        visRows = std::clamp(static_cast<int>(std::lround(static_cast<float>(baseRows) / zoom)), std::min(6, baseRows), baseRows);
+    }
+    if (visRows >= baseRows) return { baseMin, baseMin + baseRows - 1, 0 };
+    const int slack = baseRows - visRows;
+    const int startOff = std::clamp(slack / 2 + scrollRows, 0, slack);
+    return { baseMin + startOff, baseMin + startOff + visRows - 1, startOff - slack / 2 };
 }
 
 inline std::string StripLeadingEmoji(std::string_view s) {

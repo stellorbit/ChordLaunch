@@ -164,8 +164,8 @@ void AppWindow::RenderToolbar(float x, float y, float width, float height) {
             D2D1_RECT_F rcTip = D2D1::RectF(tipL, L.counter.top, tipR, L.counter.bottom);
             m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(rcTip, 4.0f, 4.0f), m_pBrushCardBg);
             m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(rcTip, 4.0f, 4.0f), m_pBrushBorderLight, 1.0f);
-            D2D1_RECT_F rcTipText = D2D1::RectF(rcTip.left + 6.0f, rcTip.top, rcTip.right - 6.0f, rcTip.bottom);
-            DrawTextSafe(m_tipText, m_pFontButton, rcTipText, m_pBrushText);
+            // 枠からはみ出さないよう左寄せ・クリップで描画する
+            DrawTextInBox(m_tipText, m_pFontButton, rcTip, m_pBrushText, 6.0f);
         }
     }
 
@@ -276,7 +276,8 @@ void AppWindow::RenderToolbar(float x, float y, float width, float height) {
     m_pRenderTarget->DrawLine(D2D1::Point2F(L.sepX3, r2Y + 2.0f), D2D1::Point2F(L.sepX3, r2Y + r2H - 2.0f), m_pBrushBorderLight, 1.0f);
 
     // 下段右端: パート連動リンク（オン時は強調色）
-    DrawButton(L.link, L"", IconType::Link, false, false, m_linkEnabled, Theme::AccentAction);
+    // Ctrl 押下中は実効状態（反転後）を点灯で示す
+    DrawButton(L.link, L"", IconType::Link, false, false, IsPartLinkActive(), Theme::AccentAction);
 }
 
 // ---------------------------------------------------------------------------
@@ -537,7 +538,7 @@ void AppWindow::RenderCenterPane(float x, float y, float width, float height) {
     // コードカードレーン (グリッド線はカード背景側に描画し、文字への被りを完全解消)
     float cardY = rulerY + m_rulerHeight;
     float timelineAvailH = std::max(120.0f, scrollY - cardY);
-    m_cardTrackHeight = std::clamp(std::floor(timelineAvailH * 0.28f), 58.0f, 80.0f);
+    m_cardTrackHeight = ComputeCardTrackHeight(timelineAvailH, m_cardSplitRatio);
     RenderTimelineCards(x, cardY, width, m_cardTrackHeight);
 
     // ピアノロール (グリッド線はノートバーおよび左端音名ガイドの背面に描画)
@@ -546,6 +547,13 @@ void AppWindow::RenderCenterPane(float x, float y, float width, float height) {
     m_prValid = false;
     if (prH > 20.0f) {
         RenderPianoRoll(x, prY, width, prH);
+
+        // 分割バー（ホバー・ドラッグ中は強調。中央のつまみでドラッグ可能と示す）
+        const bool splitActive = m_splitHover || (m_dragMode == DragMode::SplitDrag);
+        m_pRenderTarget->DrawLine(D2D1::Point2F(x, prY), D2D1::Point2F(x + width, prY), splitActive ? m_pBrushAccent : m_pBrushBorder, splitActive ? 2.0f : 1.0f);
+        const float gripX = x + width * 0.5f;
+        D2D1_RECT_F gripRc = D2D1::RectF(gripX - 16.0f, prY - 2.5f, gripX + 16.0f, prY + 2.5f);
+        m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(gripRc, 2.5f, 2.5f), splitActive ? m_pBrushAccent : m_pBrushBorder);
     }
 
     // 再生ヘッド
@@ -792,6 +800,12 @@ void AppWindow::RenderPianoRoll(float x, float y, float width, float height) {
     if (m_dragMode == DragMode::PianoNoteDrag) {
         minMidi = m_prDragMin;
         maxMidi = m_prDragMax;
+    } else {
+        // 縦ズーム: 表示行数を倍率で絞り、縦スクロール量の分だけ表示窓をずらす
+        const PianoRollWindow win = ComputePianoRollWindow(minMidi, maxMidi, m_prZoomV, m_prScrollRows);
+        minMidi = win.minMidi;
+        maxMidi = win.maxMidi;
+        m_prScrollRows = win.scrollRows; // 範囲外のスクロール量は丸めて保持する
     }
     float noteRowH = height / static_cast<float>(maxMidi - minMidi + 1);
 
@@ -854,13 +868,18 @@ void AppWindow::RenderPianoRoll(float x, float y, float width, float height) {
 
         float offsetTicks = 0.0f;
 
-        for (const auto& chord : bar.chords) {
+        for (size_t chordIdx = 0; chordIdx < bar.chords.size(); ++chordIdx) {
+            const auto& chord = bar.chords[chordIdx];
             int cTicks = chord.durationTicks > 0 ? chord.durationTicks : (chord.durationBeats * TICKS_PER_BEAT);
             float cx = bx + (offsetTicks / barTicks) * barWidth;
             float cw = (static_cast<float>(cTicks) / barTicks) * barWidth;
             offsetTicks += cTicks;
 
             if (cx + cw < x + guideW || cx > x + width) continue;
+
+            // クリックでフォーカスされたノート（選択中コードの該当音名）を強調する
+            const bool noteFocusChord = !m_isMergedView && m_selNotePc >= 0 &&
+                static_cast<int>(b) == m_selectedBarIndex && static_cast<int>(chordIdx) == m_selectedChordIndex;
 
             if (!chord.isRest && chord.rootPitch != PitchClass::Unknown) {
                 auto notes = MusicEngine::GetChordMidiNotes(chord, m_baseOctave, m_selectedVoicing, chord.inversion, m_bassOctaveMode);
@@ -870,6 +889,9 @@ void AppWindow::RenderPianoRoll(float x, float y, float width, float height) {
                         D2D1_RECT_F noteRc = D2D1::RectF(std::max(x + guideW + 1.0f, cx + 1.5f), ny + 0.5f, cx + cw - 1.5f, ny + noteRowH - 0.5f);
                         if (noteRc.right > noteRc.left) {
                             m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(noteRc, 2.5f, 2.5f), m_pBrushPianoRollNote);
+                            if (noteFocusChord && ((n % 12) + 12) % 12 == m_selNotePc) {
+                                m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(noteRc, 2.5f, 2.5f), m_pBrushText, 2.0f);
+                            }
 
                             if ((noteRc.right - noteRc.left) >= 22.0f && noteRowH >= 9.0f) {
                                 m_pRenderTarget->PushAxisAlignedClip(noteRc, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);

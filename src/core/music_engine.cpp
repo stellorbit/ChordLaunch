@@ -395,7 +395,7 @@ ChordToken MusicEngine::ParseChordSymbol(
     std::transform(descLower.begin(), descLower.end(), descLower.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
-    if (descriptor == "M7" || descriptor == "Δ7" || descriptor == "^7" || descLower == "maj7" || descLower == "ma7" || descLower == "mas") {
+    if (descriptor == "M7" || descriptor == "^7" || descLower == "maj7" || descLower == "ma7" || descLower == "mas") {
         token.quality = ChordQuality::Major7;
         token.qualitySuffix = "Maj7";
     } else if (descriptor == "m7" || descLower == "min7" || descLower == "-7" || descLower == "mis") {
@@ -413,7 +413,7 @@ ChordToken MusicEngine::ParseChordSymbol(
     } else if (descLower == "7" || descLower == "dom7" || descLower == "svn") {
         token.quality = ChordQuality::Dominant7;
         token.qualitySuffix = "7";
-    } else if (descLower == "m7b5" || descLower == "m7-5" || descLower == "ø" || descLower == "halfdim" || descLower == "hdm" || descLower == "m75") {
+    } else if (descLower == "m7b5" || descLower == "m7-5" || descLower == "halfdim" || descLower == "hdm" || descLower == "m75") {
         token.quality = ChordQuality::HalfDiminished7;
         token.qualitySuffix = "m7b5";
     } else if (descLower == "dim" || descLower == "diminished") {
