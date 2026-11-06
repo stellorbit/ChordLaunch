@@ -381,7 +381,9 @@ private:
     float m_scrollBarHeight = 12.0f;
 
     // タイムライン表示パラメータ (tickベース)
-    float m_timelineScrollX = 0.0f;
+    // タイムライン左端の余白(=ピアノロール音名ガイド幅)。スクロール下限を負にして1小節目をガイドの右へ出す
+    static constexpr float kTimelineGutter = 28.0f;
+    float m_timelineScrollX = -kTimelineGutter;
     float m_pixelsPerBeat = 64.0f;
     int   m_selectedBarIndex = -1;
     int   m_selectedChordIndex = -1;

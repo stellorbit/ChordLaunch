@@ -28,13 +28,13 @@ void AppWindow::EnsureVisible(int barIndex) {
     float totalContentWidth = std::max<size_t>(numBars + 16, 64) * barWidth;
     float maxScroll = std::max(0.0f, totalContentWidth - viewWidth);
 
-    if (barStart < m_timelineScrollX) {
-        m_timelineScrollX = barStart;
+    if (barStart < m_timelineScrollX + kTimelineGutter) {
+        m_timelineScrollX = barStart - kTimelineGutter;
     } else if (barEnd > m_timelineScrollX + viewWidth) {
         m_timelineScrollX = barEnd - viewWidth;
     }
 
-    m_timelineScrollX = std::clamp(m_timelineScrollX, 0.0f, maxScroll);
+    m_timelineScrollX = std::clamp(m_timelineScrollX, -kTimelineGutter, maxScroll);
 }
 
 void AppWindow::AuditionChord(const ChordToken& chord) {
@@ -395,7 +395,7 @@ void AppWindow::ZoomTimelineAt(int steps, float anchorX) {
     const float rightW = m_showRightPane ? m_rightPaneWidth : 0.0f;
     const float viewWidth = m_width - m_leftPaneWidth - rightW;
     const float maxScroll = std::max(0.0f, totalContentWidth - viewWidth);
-    m_timelineScrollX = std::clamp(anchorBeat * newPpb - rel, 0.0f, maxScroll);
+    m_timelineScrollX = std::clamp(anchorBeat * newPpb - rel, -kTimelineGutter, maxScroll);
     InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 

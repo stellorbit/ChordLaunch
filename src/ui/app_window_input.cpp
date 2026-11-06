@@ -1133,7 +1133,7 @@ void AppWindow::OnMouseMove(float x, float y) {
             float totalContentWidth = numBars * (m_pixelsPerBeat * 4.0f);
             float maxScroll = std::max(0.0f, totalContentWidth - viewWidth);
             float ratio = std::clamp((x - centerX) / viewWidth, 0.0f, 1.0f);
-            m_timelineScrollX = ratio * maxScroll;
+            m_timelineScrollX = -kTimelineGutter + ratio * (maxScroll + kTimelineGutter);
             InvalidateRect(m_hwnd, nullptr, FALSE);
         }
         return;
@@ -1431,7 +1431,7 @@ void AppWindow::OnMouseWheel(short delta, float x, float y) {
     float viewWidth = m_width - m_leftPaneWidth - rightW;
 
     float maxScroll = std::max(0.0f, totalContentWidth - viewWidth);
-    m_timelineScrollX = std::clamp(m_timelineScrollX, 0.0f, maxScroll);
+    m_timelineScrollX = std::clamp(m_timelineScrollX, -kTimelineGutter, maxScroll);
 
     InvalidateRect(m_hwnd, nullptr, FALSE);
 }

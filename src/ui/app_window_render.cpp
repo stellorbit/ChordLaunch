@@ -749,7 +749,7 @@ void AppWindow::RenderPianoRoll(float x, float y, float width, float height) {
     MusicalMode mode = pActive ? pActive->mode : MusicalMode::Major;
 
     float barWidth = m_pixelsPerBeat * 4.0f;
-    float guideW = 28.0f;
+    float guideW = kTimelineGutter;
 
     // 現在のコード群の構成音レンジを計測し、無駄な上下音域を削って1行高を最大化する
     int actualMin = 127;
@@ -1059,7 +1059,7 @@ void AppWindow::RenderTimelineScrollBar(float x, float y, float width, float hei
 
     float thumbWidth = std::max(30.0f, (viewWidth / totalContentWidth) * width);
     float maxScroll = totalContentWidth - viewWidth;
-    float scrollRatio = std::clamp(m_timelineScrollX / maxScroll, 0.0f, 1.0f);
+    float scrollRatio = std::clamp((m_timelineScrollX + kTimelineGutter) / (maxScroll + kTimelineGutter), 0.0f, 1.0f);
     float thumbX = x + scrollRatio * (width - thumbWidth);
 
     D2D1_ROUNDED_RECT thumbRc = D2D1::RoundedRect(D2D1::RectF(thumbX, y + 2.0f, thumbX + thumbWidth, y + height - 2.0f), 3.0f, 3.0f);
