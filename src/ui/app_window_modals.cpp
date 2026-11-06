@@ -1584,7 +1584,6 @@ bool AppWindow::OnModalClick(float x, float y) {
                     if (pActive) {
                         PushUndo();
                         ApplyTemplateProgression(tmpls[i].progression);
-                        pActive->rawProgressionText = tmpls[i].progression;
                         SyncTimelineToText();
                         m_isDirty = true;
                         UpdateWindowTitle();

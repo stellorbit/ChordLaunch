@@ -91,6 +91,7 @@ void AppWindow::ApplyTemplateProgression(const std::string& progression) {
     if (!pActive) return;
 
     std::vector<Bar> parsed = ProgressionParser::Parse(progression, pActive->keyRoot, pActive->mode);
+    if (parsed.empty()) return;
 
     // 全コードを順に並べ、各コードの音価を入力グリッドへそろえる。
     // 小節頭のセクション名・キー変更は、その小節の先頭コードに紐づけて持ち越す。
@@ -113,26 +114,40 @@ void AppWindow::ApplyTemplateProgression(const std::string& progression) {
             entries.push_back(std::move(e));
         }
     }
-    if (entries.empty()) {
-        pActive->bars = std::move(parsed);
-        return;
-    }
+    if (entries.empty()) return;
 
     const int unit = std::max(1, m_inputGridTicks);
-    const int total = unit * static_cast<int>(entries.size());
 
-    std::vector<Bar> work;
-    EnsureBarsCoverTick(work, total);
+    // 既存コードは上書きせず、最後のコード（休符を除く）の終端の直後から追記する。
+    // 続けて選択すれば、その都度後ろへ連結される
+    std::vector<Bar> work = pActive->bars;
+    if (work.empty()) EnsureBarsCoverTick(work, 1);
+    int appendTick = 0;
+    for (size_t b = 0; b < work.size(); ++b) {
+        const int barStart = TimelineEdit::BarStartTick(work, static_cast<int>(b));
+        int local = 0;
+        for (const auto& c : work[b].chords) {
+            const int d = (c.durationTicks > 0) ? c.durationTicks : (c.durationBeats * TICKS_PER_BEAT);
+            local += d;
+            if (!c.isRest && d > 0) appendTick = std::max(appendTick, barStart + local);
+        }
+    }
 
     std::vector<std::pair<int, const Entry*>> markerAt;
-    int tick = 0;
+    int tick = appendTick;
+    int lastBar = -1;
+    int lastChord = 0;
     for (const auto& e : entries) {
         if (!e.sectionMarker.empty() || !e.keyChange.empty()) markerAt.emplace_back(tick, &e);
         if (!e.chord.isRest) {
             ChordToken placed = e.chord;
             placed.SetTicks(unit);
             auto res = TimelineEdit::InsertChordSpan(work, placed, tick);
-            if (res.selectedBar >= 0) work = std::move(res.bars);
+            if (res.selectedBar >= 0) {
+                work = std::move(res.bars);
+                lastBar = res.selectedBar;
+                lastChord = std::max(0, res.selectedChord);
+            }
         }
         tick += unit;
     }
@@ -151,6 +166,11 @@ void AppWindow::ApplyTemplateProgression(const std::string& progression) {
     }
 
     pActive->bars = std::move(work);
+    if (lastBar >= 0) {
+        m_selectedBarIndex = lastBar;
+        m_selectedChordIndex = lastChord;
+        EnsureVisible(m_selectedBarIndex);
+    }
 }
 
 void AppWindow::InsertChordAtTimelineTick(const ChordToken& chord, int targetBarIdx, int targetTickInBar, bool pushUndo) {
