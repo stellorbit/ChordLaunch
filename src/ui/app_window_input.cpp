@@ -1098,7 +1098,9 @@ void AppWindow::OnMouseMove(float x, float y) {
         Part* pActive = m_partManager.GetActivePart();
         if (pActive && m_dragBarIndex >= 0 && m_dragBarIndex < static_cast<int>(pActive->bars.size())) {
             auto& bar = pActive->bars[m_dragBarIndex];
-            if (m_dragChordIndex >= 0 && m_dragChordIndex < static_cast<int>(bar.chords.size())) {
+            // 小節線を越えるカードを含む小節では入れ替えない（後続が小節外へ出てしまうため）
+            const bool barSpills = TimelineEdit::TotalTicks(bar) > std::max(1, bar.GetTotalTicks());
+            if (!barSpills && m_dragChordIndex >= 0 && m_dragChordIndex < static_cast<int>(bar.chords.size())) {
                 float dx = x - m_dragStartX;
                 if (dx > m_pixelsPerBeat && m_dragChordIndex + 1 < static_cast<int>(bar.chords.size())) {
                     std::swap(bar.chords[m_dragChordIndex], bar.chords[m_dragChordIndex + 1]);

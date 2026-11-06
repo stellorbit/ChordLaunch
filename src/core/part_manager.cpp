@@ -681,7 +681,7 @@ static bool ParseBarsJson(const std::string& partBlock, const Part& part, std::v
             fullRest.SetTicks(bar.GetTotalTicks());
             bar.chords.push_back(fullRest);
         }
-        TimelineEdit::NormalizeBar(bar, nullptr, true);
+        TimelineEdit::NormalizeBar(bar);
         bars.push_back(std::move(bar));
     }
 

@@ -52,36 +52,35 @@ void AppWindow::AppendChordToTimeline(const ChordToken& chord) {
     Part* pActive = m_partManager.GetActivePart();
     if (!pActive) return;
 
-    PushUndo();
-    m_isMergedView = false;
     int addTicks = (chord.durationTicks > 0) ? chord.durationTicks : (chord.durationBeats * TICKS_PER_BEAT);
+    addTicks = std::max(1, addTicks);
 
-    if (pActive->bars.empty()) {
-        Bar b;
-        b.barNumber = 1;
-        b.timeNumerator = pActive->timeNumerator;
-        b.timeDenominator = pActive->timeDenominator;
-        pActive->bars.push_back(b);
-    } else {
-        auto& lastBar = pActive->bars.back();
-        int usedTicks = 0;
-        for (const auto& existing : lastBar.chords) {
-            usedTicks += (existing.durationTicks > 0) ? existing.durationTicks : (existing.durationBeats * TICKS_PER_BEAT);
-        }
-        int maxBarTicks = lastBar.GetTotalTicks();
-        if (maxBarTicks <= 0) maxBarTicks = TICKS_PER_BAR_4_4;
-        if (!lastBar.chords.empty() && usedTicks + addTicks > maxBarTicks) {
-            Bar newBar;
-            newBar.barNumber = static_cast<int>(pActive->bars.size()) + 1;
-            newBar.timeNumerator = pActive->timeNumerator;
-            newBar.timeDenominator = pActive->timeDenominator;
-            pActive->bars.push_back(newBar);
+    // 最後のコード（休符を除く）の終端の直後へ、絶対tickで追加する。
+    // 小節線を越えても1枚のまま保持され、曲末を越える分は休符小節が足される
+    std::vector<Bar> work = pActive->bars;
+    if (work.empty()) EnsureBarsCoverTick(work, 1);
+    int appendTick = 0;
+    for (size_t b = 0; b < work.size(); ++b) {
+        int local = 0;
+        for (const auto& c : work[b].chords) {
+            const int d = (c.durationTicks > 0) ? c.durationTicks : (c.durationBeats * TICKS_PER_BEAT);
+            local += d;
+            if (!c.isRest && d > 0) {
+                appendTick = std::max(appendTick, TimelineEdit::BarStartTick(work, static_cast<int>(b)) + local);
+            }
         }
     }
 
-    pActive->bars.back().chords.push_back(chord);
-    m_selectedBarIndex = static_cast<int>(pActive->bars.size()) - 1;
-    m_selectedChordIndex = static_cast<int>(pActive->bars.back().chords.size()) - 1;
+    ChordToken placed = chord;
+    placed.SetTicks(addTicks);
+    auto res = TimelineEdit::InsertChordSpan(work, placed, appendTick);
+    if (res.selectedBar < 0) return;
+
+    PushUndo();
+    m_isMergedView = false;
+    pActive->bars = std::move(res.bars);
+    m_selectedBarIndex = res.selectedBar;
+    m_selectedChordIndex = std::max(0, res.selectedChord);
     EnsureVisible(m_selectedBarIndex);
     SyncTimelineToText();
     InvalidateRect(m_hwnd, nullptr, FALSE);
@@ -92,53 +91,31 @@ void AppWindow::InsertChordAtTimelineTick(const ChordToken& chord, int targetBar
     if (!pActive) return;
 
     if (targetBarIdx < 0) targetBarIdx = 0;
-    while (targetBarIdx >= static_cast<int>(pActive->bars.size())) {
-        Bar newBar;
-        newBar.barNumber = static_cast<int>(pActive->bars.size()) + 1;
-        newBar.timeNumerator = pActive->timeNumerator > 0 ? pActive->timeNumerator : 4;
-        newBar.timeDenominator = pActive->timeDenominator > 0 ? pActive->timeDenominator : 4;
-        ChordToken fullRest;
-        fullRest.isRest = true;
-        fullRest.quality = ChordQuality::Rest;
-        fullRest.rootName = "R";
-        fullRest.degreeRoman = "R";
-        fullRest.rawText = "_";
-        fullRest.SetTicks(newBar.GetTotalTicks());
-        newBar.chords.push_back(fullRest);
-        pActive->bars.push_back(newBar);
+
+    // 絶対tickで配置する。小節線を越えても1枚のまま保持され、
+    // 小節内 tick が小節長以上の場合はそのまま後続小節の位置として扱う
+    std::vector<Bar> work = pActive->bars;
+    while (static_cast<int>(work.size()) <= targetBarIdx) {
+        EnsureBarsCoverTick(work, TimelineEdit::SongTicks(work) + 1);
     }
+    const int absStart = TimelineEdit::BarStartTick(work, targetBarIdx) + std::max(0, targetTickInBar);
+
+    int chordTicks = chord.durationTicks > 0 ? chord.durationTicks : (chord.durationBeats > 0 ? chord.durationBeats * TICKS_PER_BEAT : TICKS_PER_BEAT);
+    chordTicks = std::max(1, chordTicks);
+
+    ChordToken placed = chord;
+    placed.SetTicks(chordTicks);
+
+    auto res = TimelineEdit::InsertChordSpan(work, placed, absStart);
+    if (res.selectedBar < 0) return;
 
     if (pushUndo) {
         PushUndo();
     }
     m_isMergedView = false;
-
-    Bar& targetBar = pActive->bars[targetBarIdx];
-    int barTicks = targetBar.GetTotalTicks();
-    if (barTicks <= 0) barTicks = TICKS_PER_BAR_4_4;
-
-    int chordTicks = chord.durationTicks > 0 ? chord.durationTicks : (chord.durationBeats > 0 ? chord.durationBeats * TICKS_PER_BEAT : TICKS_PER_BEAT);
-    chordTicks = std::max(1, chordTicks);
-
-    // 前小節から伸びてくる跨ぎカードに覆われた区間へは配置しない
-    int minGrid = std::max(1, m_timelineGridTicks);
-    int maxStart = std::max(0, barTicks - std::min(barTicks, minGrid));
-    int covered = TimelineEdit::IncomingCoverUntil(pActive->bars, targetBarIdx);
-    int minStart = std::min(covered, maxStart);
-    int newStart = std::clamp(targetTickInBar, minStart, maxStart);
-
-    ChordToken placed = chord;
-    placed.SetTicks(chordTicks);
-
-    auto overflow = TimelineEdit::InsertChord(targetBar, placed, newStart);
-    for (const auto& over : overflow) {
-        // 再帰で pActive->bars が拡張されるため参照を保持しない
-        InsertChordAtTimelineTick(over.chord, targetBarIdx + 1, over.startTick, false);
-    }
-
-    m_selectedBarIndex = targetBarIdx;
-    m_selectedChordIndex = TimelineEdit::ChordIndexAtTick(pActive->bars[targetBarIdx], newStart);
-    if (m_selectedChordIndex < 0) m_selectedChordIndex = 0;
+    pActive->bars = std::move(res.bars);
+    m_selectedBarIndex = res.selectedBar;
+    m_selectedChordIndex = std::max(0, res.selectedChord);
 
     EnsureVisible(m_selectedBarIndex);
     SyncTimelineToText();
@@ -163,8 +140,7 @@ void AppWindow::SplitSelectedChord() {
         return;
     }
 
-    PushUndo();
-    m_isMergedView = false;
+    if (chord.isRest) return;
 
     int halfTicks = totalTicks / 2;
     int snap = std::max(60, m_timelineGridTicks);
@@ -173,12 +149,26 @@ void AppWindow::SplitSelectedChord() {
     }
     int secondTicks = totalTicks - halfTicks;
 
-    chord.SetTicks(halfTicks);
-
+    // 絶対tickで前半・後半へ分ける（小節線を越えるカードでも後半が小節外へ取り残されない）
+    int startTick = TimelineEdit::BarStartTick(pActive->bars, m_selectedBarIndex);
+    for (int i = 0; i < m_selectedChordIndex; ++i) {
+        const auto& c = bar.chords[i];
+        startTick += (c.durationTicks > 0) ? c.durationTicks : (c.durationBeats * TICKS_PER_BEAT);
+    }
     ChordToken secondChord = chord;
     secondChord.SetTicks(secondTicks);
 
-    bar.chords.insert(bar.chords.begin() + m_selectedChordIndex + 1, secondChord);
+    auto first = TimelineEdit::ResizeChordSpan(pActive->bars, startTick, startTick, startTick + halfTicks, 1);
+    if (first.selectedBar < 0) return;
+    auto both = TimelineEdit::InsertChordSpan(first.bars, secondChord, startTick + halfTicks);
+    if (both.selectedBar < 0) return;
+
+    PushUndo();
+    m_isMergedView = false;
+    pActive->bars = std::move(both.bars);
+    m_selectedBarIndex = first.selectedBar;
+    m_selectedChordIndex = first.selectedChord;
+    m_selAnchorTick = PrimaryChordStartTick();
 
     SyncTimelineToText();
     SetStatusMessage(TR(L"コードを分割しました (B)", L"Split chord (B)"));
@@ -466,31 +456,15 @@ void AppWindow::InsertChordAtTimelineX(const ChordToken& chord, float x, bool pu
     Part* pActive = m_partManager.GetActivePart();
     if (!pActive) return;
 
-    float centerX = m_leftPaneWidth;
-    float barWidth = m_pixelsPerBeat * 4.0f;
-    float relX = (x - centerX) + m_timelineScrollX;
-    if (relX < 0.0f) relX = 0.0f;
-
-    int targetBarIdx = (barWidth > 0.0f) ? static_cast<int>(relX / barWidth) : 0;
-    float barOffsetRatio = (barWidth > 0.0f) ? (std::fmod(relX, barWidth) / barWidth) : 0.0f;
-
-    int barTotalTicks = -1;
-    if (targetBarIdx >= 0 && targetBarIdx < static_cast<int>(pActive->bars.size())) {
-        barTotalTicks = pActive->bars[targetBarIdx].GetTotalTicks();
-    }
-    if (barTotalTicks <= 0) {
-        int barNumerator = (pActive->timeNumerator > 0) ? pActive->timeNumerator : 4;
-        barTotalTicks = barNumerator * TICKS_PER_BEAT;
-    }
-
+    // 小節末尾へスナップした場合は次小節の先頭として扱う（小節内の上限で引き戻さない）
     int gridTicks = std::max(1, snapTicks > 0 ? snapTicks : m_timelineGridTicks);
-    float rawTick = barOffsetRatio * static_cast<float>(barTotalTicks);
-    int snappedTick = static_cast<int>(std::round(rawTick / static_cast<float>(gridTicks))) * gridTicks;
+    int targetBarIdx = 0;
+    int snappedTick = 0;
+    TimelineTickFromX(x, gridTicks, &targetBarIdx, &snappedTick);
+
     int fallbackTicks = std::max(1, m_inputGridTicks);
     int chordTicks = chord.durationTicks > 0 ? chord.durationTicks : (chord.durationBeats > 0 ? chord.durationBeats * TICKS_PER_BEAT : fallbackTicks);
     chordTicks = std::max(1, chordTicks);
-    int maxStart = std::max(0, barTotalTicks - std::min(barTotalTicks, gridTicks));
-    snappedTick = std::clamp(snappedTick, 0, maxStart);
 
     ChordToken placedChord = chord;
     placedChord.SetTicks(chordTicks);
@@ -704,20 +678,9 @@ void AppWindow::DuplicateSelection() {
         insertTick += d;
     }
     ChordToken copy = bar.chords[m_selectedChordIndex];
-    int copyTicks = copy.durationTicks > 0 ? copy.durationTicks : (copy.durationBeats * TICKS_PER_BEAT);
-    int barTicks = bar.GetTotalTicks();
-    if (barTicks <= 0) barTicks = TICKS_PER_BAR_4_4;
-
-    int targetBar = m_selectedBarIndex;
-    int targetTick = insertTick;
-    if (targetTick + copyTicks > barTicks) {
-        // 小節末尾を超える場合は次小節の先頭へ（元コードを上書きしない）
-        targetBar += 1;
-        targetTick = 0;
-    }
-
+    // 小節線を越えても1枚のまま、元コードの直後（絶対tick）へ置く
     PushUndo();
-    InsertChordAtTimelineTick(copy, targetBar, targetTick, false);
+    InsertChordAtTimelineTick(copy, m_selectedBarIndex, insertTick, false);
 }
 
 void AppWindow::DeleteSelection() {

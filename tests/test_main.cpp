@@ -1327,13 +1327,15 @@ void TestTimelineEditInsertAndResize() {
         Bar bar = MakeTickBar4();
         bar.chords.push_back(MakeTok("C", 1920));
 
-        auto overflow = TimelineEdit::InsertChord(bar, MakeTok("G", 480), 480);
-        TEST_ASSERT(overflow.empty(), "Split insert must not overflow a full-length chord");
-        TEST_ASSERT(bar.chords.size() == 3, "C must be split into 2 pieces around the inserted G");
-        TEST_ASSERT(bar.chords[0].rootName == "C" && bar.chords[0].durationTicks == 480, "Left C piece is 480 ticks");
-        TEST_ASSERT(bar.chords[1].rootName == "G" && bar.chords[1].durationTicks == 480, "G sits on beat 2");
-        TEST_ASSERT(bar.chords[2].rootName == "C" && bar.chords[2].durationTicks == 960, "Right C piece is 960 ticks (no drift)");
-        TEST_ASSERT(TimelineEdit::TotalTicks(bar) == 1920, "Bar total stays exactly 1920 ticks");
+        auto res = TimelineEdit::InsertChordSpan(std::vector<Bar>{bar}, MakeTok("G", 480), 480);
+        TEST_ASSERT(res.bars.size() == 1, "Split insert into a full-length chord must not add bars");
+        const Bar& rb = res.bars[0];
+        TEST_ASSERT(rb.chords.size() == 3, "C must be split into 2 pieces around the inserted G");
+        TEST_ASSERT(rb.chords[0].rootName == "C" && rb.chords[0].durationTicks == 480, "Left C piece is 480 ticks");
+        TEST_ASSERT(rb.chords[1].rootName == "G" && rb.chords[1].durationTicks == 480, "G sits on beat 2");
+        TEST_ASSERT(rb.chords[2].rootName == "C" && rb.chords[2].durationTicks == 960, "Right C piece is 960 ticks (no drift)");
+        TEST_ASSERT(TimelineEdit::TotalTicks(rb) == 1920, "Bar total stays exactly 1920 ticks");
+        TEST_ASSERT(res.selectedBar == 0 && res.selectedChord == 1, "Inserted G is reported as the selection");
     }
 
     // 2. 休符区間へのドロップは休符を消費し、後続コードを押し出さない
@@ -1342,40 +1344,44 @@ void TestTimelineEditInsertAndResize() {
         bar.chords.push_back(MakeTok("C", 960));
         bar.chords.push_back(MakeRestTok(960));
 
-        auto overflow = TimelineEdit::InsertChord(bar, MakeTok("G", 480), 960);
-        TEST_ASSERT(overflow.empty(), "Drop into a rest must not overflow");
-        TEST_ASSERT(bar.chords.size() == 3, "Rest is split into chord + remainder");
-        TEST_ASSERT(bar.chords[0].rootName == "C" && bar.chords[0].durationTicks == 960, "Preceding C untouched");
-        TEST_ASSERT(bar.chords[1].rootName == "G" && bar.chords[1].durationTicks == 480, "G pinned at the drop tick");
-        TEST_ASSERT(bar.chords[2].isRest && bar.chords[2].durationTicks == 480, "Remaining rest is 480 ticks");
-        TEST_ASSERT(StartTickOfIndex(bar, 1) == 960, "G starts exactly at the drop tick (WYSIWYG)");
+        auto res = TimelineEdit::InsertChordSpan(std::vector<Bar>{bar}, MakeTok("G", 480), 960);
+        TEST_ASSERT(res.bars.size() == 1, "Drop into a rest must not add bars");
+        const Bar& rb = res.bars[0];
+        TEST_ASSERT(rb.chords.size() == 3, "Rest is split into chord + remainder");
+        TEST_ASSERT(rb.chords[0].rootName == "C" && rb.chords[0].durationTicks == 960, "Preceding C untouched");
+        TEST_ASSERT(rb.chords[1].rootName == "G" && rb.chords[1].durationTicks == 480, "G pinned at the drop tick");
+        TEST_ASSERT(rb.chords[2].isRest && rb.chords[2].durationTicks == 480, "Remaining rest is 480 ticks");
+        TEST_ASSERT(StartTickOfIndex(rb, 1) == 960, "G starts exactly at the drop tick (WYSIWYG)");
     }
 
-    // 3. 満杯の小節では押し出し分が overflow として次小節へ渡る（データ消失なし）
+    // 3. 満杯の小節では押し出し分が次小節へ続く（データ消失なし・休符小節が足される）
     {
         Bar bar = MakeTickBar4();
         for (const char* r : {"C", "D", "E", "F"}) bar.chords.push_back(MakeTok(r, 480));
 
-        auto overflow = TimelineEdit::InsertChord(bar, MakeTok("G", 480), 480);
-        TEST_ASSERT(overflow.size() == 1, "One chord overflows to the next bar");
-        TEST_ASSERT(overflow[0].chord.rootName == "F", "Last chord F is carried over (nothing is deleted)");
-        TEST_ASSERT(TimelineEdit::TotalTicks(bar) == 1920, "Rippled bar still sums to 1920 ticks");
-        TEST_ASSERT(bar.chords[1].rootName == "G", "Inserted chord lands on the requested tick");
-        TEST_ASSERT(StartTickOfIndex(bar, 1) == 480, "Inserted chord starts at 480 ticks");
+        auto res = TimelineEdit::InsertChordSpan(std::vector<Bar>{bar}, MakeTok("G", 480), 480);
+        TEST_ASSERT(res.bars.size() == 2, "A rest bar is appended to hold the pushed-out chord");
+        const Bar& b0 = res.bars[0];
+        TEST_ASSERT(b0.chords.size() == 4 && b0.chords[1].rootName == "G", "Inserted chord lands on the requested tick");
+        TEST_ASSERT(StartTickOfIndex(b0, 1) == 480, "Inserted chord starts at 480 ticks");
+        TEST_ASSERT(b0.chords[3].rootName == "E", "E is pushed to beat 4");
+        TEST_ASSERT(res.bars[1].chords[0].rootName == "F" && res.bars[1].chords[0].durationTicks == 480, "F is carried into the next bar (nothing is deleted)");
+        TEST_ASSERT(TimelineEdit::TotalTicks(res.bars[1]) == 1920, "Appended bar still sums to 1920 ticks");
     }
 
-    // 4. 押し出しは後方の休符で吸収される（次小節へ漏れない）
+    // 4. 押し出しは後方の休符で吸収される（曲は伸びない）
     {
         Bar bar = MakeTickBar4();
         bar.chords.push_back(MakeTok("C", 480));
         bar.chords.push_back(MakeRestTok(1440));
 
-        auto overflow = TimelineEdit::InsertChord(bar, MakeTok("G", 480), 0);
-        TEST_ASSERT(overflow.empty(), "Trailing rest absorbs the shift");
-        TEST_ASSERT(TimelineEdit::TotalTicks(bar) == 1920, "Bar stays 1920 ticks");
-        TEST_ASSERT(bar.chords[0].rootName == "G", "G on beat 1");
-        TEST_ASSERT(bar.chords[1].rootName == "C" && bar.chords[1].durationTicks == 480, "C pushed to beat 2");
-        TEST_ASSERT(bar.chords[2].isRest && bar.chords[2].durationTicks == 960, "Rest shrunk to 960 ticks");
+        auto res = TimelineEdit::InsertChordSpan(std::vector<Bar>{bar}, MakeTok("G", 480), 0);
+        TEST_ASSERT(res.bars.size() == 1, "Trailing rest absorbs the shift");
+        const Bar& rb = res.bars[0];
+        TEST_ASSERT(TimelineEdit::TotalTicks(rb) == 1920, "Bar stays 1920 ticks");
+        TEST_ASSERT(rb.chords[0].rootName == "G", "G on beat 1");
+        TEST_ASSERT(rb.chords[1].rootName == "C" && rb.chords[1].durationTicks == 480, "C pushed to beat 2");
+        TEST_ASSERT(rb.chords[2].isRest && rb.chords[2].durationTicks == 960, "Rest shrunk to 960 ticks");
     }
 
     auto MakeBars = [](std::initializer_list<Bar> bs) {
@@ -1693,66 +1699,67 @@ void TestSyncopationPersistence() {
 }
 
 void TestOneBarChordCrossBarInsertion() {
-    std::cout << "[TEST] 28. One-bar chord cross-bar insertion and overflow handling\n";
+    std::cout << "[TEST] 28. One-bar chord cross-bar insertion keeps a single card\n";
 
-    // 1. 1小節のコード A (1920 ticks) を Bar 1 の 2拍目 (480 ticks) に挿入
-    Bar bar1;
-    bar1.barNumber = 1;
-    bar1.timeNumerator = 4;
-    bar1.timeDenominator = 4;
+    auto MakeBar = [](int number) {
+        Bar b;
+        b.barNumber = number;
+        b.timeNumerator = 4;
+        b.timeDenominator = 4;
+        return b;
+    };
 
-    ChordToken chordC;
-    chordC.rawText = "C";
-    chordC.rootName = "C";
-    chordC.SetTicks(1920);
-    bar1.chords.push_back(chordC);
+    // 1. 1小節のコード A (1920 ticks) を Bar 1 の 2拍目 (480 ticks) へ挿入: 小節線で分割されず1枚のまま跨ぐ
+    {
+        Bar bar1 = MakeBar(1);
+        bar1.chords.push_back(MakeTok("C", 1920));
+        Bar bar2 = MakeBar(2);
+        bar2.chords.push_back(MakeRestTok(1920));
 
-    ChordToken chordA;
-    chordA.rawText = "A";
-    chordA.rootName = "A";
-    chordA.SetTicks(1920);
+        auto res = TimelineEdit::InsertChordSpan({ bar1, bar2 }, MakeTok("A", 1920), 480);
+        TEST_ASSERT(res.bars.size() == 2, "Crossing insert fits in the existing two bars");
+        TEST_ASSERT(res.bars[0].chords.size() == 2, "Bar 1 holds trimmed C and the crossing A");
+        TEST_ASSERT(res.bars[0].chords[0].rootName == "C" && res.bars[0].chords[0].durationTicks == 480, "C occupies Beat 1");
+        TEST_ASSERT(res.bars[0].chords[1].rootName == "A" && res.bars[0].chords[1].durationTicks == 1920, "A keeps its full 1920 ticks as one card");
+        TEST_ASSERT(res.bars[1].chords.size() == 1 && res.bars[1].chords[0].isRest, "Bar 2 holds no split copy of A");
+        TEST_ASSERT(res.selectedBar == 0 && res.selectedChord == 1, "The crossing card is selected in its start bar");
+    }
 
-    auto overflow = TimelineEdit::InsertChord(bar1, chordA, 480);
-    TEST_ASSERT(overflow.size() == 1, "Inserting 1-bar chord at Beat 2 produces 1 overflow item");
-    TEST_ASSERT(overflow[0].startTick == 0, "Overflow item starts at tick 0 of next bar");
-    TEST_ASSERT(overflow[0].chord.durationTicks == 480, "Overflow item duration is 480 ticks (1 beat)");
+    // 2. 3拍目 (960 ticks) へ1小節コードを挿入: 最終小節を越える分は休符小節が足される
+    {
+        Bar bar3 = MakeBar(1);
+        bar3.chords.push_back(MakeRestTok(1920));
 
-    TEST_ASSERT(TimelineEdit::TotalTicks(bar1) == 1920, "Bar 1 total ticks is strictly 1920 ticks");
-    TEST_ASSERT(bar1.chords.size() == 2, "Bar 1 contains 2 chords (C trimmed to 480, A occupying 1440)");
-    TEST_ASSERT(bar1.chords[0].rootName == "C" && bar1.chords[0].durationTicks == 480, "C occupies 0..480 (Beat 1)");
-    TEST_ASSERT(bar1.chords[1].rootName == "A" && bar1.chords[1].durationTicks == 1440, "A occupies 480..1920 (Beats 2-4)");
+        auto res = TimelineEdit::InsertChordSpan({ bar3 }, MakeTok("A", 1920), 960);
+        TEST_ASSERT(res.bars.size() == 2, "A rest bar is appended for the part beyond the song end");
+        TEST_ASSERT(TimelineEdit::SongTicks(res.bars) == 3840, "Song grows by exactly one bar");
+        TEST_ASSERT(res.bars[0].chords.size() == 2 && res.bars[0].chords[0].isRest && res.bars[0].chords[0].durationTicks == 960, "Bar 1 has rest (960)");
+        TEST_ASSERT(res.bars[0].chords[1].rootName == "A" && res.bars[0].chords[1].durationTicks == 1920, "A is stored as one 1920-tick card");
+    }
 
-    // 2. 次小節 (Bar 2) へのオーバーフロー挿入
-    Bar bar2;
-    bar2.barNumber = 2;
-    bar2.timeNumerator = 4;
-    bar2.timeDenominator = 4;
-    ChordToken restBar2;
-    restBar2.isRest = true;
-    restBar2.rawText = "_";
-    restBar2.SetTicks(1920);
-    bar2.chords.push_back(restBar2);
+    // 3. 拍子の異なる小節（4/4 の次が 3/4）をまたぐ挿入でも、絶対tickで位置が保たれる
+    {
+        Bar bar1 = MakeBar(1);
+        bar1.chords.push_back(MakeRestTok(1920));
+        Bar bar2;
+        bar2.barNumber = 2;
+        bar2.timeNumerator = 3;
+        bar2.timeDenominator = 4;
+        bar2.chords.push_back(MakeRestTok(1440));
 
-    auto overflow2 = TimelineEdit::InsertChord(bar2, overflow[0].chord, overflow[0].startTick);
-    TEST_ASSERT(overflow2.empty(), "Overflow item into empty bar produces no further overflow");
-    TEST_ASSERT(TimelineEdit::TotalTicks(bar2) == 1920, "Bar 2 total ticks is strictly 1920 ticks");
-    TEST_ASSERT(bar2.chords.size() == 2, "Bar 2 contains A (480) and remaining rest (1440)");
-    TEST_ASSERT(bar2.chords[0].rootName == "A" && bar2.chords[0].durationTicks == 480, "A occupies Beat 1 of Bar 2 (480 ticks)");
-    TEST_ASSERT(bar2.chords[1].isRest && bar2.chords[1].durationTicks == 1440, "Remaining 3 beats in Bar 2 are rest (1440 ticks)");
+        auto res = TimelineEdit::InsertChordSpan({ bar1, bar2 }, MakeTok("D", 960), 1440);
+        TEST_ASSERT(res.bars.size() == 2 && TimelineEdit::SongTicks(res.bars) == 3360, "Song length is unchanged");
+        TEST_ASSERT(res.bars[0].chords.size() == 2 && res.bars[0].chords[1].rootName == "D" && res.bars[0].chords[1].durationTicks == 960, "D crosses from the 4/4 bar into the 3/4 bar as one card");
+    }
 
-    // 3. 3拍目 (960 ticks) に1小節コードを挿入した場合の前後小節の分割検証
-    Bar bar3;
-    bar3.barNumber = 3;
-    ChordToken restBar3;
-    restBar3.isRest = true;
-    restBar3.rawText = "_";
-    restBar3.SetTicks(1920);
-    bar3.chords.push_back(restBar3);
-
-    auto over3 = TimelineEdit::InsertChord(bar3, chordA, 960);
-    TEST_ASSERT(over3.size() == 1 && over3[0].chord.durationTicks == 960, "At Beat 3, overflow is 960 ticks (2 beats)");
-    TEST_ASSERT(TimelineEdit::TotalTicks(bar3) == 1920, "Bar 3 total ticks is 1920 ticks");
-    TEST_ASSERT(bar3.chords.size() == 2 && bar3.chords[1].durationTicks == 960, "Bar 3 has rest (960) + A (960)");
+    // 4. 小節跨ぎカードを持つ小節の NormalizeBar は、末尾の跨ぎを保持する
+    {
+        Bar bar = MakeBar(1);
+        bar.chords.push_back(MakeRestTok(960));
+        bar.chords.push_back(MakeTok("A", 1920));
+        TimelineEdit::NormalizeBar(bar);
+        TEST_ASSERT(bar.chords.size() == 2 && bar.chords[1].durationTicks == 1920, "Tail-crossing card is preserved");
+    }
 }
 
 void TestExistingProjectDeserializationRestoresPitch() {

@@ -6,15 +6,10 @@
 namespace clp {
 
 // タイムライン（小節内コード列）の tick ベース編集。
-// すべての関数は「小節のコード列が必ず Bar::GetTotalTicks() 分を過不足なく覆う」
-// という不変条件を維持する。はみ出した内容は overflow として次小節へ引き渡す。
+// 小節線に縛られず、コードは絶対tickで配置する。小節線を越えるカードは
+// 開始小節に1枚のまま保持し、後続小節側は覆われた区間を切り詰める。
 class TimelineEdit {
 public:
-    struct OverflowItem {
-        int startTick = 0; // 次小節先頭からの tick
-        ChordToken chord;
-    };
-
     // 小節内の実際の合計 tick（休符含む）
     static int TotalTicks(const Bar& bar);
 
@@ -27,15 +22,10 @@ public:
     // 前小節から伸びてくる跨ぎカードが、この小節の先頭から何 tick まで覆っているか
     static int IncomingCoverUntil(const std::vector<Bar>& bars, int barIndex);
 
-    // 連続休符の結合・0tick要素の除去・末尾休符の補完・小節超過分の切り出し。
-    // allowTailSpill=true のとき、小節最後のコードが小節線を越えて伸びる
-    // 「小節跨ぎカード」をそのまま保持する（プロジェクト読込用）。
-    static void NormalizeBar(Bar& bar, std::vector<OverflowItem>* overflow = nullptr, bool allowTailSpill = false);
-
-    // 指定 tick にコードを挿入する。既存コードと衝突する場合は既存コードを
-    // 前後に分割し、後続を後ろへ押し出す（既存データを失わない）。
-    // 戻り値は次小節へあふれた内容。bar は正規化済みで返る。
-    static std::vector<OverflowItem> InsertChord(Bar& bar, const ChordToken& chord, int startTick);
+    // 連続休符の結合・0tick要素の除去・末尾休符の補完。
+    // 小節最後のコードが小節線を越えて伸びる「小節跨ぎカード」はそのまま保持し、
+    // それ以外の小節超過分は切り詰める（プロジェクト読込用）。
+    static void NormalizeBar(Bar& bar);
 
     // 小節線を越えるリサイズ。targetStartTick のコードの開始/終了を絶対tickで動かし、
     // パート全体を絶対時間で再構築する（カードは1枚のまま小節を跨ぐ）。
@@ -57,6 +47,14 @@ public:
                                     int targetStartTick,
                                     int newStartTick,
                                     int minTicks);
+
+    // 絶対tick startTick へコードを挿入する。長さは保持し、小節線を越えても1枚のままとする。
+    // 既存コードと衝突する場合は、またぐコードを前後に分割し、挿入位置以降のコードを
+    // 後方の休符（隙間）で吸収しながら押し出す。曲末を越える分は休符小節を足して収める。
+    // 休符コードの挿入は何もしない（selectedBar = -1）。
+    static SpanResult InsertChordSpan(const std::vector<Bar>& baseBars,
+                                      const ChordToken& chord,
+                                      int startTick);
 
     // クリップボード用: 選択コード群を、先頭コードを 0 とした相対tickで保持する。
     struct RangeItem {

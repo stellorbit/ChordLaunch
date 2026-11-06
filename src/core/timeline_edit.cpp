@@ -85,33 +85,6 @@ void WriteItems(Bar& bar, std::vector<Item> items) {
     bar.chords = std::move(out);
 }
 
-// 挿入で押し出された分を、挿入位置より後ろの休符から吸収する。
-// 休符を詰めた分だけ後続を前へ詰めるため、小節内の総tickは変化しない。
-void AbsorbByRests(std::vector<Item>& items, int barTicks, int insertStart) {
-    int totalEnd = 0;
-    for (const auto& it : items) {
-        totalEnd = std::max(totalEnd, it.start + DurOf(it.chord));
-    }
-    int deficit = totalEnd - barTicks;
-    if (deficit <= 0) return;
-
-    for (int i = static_cast<int>(items.size()) - 1; i >= 0 && deficit > 0; --i) {
-        if (!items[i].chord.isRest) continue;
-        if (items[i].start < insertStart) continue;
-        int d = DurOf(items[i].chord);
-        int take = std::min(d, deficit);
-        for (size_t j = static_cast<size_t>(i) + 1; j < items.size(); ++j) {
-            items[j].start -= take;
-        }
-        if (take >= d) {
-            items.erase(items.begin() + i);
-        } else {
-            items[i].chord.SetTicks(d - take);
-        }
-        deficit -= take;
-    }
-}
-
 // 絶対tick配置（開始順）から、小節ごとのコード列を再構築する。
 // 小節の開始位置は拍子ぶん固定。小節線を越えるカードは開始小節に1枚のまま保持し、
 // 跨ぎカードに覆われた後続区間は切り詰める。
@@ -210,7 +183,7 @@ int TimelineEdit::ChordIndexAtTick(const Bar& bar, int tick) {
     return -1;
 }
 
-void TimelineEdit::NormalizeBar(Bar& bar, std::vector<OverflowItem>* overflow, bool allowTailSpill) {
+void TimelineEdit::NormalizeBar(Bar& bar) {
     const int barTicks = BarTicksOf(bar);
 
     std::vector<Item> items = PlacementsOf(bar);
@@ -219,27 +192,14 @@ void TimelineEdit::NormalizeBar(Bar& bar, std::vector<OverflowItem>* overflow, b
     for (int i = 0; i < static_cast<int>(items.size()); ++i) {
         Item& it = items[static_cast<size_t>(i)];
         int d = DurOf(it.chord);
-        if (it.start >= barTicks) {
-            if (overflow) {
-                it.start -= barTicks;
-                overflow->push_back(OverflowItem{it.start, it.chord});
-            }
-            continue;
-        }
+        if (it.start >= barTicks) continue; // 小節外から始まるコードは、この小節には属さない
         if (it.start + d > barTicks) {
             // 小節跨ぎカード（末尾コードの小節線越え）はそのまま保持する
-            if (allowTailSpill && i == lastIndex && !it.chord.isRest) {
+            if (i == lastIndex && !it.chord.isRest) {
                 kept.push_back(it);
                 continue;
             }
-            int inBar = barTicks - it.start;
-            int over = d - inBar;
-            if (overflow && over > 0) {
-                ChordToken overChord = it.chord;
-                overChord.SetTicks(over);
-                overflow->push_back(OverflowItem{0, overChord});
-            }
-            it.chord.SetTicks(inBar);
+            it.chord.SetTicks(barTicks - it.start);
         }
         kept.push_back(it);
     }
@@ -435,104 +395,91 @@ std::vector<Bar> TimelineEdit::InsertRange(const std::vector<Bar>& bars,
     return RebuildBars(bars, placements);
 }
 
-std::vector<TimelineEdit::OverflowItem> TimelineEdit::InsertChord(Bar& bar, const ChordToken& chord, int startTick) {
-    std::vector<OverflowItem> overflow;
-    NormalizeBar(bar, &overflow);
+TimelineEdit::SpanResult TimelineEdit::InsertChordSpan(const std::vector<Bar>& baseBars,
+                                                       const ChordToken& chord,
+                                                       int startTick) {
+    SpanResult res;
+    res.bars = baseBars;
+    if (baseBars.empty() || chord.isRest || startTick < 0) return res;
 
-    const int barTicks = BarTicksOf(bar);
-    int chordTicks = std::max(1, DurOf(chord));
-    startTick = std::clamp(startTick, 0, std::max(0, barTicks - 1));
-
-    if (chord.isRest) {
-        return overflow;
-    }
-
+    const int len = std::max(1, DurOf(chord));
+    const int s = startTick;
+    const int e = s + len;
     ChordToken newChord = chord;
-    newChord.SetTicks(chordTicks);
-    const int newStart = startTick;
-    const int newEnd = startTick + chordTicks;
+    newChord.SetTicks(len);
 
-    std::vector<Item> placed = PlacementsOf(bar);
-    bool hasCollision = false;
-    for (const auto& p : placed) {
-        if (p.chord.isRest) continue;
-        int ps = p.start;
-        int pe = ps + DurOf(p.chord);
-        if (std::max(ps, newStart) < std::min(pe, newEnd)) {
-            hasCollision = true;
+    // 1. 全コードを絶対tickで収集し、新コードと重なる非休符があるか調べる
+    std::vector<Item> placements = CollectAbsolute(baseBars);
+    bool collision = false;
+    for (const auto& p : placements) {
+        if (std::max(p.start, s) < std::min(p.start + DurOf(p.chord), e)) {
+            collision = true;
             break;
         }
     }
 
-    std::vector<Item> resolved;
-    if (!hasCollision) {
-        for (const auto& p : placed) {
-            int ps = p.start;
-            int pe = ps + DurOf(p.chord);
-            if (p.chord.isRest && pe > newStart && ps < newEnd) {
-                if (ps < newStart) {
-                    ChordToken leftRest = p.chord;
-                    leftRest.SetTicks(newStart - ps);
-                    resolved.push_back(Item{ps, leftRest});
-                }
-                if (pe > newEnd) {
-                    ChordToken rightRest = p.chord;
-                    rightRest.SetTicks(pe - newEnd);
-                    resolved.push_back(Item{newEnd, rightRest});
-                }
-                continue;
-            }
-            resolved.push_back(p);
-        }
-        resolved.push_back(Item{newStart, newChord});
+    // 2. 衝突なし: 休符（隙間）へそのまま置く。衝突あり: またぐコードは前後に分割し、
+    //    挿入位置以降のコードは新コードの終端へ向けて必要なぶんだけ後方へ押し出す
+    //    （後方の隙間＝休符は押し出しを吸収する）
+    std::vector<Item> out;
+    std::vector<Item> after;
+    if (!collision) {
+        out = std::move(placements);
     } else {
-        for (const auto& p : placed) {
-            int ps = p.start;
-            int pe = ps + DurOf(p.chord);
-            if (p.chord.isRest) {
-                if (pe <= newStart || ps >= newEnd) {
-                    resolved.push_back(p);
-                } else {
-                    if (ps < newStart) {
-                        ChordToken leftRest = p.chord;
-                        leftRest.SetTicks(newStart - ps);
-                        resolved.push_back(Item{ps, leftRest});
-                    }
-                    if (pe > newEnd) {
-                        ChordToken rightRest = p.chord;
-                        rightRest.SetTicks(pe - newEnd);
-                        resolved.push_back(Item{newEnd, rightRest});
-                    }
-                }
-            } else if (pe <= newStart) {
-                resolved.push_back(p);
-            } else if (ps >= newStart) {
-                // 挿入位置より後ろのコードは挿入長ぶん後方へ押し出す
-                Item shifted = p;
-                shifted.start += chordTicks;
-                resolved.push_back(shifted);
+        for (const auto& p : placements) {
+            const int ps = p.start;
+            const int pe = ps + DurOf(p.chord);
+            if (pe <= s) {
+                out.push_back(p);
+            } else if (ps >= s) {
+                after.push_back(p);
             } else {
-                // 挿入位置をまたぐコードは前後に分割（挿入区間は置き換え）
-                if (newStart > ps) {
-                    ChordToken left = p.chord;
-                    left.SetTicks(newStart - ps);
-                    resolved.push_back(Item{ps, left});
-                }
-                if (pe > newEnd) {
+                ChordToken left = p.chord;
+                left.SetTicks(s - ps);
+                out.push_back(Item{ps, left});
+                if (pe > e) {
                     ChordToken right = p.chord;
-                    right.SetTicks(pe - newEnd);
-                    resolved.push_back(Item{newEnd, right});
+                    right.SetTicks(pe - e);
+                    after.push_back(Item{e, right});
                 }
             }
         }
-        resolved.push_back(Item{newStart, newChord});
+    }
+    out.push_back(Item{s, newChord});
+    int cursor = e;
+    for (auto& it : after) {
+        it.start = std::max(it.start, cursor);
+        cursor = it.start + DurOf(it.chord);
+        out.push_back(it);
+    }
+    out = MergeAndSort(std::move(out));
+
+    // 3. 曲末を越える分は、直前小節と同じ拍子の休符小節を足して収める（データを失わない）
+    int endTick = 0;
+    for (const auto& it : out) endTick = std::max(endTick, it.start + DurOf(it.chord));
+    while (SongTicks(res.bars) < endTick) {
+        Bar nb;
+        nb.barNumber = static_cast<int>(res.bars.size()) + 1;
+        nb.timeNumerator = res.bars.back().timeNumerator;
+        nb.timeDenominator = res.bars.back().timeDenominator;
+        nb.chords.push_back(MakeRest(BarTicksOf(nb)));
+        res.bars.push_back(std::move(nb));
     }
 
-    resolved = MergeAndSort(std::move(resolved));
-    AbsorbByRests(resolved, barTicks, newEnd);
-    WriteItems(bar, std::move(resolved));
-    NormalizeBar(bar, &overflow);
-    return overflow;
+    // 4. 小節ごとに再構築（小節跨ぎのカードは開始小節に1枚のまま保持）
+    res.bars = RebuildBars(res.bars, out);
+
+    int barStart = 0;
+    for (size_t i = 0; i < res.bars.size(); ++i) {
+        const int bt = BarTicksOf(res.bars[i]);
+        if (s >= barStart && s < barStart + bt) {
+            res.selectedBar = static_cast<int>(i);
+            res.selectedChord = ChordIndexAtTick(res.bars[i], s - barStart);
+            break;
+        }
+        barStart += bt;
+    }
+    return res;
 }
 
 } // namespace clp

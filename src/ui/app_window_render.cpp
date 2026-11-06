@@ -44,33 +44,16 @@ void AppWindow::OnRender() {
             float relX = (dragTargetX - centerX) + m_timelineScrollX;
             if (relX < 0.0f) relX = 0.0f;
 
-            Part* pActive = m_partManager.GetActivePart();
             int targetBarIdx = (barWidth > 0.0f) ? static_cast<int>(relX / barWidth) : 0;
-            float barOffsetRatio = (barWidth > 0.0f) ? (std::fmod(relX, barWidth) / barWidth) : 0.0f;
 
-            // ドロップ先の小節が実在する場合はその拍子を優先（挿入処理と完全一致させる）
-            int barTotalTicks = -1;
-            if (pActive && targetBarIdx >= 0 && targetBarIdx < static_cast<int>(pActive->bars.size())) {
-                barTotalTicks = pActive->bars[targetBarIdx].GetTotalTicks();
-            }
-            if (barTotalTicks <= 0) {
-                int barNumerator = (pActive && pActive->timeNumerator > 0) ? pActive->timeNumerator : 4;
-                barTotalTicks = barNumerator * TICKS_PER_BEAT;
-            }
-
+            // 実際の挿入・移動処理と同じ位置（小節線で引き戻さない絶対tick）を表示する
             int gridTicks = std::max(1, m_timelineGridTicks);
-            float rawTick = barOffsetRatio * static_cast<float>(barTotalTicks);
-            int snappedTick = static_cast<int>(std::round(rawTick / static_cast<float>(gridTicks))) * gridTicks;
+            int snappedTick = 0;
+            int barTotalTicks = TICKS_PER_BAR_4_4;
+            TimelineTickFromX(dragTargetX, gridTicks, &targetBarIdx, &snappedTick, &barTotalTicks);
             int fallbackTicks = std::max(1, m_inputGridTicks);
             int chordTicks = m_dragPaletteChord.durationTicks > 0 ? m_dragPaletteChord.durationTicks : (m_dragPaletteChord.durationBeats > 0 ? m_dragPaletteChord.durationBeats * TICKS_PER_BEAT : fallbackTicks);
             chordTicks = std::max(1, chordTicks);
-            int maxStart = std::max(0, barTotalTicks - std::min(barTotalTicks, gridTicks));
-            int covered = (pActive) ? TimelineEdit::IncomingCoverUntil(pActive->bars, targetBarIdx) : 0;
-            snappedTick = std::clamp(snappedTick, std::min(covered, maxStart), maxStart);
-            if (m_dragMode == DragMode::CardTimelineDrag) {
-                // 既存カードの移動は小節内の上限・前小節のカバー範囲で制限せず、実際の移動処理と同じ位置を表示する
-                TimelineTickFromX(dragTargetX, gridTicks, &targetBarIdx, &snappedTick, &barTotalTicks);
-            }
 
             float barLeftX = centerX + targetBarIdx * barWidth - m_timelineScrollX;
             float slotX = barLeftX + (static_cast<float>(snappedTick) / static_cast<float>(barTotalTicks)) * barWidth;
