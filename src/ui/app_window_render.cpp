@@ -47,7 +47,8 @@ void AppWindow::OnRender() {
             int targetBarIdx = (barWidth > 0.0f) ? static_cast<int>(relX / barWidth) : 0;
 
             // 実際の挿入・移動処理と同じ位置（小節線で引き戻さない絶対tick）を表示する
-            int gridTicks = std::max(1, m_timelineGridTicks);
+            // パレットドラッグは入力グリッド、配置済みカード移動は表示グリッドでスナップ（実処理と一致）
+            int gridTicks = std::max(1, (m_dragMode == DragMode::PaletteCardDrag) ? m_inputGridTicks : m_timelineGridTicks);
             int snappedTick = 0;
             int barTotalTicks = TICKS_PER_BAR_4_4;
             TimelineTickFromX(dragTargetX, gridTicks, &targetBarIdx, &snappedTick, &barTotalTicks);

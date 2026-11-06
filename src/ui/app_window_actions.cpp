@@ -86,6 +86,73 @@ void AppWindow::AppendChordToTimeline(const ChordToken& chord) {
     InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
+void AppWindow::ApplyTemplateProgression(const std::string& progression) {
+    Part* pActive = m_partManager.GetActivePart();
+    if (!pActive) return;
+
+    std::vector<Bar> parsed = ProgressionParser::Parse(progression, pActive->keyRoot, pActive->mode);
+
+    // 全コードを順に並べ、各コードの音価を入力グリッドへそろえる。
+    // 小節頭のセクション名・キー変更は、その小節の先頭コードに紐づけて持ち越す。
+    struct Entry {
+        ChordToken chord;
+        std::string sectionMarker;
+        std::string keyChange;
+    };
+    std::vector<Entry> entries;
+    for (const auto& b : parsed) {
+        bool first = true;
+        for (const auto& c : b.chords) {
+            Entry e;
+            e.chord = c;
+            if (first) {
+                e.sectionMarker = b.sectionMarker;
+                e.keyChange = b.keyChange;
+                first = false;
+            }
+            entries.push_back(std::move(e));
+        }
+    }
+    if (entries.empty()) {
+        pActive->bars = std::move(parsed);
+        return;
+    }
+
+    const int unit = std::max(1, m_inputGridTicks);
+    const int total = unit * static_cast<int>(entries.size());
+
+    std::vector<Bar> work;
+    EnsureBarsCoverTick(work, total);
+
+    std::vector<std::pair<int, const Entry*>> markerAt;
+    int tick = 0;
+    for (const auto& e : entries) {
+        if (!e.sectionMarker.empty() || !e.keyChange.empty()) markerAt.emplace_back(tick, &e);
+        if (!e.chord.isRest) {
+            ChordToken placed = e.chord;
+            placed.SetTicks(unit);
+            auto res = TimelineEdit::InsertChordSpan(work, placed, tick);
+            if (res.selectedBar >= 0) work = std::move(res.bars);
+        }
+        tick += unit;
+    }
+
+    for (const auto& m : markerAt) {
+        int barStart = 0;
+        for (auto& bar : work) {
+            const int bt = std::max(1, bar.GetTotalTicks());
+            if (m.first >= barStart && m.first < barStart + bt) {
+                if (bar.sectionMarker.empty()) bar.sectionMarker = m.second->sectionMarker;
+                if (bar.keyChange.empty()) bar.keyChange = m.second->keyChange;
+                break;
+            }
+            barStart += bt;
+        }
+    }
+
+    pActive->bars = std::move(work);
+}
+
 void AppWindow::InsertChordAtTimelineTick(const ChordToken& chord, int targetBarIdx, int targetTickInBar, bool pushUndo) {
     Part* pActive = m_partManager.GetActivePart();
     if (!pActive) return;

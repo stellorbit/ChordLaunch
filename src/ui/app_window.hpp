@@ -239,6 +239,8 @@ private:
     void SelectChord(int barIndex, int chordIndex);
     void AuditionChord(const ChordToken& chord);
     void AppendChordToTimeline(const ChordToken& chord);
+    // テンプレート進行を現在のパートへ展開する（各コードの音価は入力グリッド）
+    void ApplyTemplateProgression(const std::string& progression);
     void SyncTextToTimeline();
     void SyncTimelineToText();
     void PushUndo();

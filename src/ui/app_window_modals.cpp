@@ -1583,7 +1583,7 @@ bool AppWindow::OnModalClick(float x, float y) {
                     Part* pActive = m_partManager.GetActivePart();
                     if (pActive) {
                         PushUndo();
-                        pActive->bars = ProgressionParser::Parse(tmpls[i].progression, pActive->keyRoot, pActive->mode);
+                        ApplyTemplateProgression(tmpls[i].progression);
                         pActive->rawProgressionText = tmpls[i].progression;
                         SyncTimelineToText();
                         m_isDirty = true;
