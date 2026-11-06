@@ -1049,18 +1049,6 @@ std::vector<int> MusicEngine::GetChordMidiNotes(
     return notes;
 }
 
-std::vector<MusicEngine::TemplateInfo> MusicEngine::GetBuiltinTemplates() {
-    return {
-        {"oudo", "王道進行 (4536)", "| IVMaj7 | V7 | iiim7 | vim7 |", "J-POP・アニソンで最も愛される大ヒット王道進行"},
-        {"marusa", "丸サ進行 (Just The Two of Us)", "| IVMaj7 | III7 | vim7 | I7 |", "椎名林檎やNeo Soulで絶大な人気を誇るお洒落ループ"},
-        {"komuro", "小室進行", "| vi | IV | V | I |", "ドラマチックで力強い90年代〜現代ヒット進行"},
-        {"canon", "カノン進行", "| I | V | vi | iii | IV | I | IV | V |", "誰もが耳にしたことのあるクラシック由来の感動進行"},
-        {"pop-punk", "4コード進行 (Let It Be)", "| I | V | vi | IV |", "世界中で最も多くのヒット曲を生んだ4コード"},
-        {"two-five-one", "2-5-1 進行 (循環)", "| iim7 | V7 | IMaj7 | IMaj7 |", "ジャズやポップスの基本カデンツ"},
-        {"anison-climax", "アニソン大サビ進行", "| IV | V | iiim | vi | ii | V | I | I |", "サビの後半で一気に盛り上げて完結するドラマチック進行"}
-    };
-}
-
 // ==========================================
 // Ver 2026.9.2 準拠の全ジャンル 31+ テンプレート
 // ==========================================

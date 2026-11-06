@@ -48,12 +48,6 @@ struct Theme {
     static constexpr float OuterPadding = 12.0f;
     static constexpr float ColumnGap = 8.0f;
     
-    // 後方互換性エイリアス
-    static constexpr D2D1_COLOR_F Background = WindowBackground;
-    static constexpr D2D1_COLOR_F PaneBackground = CardBackground;
-    static constexpr D2D1_COLOR_F Border = CardBorder;
-    static constexpr D2D1_COLOR_F BorderHover = CardBorderHover;
-
     // UDフォント名（BIZ UDPゴシック優先、環境フォールバックにYu Gothic UI）
     static constexpr const wchar_t* FontName = L"BIZ UDPGothic";
     static constexpr const wchar_t* FallbackFontName = L"Yu Gothic UI";

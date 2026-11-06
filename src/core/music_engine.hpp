@@ -72,15 +72,6 @@ public:
     // 借用コードの並びを、基準コードの根音に近い順（半音距離）へ並べ替える。
     static std::vector<ChordToken> OrderBorrowedByContext(std::vector<ChordToken> borrowed, const ChordToken& baseChord);
 
-    // 後方互換用テンプレート定義
-    struct TemplateInfo {
-        std::string id;
-        std::string name;
-        std::string progression;
-        std::string description;
-    };
-    static std::vector<TemplateInfo> GetBuiltinTemplates();
-
     // Ver 2026.9.2 準拠のジャンル別大分類テンプレート
     static const std::vector<ProgressionTemplate>& GetAllGenreTemplates();
     static std::vector<std::string> GetTemplateMajorCategories();

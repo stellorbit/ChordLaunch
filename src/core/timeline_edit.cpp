@@ -212,6 +212,21 @@ int TimelineEdit::SongTicks(const std::vector<Bar>& bars) {
     return total;
 }
 
+int TimelineEdit::AppendTick(const std::vector<Bar>& bars) {
+    int appendTick = 0;
+    int barStart = 0;
+    for (const auto& bar : bars) {
+        int local = 0;
+        for (const auto& c : bar.chords) {
+            const int d = (c.durationTicks > 0) ? c.durationTicks : (c.durationBeats * TICKS_PER_BEAT);
+            local += d;
+            if (!c.isRest && d > 0) appendTick = std::max(appendTick, barStart + local);
+        }
+        barStart += BarTicksOf(bar);
+    }
+    return appendTick;
+}
+
 int TimelineEdit::BarStartTick(const std::vector<Bar>& bars, int barIndex) {
     int tick = 0;
     for (int i = 0; i < barIndex && i < static_cast<int>(bars.size()); ++i) {

@@ -241,6 +241,8 @@ private:
     void AppendChordToTimeline(const ChordToken& chord);
     // テンプレート進行を現在のパートへ展開する（各コードの音価は入力グリッド）
     void ApplyTemplateProgression(const std::string& progression);
+    // 解析済み小節を最後のコード（休符除く）の終端へ追記する。unitTicks<=0 なら解析結果の音価を保つ
+    bool AppendParsedBars(const std::vector<Bar>& parsed, int unitTicks);
     void SyncTextToTimeline();
     void SyncTimelineToText();
     void PushUndo();
@@ -276,8 +278,11 @@ private:
     void TogglePlayback();
     void StopPlayback();
     void RewindPlayback();
+    void StepPlayback();
+    void FollowPlayhead();
     void AdvancePlayback(float deltaSeconds);
-    void SeekToTick(double tick);
+    // scrollToChord=false: ルーラー操作中に画面が動かないよう、コード位置へのスクロールを行わない
+    void SeekToTick(double tick, bool scrollToChord = true);
 
     // クリップボード・ファイル・MIDIドラッグ
     void CopyProgressionToClipboard();

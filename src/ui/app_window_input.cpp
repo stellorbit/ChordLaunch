@@ -484,7 +484,7 @@ void AppWindow::OnLButtonDown(float x, float y) {
             if (relX >= 0.0f) {
                 float barWidth = m_pixelsPerBeat * 4.0f;
                 double clickedTick = (relX / barWidth) * TICKS_PER_BAR_4_4;
-                SeekToTick(clickedTick);
+                SeekToTick(clickedTick, false);
                 m_dragMode = DragMode::RulerSeek;
                 SetCapture(m_hwnd);
             }
@@ -1012,7 +1012,7 @@ void AppWindow::OnMouseMove(float x, float y) {
         if (relX >= 0.0f) {
             float barWidth = m_pixelsPerBeat * 4.0f;
             double clickedTick = (relX / barWidth) * TICKS_PER_BAR_4_4;
-            SeekToTick(clickedTick);
+            SeekToTick(clickedTick, false);
         }
         return;
     }

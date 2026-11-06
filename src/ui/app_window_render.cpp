@@ -437,6 +437,68 @@ void AppWindow::RenderCenterPane(float x, float y, float width, float height) {
     float barWidth = m_pixelsPerBeat * 4.0f;
     size_t numBars = std::max<size_t>(bars.size() + 16, 64);
 
+    // マーカー（自由位置）: パート表示は「先頭=パート名（淡色）＋自由位置マーカー」、
+    // 全体表示は「各パート先頭=パート名＋自由位置マーカー」。tick から x 座標へ直接変換する。
+    // ラベルの位置は小節番号の省略判定に使うため、小節線・番号の描画より先に確定する。
+    struct RulerLabel { float markX; bool hasLabel; D2D1_RECT_F rc; std::string name; bool implicitName; };
+    std::vector<RulerLabel> rulerLabels;
+    {
+        struct RulerMarker { int tick; std::string name; bool implicitName; };
+        std::vector<RulerMarker> rulerMarkers;
+        if (m_isMergedView) {
+            int acc = 0;
+            for (const auto& bar : bars) {
+                if (!bar.sectionMarker.empty()) rulerMarkers.push_back({ acc, bar.sectionMarker, false });
+                acc += bar.GetTotalTicks();
+            }
+            for (const auto& m : m_partManager.GenerateMergedMarkers()) rulerMarkers.push_back({ m.tick, m.name, false });
+        } else if (pActive) {
+            rulerMarkers.push_back({ 0, pActive->name, true });
+            for (const auto& m : pActive->markers) rulerMarkers.push_back({ m.tick, m.name, false });
+        }
+        std::stable_sort(rulerMarkers.begin(), rulerMarkers.end(),
+            [](const RulerMarker& a, const RulerMarker& b) { return a.tick < b.tick; });
+
+        auto tickToX = [&](int tick) {
+            return x + (static_cast<float>(tick) / static_cast<float>(TICKS_PER_BAR_4_4)) * barWidth - m_timelineScrollX;
+        };
+
+        // ラベル文字列の描画幅（DirectWrite 実測）。測れない場合は 0（= 利用可能幅いっぱいで描く）
+        auto measureLabel = [&](const std::wstring& text) -> float {
+            if (!m_pDWriteFactory || !m_pFontRuler || text.empty()) return 0.0f;
+            IDWriteTextLayout* pLayout = nullptr;
+            if (FAILED(m_pDWriteFactory->CreateTextLayout(text.c_str(), static_cast<UINT32>(text.size()), m_pFontRuler, 10000.0f, 100.0f, &pLayout)) || !pLayout) return 0.0f;
+            DWRITE_TEXT_METRICS metrics{};
+            pLayout->GetMetrics(&metrics);
+            pLayout->Release();
+            return metrics.widthIncludingTrailingWhitespace;
+        };
+
+        m_pFontRuler->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        for (size_t i = 0; i < rulerMarkers.size(); ++i) {
+            const auto& rm = rulerMarkers[i];
+            float mx = tickToX(rm.tick);
+            float nextX = (i + 1 < rulerMarkers.size()) ? tickToX(rulerMarkers[i + 1].tick) : (x + width);
+            if (nextX < x || mx > x + width) continue;
+
+            // 小節番号と重ならないよう、小節先頭に近い場合はラベルを小節番号の右へずらす
+            float barStartX = x + std::floor(static_cast<float>(rm.tick) / static_cast<float>(TICKS_PER_BAR_4_4)) * barWidth - m_timelineScrollX;
+            float labelL = (mx - barStartX < 26.0f) ? (barStartX + 26.0f) : (mx + 3.0f);
+            labelL = std::max(x + 2.0f, labelL);
+            float labelR = std::min(x + width, nextX - 3.0f);
+            if (labelR - labelL < 24.0f) {
+                rulerLabels.push_back({ mx, false, D2D1::RectF(0, 0, 0, 0), rm.name, rm.implicitName }); // 線のみ
+                continue;
+            }
+
+            // 文字の幅だけを占有する（次のマーカーまでの全域を塗らない）
+            const float textW = measureLabel(ToWString(rm.name));
+            if (textW > 0.0f) labelR = std::min(labelR, labelL + textW + 4.0f);
+
+            rulerLabels.push_back({ mx, true, D2D1::RectF(labelL, rulerY + 2.0f, labelR, rulerY + m_rulerHeight - 10.0f), rm.name, rm.implicitName });
+        }
+    }
+
     for (size_t b = 0; b <= numBars; ++b) {
         float bx = x + b * barWidth - m_timelineScrollX;
         if (bx < x - barWidth || bx > x + width) continue;
@@ -446,7 +508,13 @@ void AppWindow::RenderCenterPane(float x, float y, float width, float height) {
         if (b < numBars) {
             std::wstring bNum = std::to_wstring(b + 1);
             D2D1_RECT_F bNumRc = D2D1::RectF(std::max(x + 2.0f, bx + 4.0f), rulerY + 2.0f, bx + 40.0f, rulerY + m_rulerHeight);
-            if (bNumRc.right > bNumRc.left) {
+            // ラベルと水平方向に重なる小節番号だけを省略する（小節線は常に全高で描く）
+            const float numRight = std::min(bNumRc.right, bNumRc.left + 8.0f * static_cast<float>(bNum.size()) + 2.0f);
+            bool hiddenByLabel = false;
+            for (const auto& lb : rulerLabels) {
+                if (lb.hasLabel && bNumRc.left < lb.rc.right && numRight > lb.rc.left) { hiddenByLabel = true; break; }
+            }
+            if (bNumRc.right > bNumRc.left && !hiddenByLabel) {
                 DrawTextSafe(bNum, m_pFontRuler, bNumRc, m_pBrushText);
             }
 
@@ -469,54 +537,16 @@ void AppWindow::RenderCenterPane(float x, float y, float width, float height) {
         }
     }
 
-    // マーカー（自由位置）: パート表示は「先頭=パート名（淡色）＋自由位置マーカー」、
-    // 全体表示は「各パート先頭=パート名＋自由位置マーカー」。tick から x 座標へ直接変換して描く。
-    {
-        struct RulerMarker { int tick; std::string name; bool implicitName; };
-        std::vector<RulerMarker> rulerMarkers;
-        if (m_isMergedView) {
-            int acc = 0;
-            for (const auto& bar : bars) {
-                if (!bar.sectionMarker.empty()) rulerMarkers.push_back({ acc, bar.sectionMarker, false });
-                acc += bar.GetTotalTicks();
-            }
-            for (const auto& m : m_partManager.GenerateMergedMarkers()) rulerMarkers.push_back({ m.tick, m.name, false });
-        } else if (pActive) {
-            rulerMarkers.push_back({ 0, pActive->name, true });
-            for (const auto& m : pActive->markers) rulerMarkers.push_back({ m.tick, m.name, false });
+    // マーカーの線とラベル（位置は上で確定済み。背景は塗らず、小節線を隠さない）
+    for (const auto& lb : rulerLabels) {
+        if (lb.markX >= x) {
+            m_pRenderTarget->DrawLine(D2D1::Point2F(lb.markX, rulerY), D2D1::Point2F(lb.markX, rulerY + m_rulerHeight),
+                lb.implicitName ? m_pBrushBorder : m_pBrushAccent, 2.5f);
         }
-        std::stable_sort(rulerMarkers.begin(), rulerMarkers.end(),
-            [](const RulerMarker& a, const RulerMarker& b) { return a.tick < b.tick; });
-
-        auto tickToX = [&](int tick) {
-            return x + (static_cast<float>(tick) / static_cast<float>(TICKS_PER_BAR_4_4)) * barWidth - m_timelineScrollX;
-        };
-
-        m_pFontRuler->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-        for (size_t i = 0; i < rulerMarkers.size(); ++i) {
-            const auto& rm = rulerMarkers[i];
-            float mx = tickToX(rm.tick);
-            float nextX = (i + 1 < rulerMarkers.size()) ? tickToX(rulerMarkers[i + 1].tick) : (x + width);
-            if (nextX < x || mx > x + width) continue;
-
-            if (mx >= x) {
-                m_pRenderTarget->DrawLine(D2D1::Point2F(mx, rulerY), D2D1::Point2F(mx, rulerY + m_rulerHeight),
-                    rm.implicitName ? m_pBrushBorder : m_pBrushAccent, 2.5f);
-            }
-
-            // 小節番号と重ならないよう、小節先頭に近い場合はラベルを小節番号の右へずらす
-            float barStartX = x + std::floor(static_cast<float>(rm.tick) / static_cast<float>(TICKS_PER_BAR_4_4)) * barWidth - m_timelineScrollX;
-            float labelL = (mx - barStartX < 26.0f) ? (barStartX + 26.0f) : (mx + 3.0f);
-            labelL = std::max(x + 2.0f, labelL);
-            float labelR = std::min(x + width, nextX - 3.0f);
-            if (labelR - labelL < 24.0f) continue;
-
-            D2D1_RECT_F labelRc = D2D1::RectF(labelL, rulerY + 2.0f, labelR, rulerY + m_rulerHeight - 10.0f);
-            m_pRenderTarget->PushAxisAlignedClip(labelRc, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-            m_pRenderTarget->FillRectangle(labelRc, m_pBrushCardBg);
-            DrawTextSafe(ToWString(rm.name), m_pFontRuler, labelRc, rm.implicitName ? m_pBrushTextMuted : m_pBrushAccent);
-            m_pRenderTarget->PopAxisAlignedClip();
-        }
+        if (!lb.hasLabel) continue;
+        m_pRenderTarget->PushAxisAlignedClip(lb.rc, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        DrawTextSafe(ToWString(lb.name), m_pFontRuler, lb.rc, lb.implicitName ? m_pBrushTextMuted : m_pBrushAccent);
+        m_pRenderTarget->PopAxisAlignedClip();
     }
 
     // コードカードレーン (グリッド線はカード背景側に描画し、文字への被りを完全解消)

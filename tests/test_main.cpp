@@ -1637,6 +1637,35 @@ void TestOctaveAndGridSeparation() {
     TEST_ASSERT(legacyInput == legacyTimeline, "Legacy file falls back to the timeline grid for input");
 }
 
+void TestAppendTickAndEmptyPartAppend() {
+    std::cout << "[TEST] 26. TimelineEdit: AppendTick ignores trailing rests; text input lands at bar 1 in an empty part\n";
+
+    // 1. 空 / 全休符 -> 0
+    TEST_ASSERT(TimelineEdit::AppendTick({}) == 0, "Empty song appends at tick 0");
+    {
+        Bar rest = MakeTickBar4();
+        rest.chords.push_back(MakeRestTok(1920));
+        TEST_ASSERT(TimelineEdit::AppendTick({ rest }) == 0, "All-rest part appends at tick 0");
+
+        // 全休符パートへ AppendTick の位置から挿入すると 1 小節目に入り、小節数は増えない
+        auto res = TimelineEdit::InsertChordSpan({ rest }, MakeTok("F", 480), TimelineEdit::AppendTick({ rest }));
+        TEST_ASSERT(res.bars.size() == 1, "Insert at tick 0 into a rest bar does not add a bar");
+        TEST_ASSERT(res.bars[0].chords[0].rootName == "F", "F lands on bar 1 beat 1");
+    }
+
+    // 2. 末尾の休符は無視し、最後の非休符コードの終端を返す（小節跨ぎも含む）
+    {
+        Bar b1 = MakeTickBar4();
+        b1.chords.push_back(MakeTok("C", 1920));
+        Bar b2 = MakeTickBar4();
+        b2.chords.push_back(MakeTok("G", 480));
+        b2.chords.push_back(MakeRestTok(1440));
+        Bar b3 = MakeTickBar4();
+        b3.chords.push_back(MakeRestTok(1920));
+        TEST_ASSERT(TimelineEdit::AppendTick({ b1, b2, b3 }) == 1920 + 480, "Append tick is the end of the last non-rest chord");
+    }
+}
+
 void TestSyncopationPersistence() {
     std::cout << "[TEST] 26. Syncopated timing survives project save/load (bars array is authoritative)\n";
 
@@ -2473,6 +2502,7 @@ int main() {
     TestDropGridSnapPreview();
     TestCrossBarDragAndRestNormalization();
     TestTimelineEditInsertAndResize();
+    TestAppendTickAndEmptyPartAppend();
     TestSyncopationPersistence();
     TestOctaveAndGridSeparation();
     TestOneBarChordCrossBarInsertion();

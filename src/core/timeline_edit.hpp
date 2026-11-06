@@ -16,6 +16,9 @@ public:
     // 複数小節の合計 tick（各小節の拍子ぶん）
     static int SongTicks(const std::vector<Bar>& bars);
 
+    // 追記位置: 最後のコード（休符を除く）の終端 tick。コードが無い（空・全休符）場合は 0
+    static int AppendTick(const std::vector<Bar>& bars);
+
     // 指定小節の先頭が曲頭から何 tick か
     static int BarStartTick(const std::vector<Bar>& bars, int barIndex);
 

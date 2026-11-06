@@ -59,17 +59,7 @@ void AppWindow::AppendChordToTimeline(const ChordToken& chord) {
     // 小節線を越えても1枚のまま保持され、曲末を越える分は休符小節が足される
     std::vector<Bar> work = pActive->bars;
     if (work.empty()) EnsureBarsCoverTick(work, 1);
-    int appendTick = 0;
-    for (size_t b = 0; b < work.size(); ++b) {
-        int local = 0;
-        for (const auto& c : work[b].chords) {
-            const int d = (c.durationTicks > 0) ? c.durationTicks : (c.durationBeats * TICKS_PER_BEAT);
-            local += d;
-            if (!c.isRest && d > 0) {
-                appendTick = std::max(appendTick, TimelineEdit::BarStartTick(work, static_cast<int>(b)) + local);
-            }
-        }
-    }
+    const int appendTick = TimelineEdit::AppendTick(work);
 
     ChordToken placed = chord;
     placed.SetTicks(addTicks);
@@ -91,7 +81,14 @@ void AppWindow::ApplyTemplateProgression(const std::string& progression) {
     if (!pActive) return;
 
     std::vector<Bar> parsed = ProgressionParser::Parse(progression, pActive->keyRoot, pActive->mode);
-    if (parsed.empty()) return;
+    AppendParsedBars(parsed, std::max(1, m_inputGridTicks));
+}
+
+// 解析済みの小節を、最後のコード（休符を除く）の終端から追記する。
+// unitTicks > 0: 各コードの音価をその値へそろえる / unitTicks <= 0: 解析結果の音価を保つ
+bool AppWindow::AppendParsedBars(const std::vector<Bar>& parsed, int unitTicks) {
+    Part* pActive = m_partManager.GetActivePart();
+    if (!pActive || parsed.empty()) return false;
 
     // 全コードを順に並べ、各コードの音価を入力グリッドへそろえる。
     // 小節頭のセクション名・キー変更は、その小節の先頭コードに紐づけて持ち越す。
@@ -114,34 +111,28 @@ void AppWindow::ApplyTemplateProgression(const std::string& progression) {
             entries.push_back(std::move(e));
         }
     }
-    if (entries.empty()) return;
-
-    const int unit = std::max(1, m_inputGridTicks);
+    if (entries.empty()) return false;
 
     // 既存コードは上書きせず、最後のコード（休符を除く）の終端の直後から追記する。
-    // 続けて選択すれば、その都度後ろへ連結される
+    // 続けて追記すれば、その都度後ろへ連結される。空・全休符のパートは先頭から入る
     std::vector<Bar> work = pActive->bars;
     if (work.empty()) EnsureBarsCoverTick(work, 1);
-    int appendTick = 0;
-    for (size_t b = 0; b < work.size(); ++b) {
-        const int barStart = TimelineEdit::BarStartTick(work, static_cast<int>(b));
-        int local = 0;
-        for (const auto& c : work[b].chords) {
-            const int d = (c.durationTicks > 0) ? c.durationTicks : (c.durationBeats * TICKS_PER_BEAT);
-            local += d;
-            if (!c.isRest && d > 0) appendTick = std::max(appendTick, barStart + local);
-        }
-    }
+    const int appendTick = TimelineEdit::AppendTick(work);
 
     std::vector<std::pair<int, const Entry*>> markerAt;
     int tick = appendTick;
     int lastBar = -1;
     int lastChord = 0;
     for (const auto& e : entries) {
+        int span = unitTicks;
+        if (span <= 0) {
+            span = (e.chord.durationTicks > 0) ? e.chord.durationTicks : (e.chord.durationBeats * TICKS_PER_BEAT);
+            span = std::max(1, span);
+        }
         if (!e.sectionMarker.empty() || !e.keyChange.empty()) markerAt.emplace_back(tick, &e);
         if (!e.chord.isRest) {
             ChordToken placed = e.chord;
-            placed.SetTicks(unit);
+            placed.SetTicks(span);
             auto res = TimelineEdit::InsertChordSpan(work, placed, tick);
             if (res.selectedBar >= 0) {
                 work = std::move(res.bars);
@@ -149,7 +140,7 @@ void AppWindow::ApplyTemplateProgression(const std::string& progression) {
                 lastChord = std::max(0, res.selectedChord);
             }
         }
-        tick += unit;
+        tick += span;
     }
 
     for (const auto& m : markerAt) {
@@ -171,6 +162,7 @@ void AppWindow::ApplyTemplateProgression(const std::string& progression) {
         m_selectedChordIndex = lastChord;
         EnsureVisible(m_selectedBarIndex);
     }
+    return true;
 }
 
 void AppWindow::InsertChordAtTimelineTick(const ChordToken& chord, int targetBarIdx, int targetTickInBar, bool pushUndo) {
@@ -678,12 +670,13 @@ void AppWindow::SyncTextToTimeline() {
     auto parsed = ProgressionParser::Parse(utf8, pActive->keyRoot, pActive->mode);
     if (parsed.empty()) return;
 
-    // テキストはタイムラインと同期しない入力専用欄。入力内容を末尾へ追記し、反映後に欄を空にする
+    // テキストはタイムラインと同期しない入力専用欄。入力内容を最後のコード（休符を除く）の終端へ追記し、
+    // 反映後に欄を空にする。空パートは1小節目から入る
     PushUndo();
-    for (auto& bar : parsed) {
-        pActive->bars.push_back(std::move(bar));
+    if (!AppendParsedBars(parsed, 0)) {
+        if (!m_undoStack.empty()) m_undoStack.pop_back();
+        return;
     }
-    ClearSelection();
     SyncTimelineToText();
     SetWindowTextW(m_hwndEdit, L"");
 
@@ -1250,6 +1243,33 @@ void AppWindow::StopPlayback() {
     InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
+// 1フレーム分の再生を進める（実時間の差分で進めるため、呼び出し周期のばらつきは位置に影響しない）
+void AppWindow::StepPlayback() {
+    if (!m_isPlaying) return;
+    const auto now = std::chrono::steady_clock::now();
+    const float dt = std::chrono::duration<float>(now - m_lastPlaybackTime).count();
+    m_lastPlaybackTime = now;
+    AdvancePlayback(dt);
+    if (m_isPlaying) FollowPlayhead();
+}
+
+// 再生ヘッドが表示範囲の外へ出たら、ヘッドを左端（ガター位置）に置くページ送りでスクロールする。
+// 範囲内にある間は動かさない（1小節ごとに画面が飛ぶことを避ける）
+void AppWindow::FollowPlayhead() {
+    const float barWidth = m_pixelsPerBeat * 4.0f;
+    const float headX = static_cast<float>(m_playbackTick / TICKS_PER_BAR_4_4) * barWidth;
+    const float rightW = m_showRightPane ? m_rightPaneWidth : 0.0f;
+    const float viewWidth = m_width - m_leftPaneWidth - rightW;
+
+    if (headX >= m_timelineScrollX && headX <= m_timelineScrollX + viewWidth - kTimelineGutter) return;
+
+    const Part* pActive = m_partManager.GetActivePart();
+    const size_t numBars = m_isMergedView ? m_partManager.GenerateMergedProgression().size() : (pActive ? pActive->bars.size() : 8);
+    const float totalContentWidth = std::max<size_t>(numBars + 16, 64) * barWidth;
+    const float maxScroll = std::max(0.0f, totalContentWidth - viewWidth);
+    m_timelineScrollX = std::clamp(headX - kTimelineGutter, -kTimelineGutter, maxScroll);
+}
+
 void AppWindow::AdvancePlayback(float deltaSeconds) {
     Part* pActive = m_partManager.GetActivePart();
     int bpm = pActive ? pActive->bpm : 120;
@@ -1297,8 +1317,7 @@ void AppWindow::AdvancePlayback(float deltaSeconds) {
                     m_lastSoundedChordUid = chordUidCounter;
                     m_selectedBarIndex = static_cast<int>(bi);
                     m_selectedChordIndex = static_cast<int>(ci);
-                    EnsureVisible(m_selectedBarIndex);
-                    AuditionChord(c);
+                    AuditionChord(c); // 画面のスクロールは FollowPlayhead（再生ヘッド基準）が担う
                 }
                 return;
             }
@@ -1316,7 +1335,7 @@ void AppWindow::AdvancePlayback(float deltaSeconds) {
     }
 }
 
-void AppWindow::SeekToTick(double tick) {
+void AppWindow::SeekToTick(double tick, bool scrollToChord) {
     m_playbackTick = std::max(0.0, tick);
     m_lastSoundedChordUid = -1;
 
@@ -1343,7 +1362,7 @@ void AppWindow::SeekToTick(double tick) {
             if (m_playbackTick >= startTick && m_playbackTick < endTick) {
                 m_selectedBarIndex = static_cast<int>(bi);
                 m_selectedChordIndex = static_cast<int>(ci);
-                EnsureVisible(m_selectedBarIndex);
+                if (scrollToChord) EnsureVisible(m_selectedBarIndex);
                 if (m_isPlaying) {
                     m_lastSoundedChordUid = chordUidCounter;
                     AuditionChord(c);

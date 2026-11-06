@@ -668,8 +668,12 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             return 0;
         }
         case WM_PAINT: {
+            // 再生中は描画のたびに再生位置を進め、EndDraw の垂直同期に合わせて次フレームを連鎖させる
+            // （16ms タイマーは約31ms 周期になり得るため、再生ヘッドの動きがコマ落ちする）
+            StepPlayback();
             OnRender();
             ValidateRect(hwnd, nullptr);
+            if (m_isPlaying) InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
         }
         case WM_TIMER: {
@@ -678,10 +682,7 @@ LRESULT AppWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 return 0;
             }
             if (m_isPlaying) {
-                auto now = std::chrono::steady_clock::now();
-                float dt = std::chrono::duration<float>(now - m_lastPlaybackTime).count();
-                m_lastPlaybackTime = now;
-                AdvancePlayback(dt);
+                // 描画連鎖が途切れた場合の保険（通常の再生進行は WM_PAINT 側）
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             if (m_tapBlinked) {
